@@ -2,7 +2,7 @@
 Tijan AI — Générateur Speckle 3D BIM
 API GraphQL Speckle v2 — schéma vérifié sur app.speckle.systems/explorer
 """
-import os, json, math, httpx
+import os, json, math, hashlib, httpx
 from typing import Dict, Any
 
 SPECKLE_SERVER = os.getenv("SPECKLE_SERVER_URL", "https://app.speckle.systems")
@@ -95,8 +95,10 @@ def create_version(project_id: str, model_id: str, object_id: str,
     return data["versionMutations"]["create"]["id"]
 
 
-def make_id(prefix: str, idx: int) -> str:
-    return f"{prefix}_{idx:06d}"
+def make_id(data: dict) -> str:
+    """Génère un MD5 hash 32 chars à partir du contenu de l'objet — requis par Speckle."""
+    content = json.dumps(data, sort_keys=True, separators=(',', ':'))
+    return hashlib.md5(content.encode()).hexdigest()
 
 def build_box_mesh(x, y, z, dx, dy, dz):
     x2,y2,z2 = x+dx, y+dy, z+dz
@@ -151,10 +153,15 @@ def assembler_objets(resultats: Dict[str, Any], nom_projet: str) -> list:
     l_pieu    = fondations.get("longueur_m",12.0)
 
     all_objects, poteau_ids, poutre_ids, dalle_ids, pieu_ids = [],[],[],[],[]
-    c=[0]
-    def nid(p):
-        c[0]+=1
-        return make_id(p,c[0])
+    counter = [0]
+
+    def new_obj(data: dict) -> dict:
+        counter[0] += 1
+        data["_counter"] = counter[0]  # garantit unicité du hash
+        oid = make_id(data)
+        data.pop("_counter")
+        data["id"] = oid
+        return data
 
     for n in range(nb_niv):
         z_bas=n*h_etage; z_haut=(n+1)*h_etage
@@ -166,66 +173,66 @@ def assembler_objets(resultats: Dict[str, Any], nom_projet: str) -> list:
 
         for x in xs:
             for y in ys:
-                oid=nid("col")
-                all_objects.append({"id":oid,"speckle_type":"Objects.BuiltElements.Column",
+                obj = new_obj({"speckle_type":"Objects.BuiltElements.Column",
                     "displayValue":[build_box_mesh(x-sb_n/2,y-sh_n/2,z_bas,sb_n,sh_n,h_etage)],
                     "Niveau":nom_n,"Section":f"{int(sb_n*100)}x{int(sh_n*100)}cm",
                     "Armatures":arm_n,"Beton":"C30/37 XS1","N_Ed_kN":N_Ed,"Taux_pct":taux,
                     "Norme":"EN 1992-1-1","Generateur":"Tijan AI"})
-                poteau_ids.append(oid)
+                all_objects.append(obj)
+                poteau_ids.append(obj["id"])
 
         for y in ys:
             for i in range(len(xs)-1):
-                oid=nid("bm")
                 x1,x2=xs[i]+sb_n/2,xs[i+1]-sb_n/2
-                all_objects.append({"id":oid,"speckle_type":"Objects.BuiltElements.Beam",
+                obj = new_obj({"speckle_type":"Objects.BuiltElements.Beam",
                     "displayValue":[build_box_mesh(x1,y-pb/2,z_haut-ph,x2-x1,pb,ph)],
                     "Niveau":nom_n,"Section":f"{int(pb*100)}x{int(ph*100)}cm",
                     "Armatures":arm_po,"Etriers":etr,"Norme":"EN 1992-1-1","Generateur":"Tijan AI"})
-                poutre_ids.append(oid)
+                all_objects.append(obj)
+                poutre_ids.append(obj["id"])
 
         for x in xs:
             for j in range(len(ys)-1):
-                oid=nid("bm")
                 y1,y2=ys[j]+sh_n/2,ys[j+1]-sh_n/2
-                all_objects.append({"id":oid,"speckle_type":"Objects.BuiltElements.Beam",
+                obj = new_obj({"speckle_type":"Objects.BuiltElements.Beam",
                     "displayValue":[build_box_mesh(x-pb/2,y1,z_haut-ph,pb,y2-y1,ph)],
                     "Niveau":nom_n,"Section":f"{int(pb*100)}x{int(ph*100)}cm",
                     "Armatures":arm_po,"Etriers":etr,"Norme":"EN 1992-1-1","Generateur":"Tijan AI"})
-                poutre_ids.append(oid)
+                all_objects.append(obj)
+                poutre_ids.append(obj["id"])
 
         if n>0:
-            oid=nid("floor")
             lx,ly=nb_trav*portee,nb_trav*portee
-            all_objects.append({"id":oid,"speckle_type":"Objects.BuiltElements.Floor",
+            obj = new_obj({"speckle_type":"Objects.BuiltElements.Floor",
                 "displayValue":[build_box_mesh(0,0,z_haut-ep_d,lx,ly,ep_d)],
                 "Niveau":nom_n,"Epaisseur_cm":int(ep_d*100),"Ferraillage":fer_d,
                 "Norme":"EN 1992-1-1","Generateur":"Tijan AI"})
-            dalle_ids.append(oid)
+            all_objects.append(obj)
+            dalle_ids.append(obj["id"])
 
     if "pieux" in fond_type.lower():
         charge=round(surface*nb_niv*0.012/(len(xs)*len(ys)),1)
         for x in xs:
             for y in ys:
-                oid=nid("pile")
-                all_objects.append({"id":oid,"speckle_type":"Objects.BuiltElements.Pile",
+                obj = new_obj({"speckle_type":"Objects.BuiltElements.Pile",
                     "displayValue":[build_cylinder_mesh(x,y,-l_pieu,d_pieu/2,l_pieu)],
                     "Diametre_m":d_pieu,"Longueur_m":l_pieu,"Charge_kN":charge,
                     "Type":"Pieu fore","Beton":"C25/30","Generateur":"Tijan AI"})
-                pieu_ids.append(oid)
+                all_objects.append(obj)
+                pieu_ids.append(obj["id"])
 
-    root_id=make_id("root",0)
-    nb_children = len(all_objects)
-    root={"id":root_id,"speckle_type":"Base","name":nom_projet,"Ville":ville,
+    root_data = {"speckle_type":"Base","name":nom_projet,"Ville":ville,
         "Niveaux":nb_niv,"Surface_m2":surface,"Norme":"EN 1992-1-1 / Eurocodes",
         "Beton":"C30/37 XS1",
         "Score_Edge_Energie":score_edge.get("energie",{}).get("total_pct",0),
         "Score_Edge_Eau":score_edge.get("eau",{}).get("total_pct",0),
         "Score_Edge_Materiaux":score_edge.get("materiaux",{}).get("total_pct",0),
-        "Generateur":"Tijan AI Engine v2","totalChildrenCount":nb_children,
+        "Generateur":"Tijan AI Engine v2","totalChildrenCount":len(all_objects),
         "@poteaux":poteau_ids,"@poutres":poutre_ids,"@dalles":dalle_ids,"@pieux":pieu_ids}
+    root_id = make_id(root_data)
+    root_data["id"] = root_id
 
-    return [root]+all_objects
+    return [root_data] + all_objects
 
 
 def envoyer_sur_speckle(resultats: Dict[str, Any], nom_projet: str,
