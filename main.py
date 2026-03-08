@@ -404,7 +404,7 @@ def calculer_edge(data: ProjetInput):
         raise HTTPException(status_code=500, detail=str(e))
 from fastapi import UploadFile, File, Form
 import tempfile, shutil
-from parse_plans import parser_plans_architecturaux
+from parse_plans import parser_plans_architecte
 
 @app.post("/parse-plans")
 async def parse_plans(
@@ -418,7 +418,7 @@ async def parse_plans(
             shutil.copyfileobj(f.file, tmp)
             tmp.close()
             tmp_paths.append(tmp.name)
-        resultat = parser_plans_architecturaux(tmp_paths, pression_sol_mpa)
+        resultat = parser_plans_architecte(tmp_paths, pression_sol_mpa)
         return {"statut": "success", "data": resultat}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur parsing : {str(e)}")
