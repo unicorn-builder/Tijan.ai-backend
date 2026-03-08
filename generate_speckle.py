@@ -1,6 +1,6 @@
 """
 Tijan AI — Générateur Speckle 3D BIM
-Liste plate d'objets + referencedId — viewer compatible
+displayValue inline (mesh directement dans chaque objet) — format validé Speckle v2
 """
 import os, json, math, hashlib, httpx
 from typing import Dict, Any
@@ -51,8 +51,7 @@ def get_or_create_model(project_id, model_name, token, server):
 def send_objects(project_id, objects, token, server):
     _token  = token  or SPECKLE_TOKEN
     _server = server or SPECKLE_SERVER
-    # Envoyer en batches de 100 pour éviter les timeouts
-    batch_size = 100
+    batch_size = 50
     for i in range(0, len(objects), batch_size):
         batch = objects[i:i+batch_size]
         data = json.dumps(batch).encode("utf-8")
@@ -64,23 +63,34 @@ def send_objects(project_id, objects, token, server):
     return objects[0]["id"]
 
 def create_version(project_id, model_id, object_id, message, token, server):
-    data = gql("""mutation($i:CreateVersionInput!){versionMutations{create(input:$i){id}}}""",
+    data = gql("mutation($i:CreateVersionInput!){versionMutations{create(input:$i){id}}}",
         {"i": {"projectId": project_id, "modelId": model_id, "objectId": object_id,
                "message": message, "sourceApplication": "TijanAI"}},
         token=token, server=server)
     return data["versionMutations"]["create"]["id"]
 
-def box(x, y, z, dx, dy, dz, counter):
-    """Mesh simple 8 sommets — format plat Speckle."""
-    x2,y2,z2 = x+dx, y+dy, z+dz
-    verts = [x,y,z, x2,y,z, x2,y2,z, x,y2,z, x,y,z2, x2,y,z2, x2,y2,z2, x,y2,z2]
-    faces = [4,0,1,2,3, 4,7,6,5,4, 4,0,4,5,1, 4,1,5,6,2, 4,2,6,7,3, 4,3,7,4,0]
-    obj = {"speckle_type":"Objects.Geometry.Mesh",
-           "vertices":verts,"faces":faces,"units":"m","_c":counter}
-    oid = md5(obj)
-    obj.pop("_c")
-    obj["id"] = oid
-    return obj
+def make_mesh(x, y, z, dx, dy, dz):
+    """Mesh box 6 faces — vertices en liste plate, faces avec compte de sommets."""
+    x2, y2, z2 = x+dx, y+dy, z+dz
+    verts = [
+        x,y,z,   x2,y,z,  x2,y2,z,  x,y2,z,   # bas
+        x,y,z2,  x2,y,z2, x2,y2,z2, x,y2,z2    # haut
+    ]
+    faces = [
+        4, 0,1,2,3,   # bas
+        4, 7,6,5,4,   # haut
+        4, 0,4,5,1,   # avant
+        4, 1,5,6,2,   # droite
+        4, 2,6,7,3,   # arriere
+        4, 3,7,4,0    # gauche
+    ]
+    return {
+        "speckle_type": "Objects.Geometry.Mesh",
+        "vertices": verts,
+        "faces": faces,
+        "units": "m",
+        "renderMaterial": None
+    }
 
 def assembler_objets(resultats: Dict[str, Any], nom_projet: str):
     geo     = resultats.get("geometrie", {})
@@ -105,23 +115,28 @@ def assembler_objets(resultats: Dict[str, Any], nom_projet: str):
     dp = fond.get("diametre_m", 0.8)
     lp = fond.get("longueur_m", 12.0)
 
-    all_objects = []  # liste plate
+    all_objects = []
     c = [0]
 
-    def mk(speckle_type, props, bx):
+    def new_obj(speckle_type, props, bx):
         c[0] += 1
-        mesh = box(*bx, c[0])
-        all_objects.append(mesh)
-        obj = {"speckle_type": speckle_type,
-               "displayValue": [{"referencedId": mesh["id"], "speckle_type": "reference"}],
-               **props, "_c": c[0]}
-        oid = md5(obj)
-        obj.pop("_c")
-        obj["id"] = oid
-        all_objects.append(obj)
-        return oid
+        mesh = make_mesh(*bx)
+        mesh_id_src = {**mesh, "_c": c[0]}
+        mesh["id"] = md5(mesh_id_src)
 
-    poteau_refs, poutre_refs, dalle_refs, pieu_refs = [], [], [], []
+        obj = {
+            "speckle_type": speckle_type,
+            "displayValue": [mesh],
+            **props,
+            "_c": c[0]
+        }
+        obj_id = md5({k: v for k, v in obj.items() if k != "displayValue"})
+        obj.pop("_c")
+        obj["id"] = obj_id
+        all_objects.append(obj)
+        return obj_id
+
+    poteau_ids, poutre_ids, dalle_ids, pieu_ids = [], [], [], []
 
     for n in range(nb_niv):
         z0 = n * h_et
@@ -131,63 +146,70 @@ def assembler_objets(resultats: Dict[str, Any], nom_projet: str):
 
         for x in xs:
             for y in ys:
-                oid = mk("Objects.BuiltElements.Column",
+                oid = new_obj("Objects.BuiltElements.Column",
                     {"Niveau": nom_n, "Section": f"{int(sb_n*100)}x{int(sb_n*100)}cm",
                      "Armatures": elts.get("poteaux",{}).get("armatures_long","10HA20"),
-                     "Beton": "C30/37 XS1", "Norme": "EN 1992-1-1"},
+                     "Beton": "C30/37 XS1", "Norme": "EN 1992-1-1", "Generateur": "Tijan AI"},
                     (x-sb_n/2, y-sb_n/2, z0, sb_n, sb_n, h_et))
-                poteau_refs.append({"referencedId": oid, "speckle_type": "reference"})
+                poteau_ids.append(oid)
 
         for y in ys:
             for i in range(len(xs)-1):
                 x1, x2 = xs[i]+sb_n/2, xs[i+1]-sb_n/2
-                oid = mk("Objects.BuiltElements.Beam",
+                oid = new_obj("Objects.BuiltElements.Beam",
                     {"Niveau": nom_n, "Section": f"{int(pb*100)}x{int(ph*100)}cm",
                      "Armatures": elts.get("poutres",{}).get("armatures_long","12HA16"),
-                     "Norme": "EN 1992-1-1"},
+                     "Norme": "EN 1992-1-1", "Generateur": "Tijan AI"},
                     (x1, y-pb/2, z1-ph, x2-x1, pb, ph))
-                poutre_refs.append({"referencedId": oid, "speckle_type": "reference"})
+                poutre_ids.append(oid)
 
         for x in xs:
             for j in range(len(ys)-1):
                 y1, y2 = ys[j]+sh/2, ys[j+1]-sh/2
-                oid = mk("Objects.BuiltElements.Beam",
+                oid = new_obj("Objects.BuiltElements.Beam",
                     {"Niveau": nom_n, "Section": f"{int(pb*100)}x{int(ph*100)}cm",
                      "Armatures": elts.get("poutres",{}).get("armatures_long","12HA16"),
-                     "Norme": "EN 1992-1-1"},
+                     "Norme": "EN 1992-1-1", "Generateur": "Tijan AI"},
                     (x-pb/2, y1, z1-ph, pb, y2-y1, ph))
-                poutre_refs.append({"referencedId": oid, "speckle_type": "reference"})
+                poutre_ids.append(oid)
 
         if n > 0:
             lx = ly = nb_trav * portee
-            oid = mk("Objects.BuiltElements.Floor",
+            oid = new_obj("Objects.BuiltElements.Floor",
                 {"Niveau": nom_n, "Epaisseur_cm": int(ep*100),
                  "Ferraillage": elts.get("dalle",{}).get("armatures","HA12/150"),
-                 "Norme": "EN 1992-1-1"},
+                 "Norme": "EN 1992-1-1", "Generateur": "Tijan AI"},
                 (0, 0, z1-ep, lx, ly, ep))
-            dalle_refs.append({"referencedId": oid, "speckle_type": "reference"})
+            dalle_ids.append(oid)
 
     if "pieux" in fond.get("type","").lower():
         for x in xs:
             for y in ys:
-                oid = mk("Objects.BuiltElements.Pile",
-                    {"Diametre_m": dp, "Longueur_m": lp, "Type": "Pieu fore", "Beton": "C25/30"},
+                oid = new_obj("Objects.BuiltElements.Pile",
+                    {"Diametre_m": dp, "Longueur_m": lp,
+                     "Type": "Pieu fore", "Beton": "C25/30", "Generateur": "Tijan AI"},
                     (x-dp/2, y-dp/2, -lp, dp, dp, lp))
-                pieu_refs.append({"referencedId": oid, "speckle_type": "reference"})
+                pieu_ids.append(oid)
 
-    root = {"speckle_type": "Base", "name": nom_projet, "Ville": ville,
-            "Niveaux": nb_niv, "Surface_m2": surface, "Norme": "EN 1992-1-1 / Eurocodes",
-            "Beton": "C30/37 XS1",
-            "Score_Edge_Energie": edge.get("energie",{}).get("total_pct",0),
-            "Score_Edge_Eau":     edge.get("eau",{}).get("total_pct",0),
-            "Score_Edge_Materiaux": edge.get("materiaux",{}).get("total_pct",0),
-            "Generateur": "Tijan AI Engine v2",
-            "totalChildrenCount": len(all_objects),
-            "@poteaux": poteau_refs,
-            "@poutres": poutre_refs,
-            "@dalles":  dalle_refs,
-            "@pieux":   pieu_refs}
-    root["id"] = md5({"name": nom_projet, "nb_niv": nb_niv, "surface": surface})
+    root = {
+        "speckle_type": "Base",
+        "name": nom_projet,
+        "Ville": ville,
+        "Niveaux": nb_niv,
+        "Surface_m2": surface,
+        "Norme": "EN 1992-1-1 / Eurocodes",
+        "Beton": "C30/37 XS1",
+        "Score_Edge_Energie": edge.get("energie",{}).get("total_pct",0),
+        "Score_Edge_Eau":     edge.get("eau",{}).get("total_pct",0),
+        "Score_Edge_Materiaux": edge.get("materiaux",{}).get("total_pct",0),
+        "Generateur": "Tijan AI Engine v2",
+        "totalChildrenCount": len(all_objects),
+        "@poteaux": poteau_ids,
+        "@poutres": poutre_ids,
+        "@dalles":  dalle_ids,
+        "@pieux":   pieu_ids
+    }
+    root["id"] = md5({"name": nom_projet, "n": nb_niv, "s": surface})
     return [root] + all_objects
 
 def envoyer_sur_speckle(resultats, nom_projet, token=None, server_url=None):
