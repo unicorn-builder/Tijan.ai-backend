@@ -49,14 +49,15 @@ def get_or_create_model(project_id: str, model_name: str, token: str, server: st
 
 
 def send_objects(project_id: str, objects: list, token: str, server: str) -> str:
-    """Envoie les objets via REST et retourne l'ID racine."""
+    """Envoie les objets via REST multipart — format Speckle v2 requis."""
     _token  = token  or SPECKLE_TOKEN
     _server = server or SPECKLE_SERVER
-    lines = "\n".join(json.dumps(obj) for obj in objects)
+    # Speckle attend un tableau JSON en multipart (pas NDJSON)
+    batch = json.dumps(objects).encode("utf-8")
     resp = httpx.post(
         f"{_server}/objects/{project_id}",
-        content=lines.encode(),
-        headers={"Authorization": f"Bearer {_token}", "Content-Type": "text/plain"},
+        files={"batch1": ("batch1.json", batch, "application/json")},
+        headers={"Authorization": f"Bearer {_token}"},
         timeout=120
     )
     resp.raise_for_status()
