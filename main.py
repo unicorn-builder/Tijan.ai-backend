@@ -426,3 +426,21 @@ async def parse_plans(
         for p in tmp_paths:
             try: os.remove(p)
             except: pass
+
+# ── ENDPOINT IFC ──────────────────────────────
+from generate_ifc import generer_ifc
+from fastapi.responses import Response
+
+@app.post("/generate-ifc")
+async def generate_ifc_endpoint(projet: dict):
+    """Génère un fichier IFC structurel téléchargeable."""
+    try:
+        nom = projet.get("nom", "Tijan_Projet")
+        contenu_ifc = generer_ifc(projet, nom)
+        return Response(
+            content=contenu_ifc,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename={nom}.ifc"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
