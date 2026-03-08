@@ -35,7 +35,7 @@ def get_or_create_model(project_id: str, model_name: str, token: str, server: st
             }
         """, {"projectId": project_id}, token=token, server=server)
         for m in data["project"]["models"]["items"]:
-            if m["name"] == model_name:
+            if m["name"].lower() == model_name.lower():
                 return m["id"]
     except Exception:
         pass
@@ -51,14 +51,13 @@ def get_or_create_model(project_id: str, model_name: str, token: str, server: st
         return data["modelMutations"]["create"]["id"]
     except Exception as e:
         if "already exists" in str(e):
-            # Relire la liste et retourner l'ID
             data = gql("""
                 query($projectId: String!) {
                     project(id: $projectId) { models { items { id name } } }
                 }
             """, {"projectId": project_id}, token=token, server=server)
             for m in data["project"]["models"]["items"]:
-                if m["name"] == model_name:
+                if m["name"].lower() == model_name.lower():
                     return m["id"]
         raise
 
