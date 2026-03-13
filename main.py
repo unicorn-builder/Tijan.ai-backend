@@ -1,324 +1,636 @@
 """
-Tijan AI — Backend FastAPI v2 — Lazy imports pour memory optimization
-"""
-import gc
-gc.enable()
-import os
-import uuid
-import tempfile
+Tijan AI — main.py v4
+Backend FastAPI — Render Standard (1 CPU / 2GB RAM)
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
+Endpoints :
+  GET  /health              → statut serveur
+  POST /parse               → parse DWG/DXF/IFC → diagnostic + géométrie
+  POST /calculate           → calcul Eurocodes (paramètres ou géométrie parsée)
+  POST /generate            → génère note de calcul PDF
+  POST /generate-boq        → génère BOQ structure PDF
+  POST /generate-planches   → génère planches BA PDF (nécessite DWG/DXF/IFC)
+  POST /generate-mep        → génère planches MEP PDF (nécessite DWG/DXF/IFC)
+  POST /generate-ifc        → export IFC structurel
+  POST /dossier-complet     → pipeline complet depuis fichier
+
+Règle produit :
+  DWG/DXF/IFC → output complet (plans + note + BOQ + IFC)
+  Paramètres  → output partiel (note + BOQ, pas de plans)
+  PDF/image   → refus avec message explicite
+"""
+
+import gc
+import os
+import io
+import tempfile
+import logging
+from datetime import datetime
+from typing import Optional
+
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel, Field, validator
-from typing import Optional, List
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("tijan")
 
 app = FastAPI(
-    title="Tijan AI Engine",
-    description="Moteur de calcul structurel Eurocodes — Engineering Intelligence for Africa",
-    version="2.0.0"
+    title="Tijan AI API",
+    description="Bureau d'études automatisé — Structure + MEP + BOQ + IFC",
+    version="4.0.0",
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ============================================================
+
+# ════════════════════════════════════════════════════════════
+# IMPORTS LAZY (évite crash au démarrage sur Render)
+# ════════════════════════════════════════════════════════════
+
+def get_moteur():
+    from engine_structural_v3 import DonneesProjet, calculer_projet
+    return DonneesProjet, calculer_projet
+
+
+def get_parser():
+    from parse_dxf_v4 import (
+        diagnostiquer_input, diagnostiquer_parametres,
+        traiter_fichier, geo_depuis_parametres, geo_vers_donnees,
+        TypeInput, NiveauOutput,
+    )
+    return (diagnostiquer_input, diagnostiquer_parametres,
+            traiter_fichier, geo_depuis_parametres, geo_vers_donnees,
+            TypeInput, NiveauOutput)
+
+
+def get_planches_ba():
+    from generate_planches_ba_v4 import generer_dossier_ba
+    return generer_dossier_ba
+
+
+def get_planches_mep():
+    from generate_planches_mep_v4 import generer_dossier_mep
+    return generer_dossier_mep
+
+
+def get_note():
+    from generate_note_v3 import generer_note
+    return generer_note
+
+
+def get_boq():
+    from generate_boq_v3 import generer_boq
+    return generer_boq
+
+
+def get_ifc():
+    from generate_ifc import generer_ifc
+    return generer_ifc
+
+
+# ════════════════════════════════════════════════════════════
 # MODÈLES PYDANTIC
-# ============================================================
+# ════════════════════════════════════════════════════════════
 
-class GeometrieInput(BaseModel):
-    surface_emprise_m2: float = Field(..., gt=0)
-    nb_niveaux: int = Field(..., ge=1, le=50)
-    hauteur_etage_m: float = Field(3.0, ge=2.5, le=6.0)
-    portee_max_m: float = Field(6.0, ge=3.0, le=12.0)
-    nb_voiles_facade: int = Field(4, ge=2, le=20)
-    nb_voiles_internes: int = Field(2, ge=0, le=10)
-    epaisseur_voile_m: float = Field(0.20, ge=0.15, le=0.50)
+class ParamsProjet(BaseModel):
+    nom: str = "Projet Tijan"
+    ville: str = "Dakar"
+    nb_niveaux: int = 4
+    hauteur_etage_m: float = 3.0
+    surface_emprise_m2: float = 500.0
+    portee_max_m: float = 5.5
+    portee_min_m: float = 4.0
+    nb_travees_x: int = 3
+    nb_travees_y: int = 2
+    usage_principal: str = "residentiel"
+    classe_beton: str = "C30/37"
+    classe_acier: str = "HA500"
+    pression_sol_MPa: float = 0.15
+    profondeur_fondation_m: float = 1.5
+    distance_mer_km: float = 2.0
+    zone_sismique: int = 1
+    enrobage_mm: float = 30.0
 
-class UsageInput(BaseModel):
-    usage_principal: str = Field("residentiel")
-    charge_toiture_kNm2: float = Field(1.0, ge=0.5, le=5.0)
 
-    @validator('usage_principal')
-    def valider_usage(cls, v):
-        valides = ["residentiel", "bureaux", "mixte"]
-        if v not in valides:
-            raise ValueError(f"Usage doit être parmi : {valides}")
-        return v
-
-class SolInput(BaseModel):
-    pression_admissible_MPa: float = Field(..., gt=0, le=1.0)
-    profondeur_fondation_m: float = Field(1.5, ge=0.5, le=10.0)
-    presence_nappe: bool = False
-    description: str = Field("")
-
-class LocalisationInput(BaseModel):
-    ville: str = Field("dakar")
-    distance_mer_km: float = Field(5.0, ge=0.0, le=500.0)
-    zone_sismique: int = Field(1, ge=1, le=3)
-
-    @validator('ville')
-    def valider_ville(cls, v):
-        valides = ["dakar", "abidjan", "casablanca", "lagos"]
-        if v not in valides:
-            raise ValueError(f"Ville doit être parmi : {valides}")
-        return v
-
-class ProjetInput(BaseModel):
-    nom: str = Field(..., min_length=2, max_length=200, alias="nom_batiment")
-    geometrie: GeometrieInput
-    usage: UsageInput = UsageInput()
-    sol: SolInput
-    localisation: LocalisationInput = LocalisationInput()
-    ingenieur: str = Field("")
-
-    class Config:
-        allow_population_by_field_name = True
-        extra = "ignore"
-
-class ResultatCompletOutput(BaseModel):
-    projet_nom: str
-    statut: str
-    resume: dict
-    score_edge: dict
-    pdf_disponible: bool
-    pdf_url: Optional[str] = None
-
-class SpeckleRequest(BaseModel):
-    resultats: dict
-    nom_projet: str = "Projet Tijan AI"
-    token: str = None
-    server_url: str = None
-
-# ============================================================
+# ════════════════════════════════════════════════════════════
 # UTILITAIRES
-# ============================================================
+# ════════════════════════════════════════════════════════════
 
-def input_vers_projet(data: ProjetInput):
-    from engine_structural import (
-        ProjetStructurel, ParamsGeometrie, ParamsUsage,
-        ParamsSol, ParamsLocalisation, UsageBatiment, ZoneVent
-    )
-    usage_map = {"residentiel": UsageBatiment.RESIDENTIEL, "bureaux": UsageBatiment.BUREAUX, "mixte": UsageBatiment.MIXTE}
-    ville_map = {"dakar": ZoneVent.DAKAR, "abidjan": ZoneVent.ABIDJAN, "casablanca": ZoneVent.CASABLANCA, "lagos": ZoneVent.LAGOS}
-    return ProjetStructurel(
-        nom=data.nom,
-        geometrie=ParamsGeometrie(
-            surface_emprise_m2=data.geometrie.surface_emprise_m2,
-            nb_niveaux=data.geometrie.nb_niveaux,
-            hauteur_etage_m=data.geometrie.hauteur_etage_m,
-            portee_max_m=data.geometrie.portee_max_m,
-            nb_voiles_facade=data.geometrie.nb_voiles_facade,
-            nb_voiles_internes=data.geometrie.nb_voiles_internes,
-            epaisseur_voile_m=data.geometrie.epaisseur_voile_m,
-        ),
-        usage=ParamsUsage(
-            usage_principal=usage_map[data.usage.usage_principal],
-            usage_rdc=usage_map[data.usage.usage_principal],
-            charge_toiture_kNm2=data.usage.charge_toiture_kNm2,
-        ),
-        sol=ParamsSol(
-            pression_admissible_MPa=data.sol.pression_admissible_MPa,
-            profondeur_fondation_m=data.sol.profondeur_fondation_m,
-            presence_nappe=data.sol.presence_nappe,
-            description=data.sol.description,
-        ),
-        localisation=ParamsLocalisation(
-            ville=ville_map[data.localisation.ville],
-            distance_mer_km=data.localisation.distance_mer_km,
-            zone_sismique=data.localisation.zone_sismique,
-        ),
+def params_to_donnees(params: ParamsProjet):
+    """Convertit ParamsProjet → DonneesProjet du moteur v3"""
+    DonneesProjet, _ = get_moteur()
+    return DonneesProjet(
+        nom=params.nom,
+        ville=params.ville,
+        nb_niveaux=params.nb_niveaux,
+        hauteur_etage_m=params.hauteur_etage_m,
+        surface_emprise_m2=params.surface_emprise_m2,
+        portee_max_m=params.portee_max_m,
+        portee_min_m=params.portee_min_m,
+        nb_travees_x=params.nb_travees_x,
+        nb_travees_y=params.nb_travees_y,
+        usage_principal=params.usage_principal,
+        classe_beton=params.classe_beton,
+        classe_acier=params.classe_acier,
+        pression_sol_MPa=params.pression_sol_MPa,
+        profondeur_fondation_m=params.profondeur_fondation_m,
+        distance_mer_km=params.distance_mer_km,
+        zone_sismique=params.zone_sismique,
+        enrobage_mm=params.enrobage_mm,
     )
 
-def nettoyer_pdf(path: str):
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-    except Exception:
-        pass
 
-# ============================================================
+def pdf_response(pdf_bytes: bytes, filename: str) -> StreamingResponse:
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+async def save_upload(file: UploadFile) -> str:
+    """Sauvegarde l'upload dans un fichier temporaire et retourne le chemin"""
+    suffix = os.path.splitext(file.filename)[1].lower()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        content = await file.read()
+        tmp.write(content)
+        return tmp.name
+
+
+# ════════════════════════════════════════════════════════════
 # ENDPOINTS
-# ============================================================
-
-@app.get("/")
-def health():
-    return {"status": "online", "service": "Tijan AI Engine v2", "version": "2.0.0"}
+# ════════════════════════════════════════════════════════════
 
 @app.get("/health")
-def health_check():
-    return {"status": "ok"}
-
-@app.post("/calculate", response_model=ResultatCompletOutput)
-def calculer(data: ProjetInput):
+async def health():
+    """Statut serveur + disponibilité des modules"""
+    modules = {}
     try:
-        from engine_structural import calculer_structure_complete
-        from generate_pdf import calculer_score_edge
-        projet = input_vers_projet(data)
-        resultat = calculer_structure_complete(projet)
-        score = calculer_score_edge(projet, resultat)
-        score_output = {
-            "energie":   {"total_pct": score["energie"]["total_pct"],   "cible_pct": 20, "conforme": score["energie"]["conforme"],   "ecart": score["energie"]["ecart"]},
-            "eau":       {"total_pct": score["eau"]["total_pct"],       "cible_pct": 20, "conforme": score["eau"]["conforme"],       "ecart": score["eau"]["ecart"]},
-            "materiaux": {"total_pct": score["materiaux"]["total_pct"], "cible_pct": 20, "conforme": score["materiaux"]["conforme"], "ecart": score["materiaux"]["ecart"]},
-            "certifiable": score["global"]["certifiable"],
-            "statut": score["global"]["statut"],
-        }
-        return ResultatCompletOutput(
-            projet_nom=resultat.projet_nom, statut="success",
-            resume=resultat.resume_executif, score_edge=score_output, pdf_disponible=False,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur moteur : {str(e)}")
-    finally:
+        import ezdxf
+        modules["ezdxf"] = ezdxf.__version__
+    except ImportError:
+        modules["ezdxf"] = "non installé"
+
+    try:
+        import ifcopenshell
+        modules["ifcopenshell"] = "ok"
+    except ImportError:
+        modules["ifcopenshell"] = "non installé"
+
+    return {
+        "status": "ok",
+        "version": "4.0.0",
+        "timestamp": datetime.utcnow().isoformat(),
+        "modules": modules,
+    }
+
+
+@app.post("/parse")
+async def parse_fichier(
+    file: UploadFile = File(...),
+    nb_niveaux: Optional[int] = Form(None),
+    ville: Optional[str] = Form(None),
+    beton: Optional[str] = Form(None),
+):
+    """
+    Parse un fichier DWG/DXF/IFC et retourne le diagnostic + géométrie.
+    Ne génère PAS de documents — diagnostic uniquement.
+    """
+    (diagnostiquer_input, _, traiter_fichier,
+     _, _, TypeInput, NiveauOutput) = get_parser()
+
+    tmp_path = await save_upload(file)
+    try:
+        overrides = {}
+        if nb_niveaux: overrides["nb_niveaux"] = nb_niveaux
+        if ville: overrides["ville"] = ville
+        if beton: overrides["beton"] = beton
+
+        result = traiter_fichier(tmp_path, overrides)
         gc.collect()
+
+        if not result["ok"]:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "ok": False,
+                    "niveau_output": result.get("niveau_output", "refuse"),
+                    "message": result.get("message", "Erreur de parsing"),
+                }
+            )
+
+        # Convertir geo en dict serialisable
+        geo = result.pop("geo")
+        if geo:
+            result["geometrie"] = {
+                "projet_nom": geo.projet_nom,
+                "source": geo.source,
+                "emprise_x_m": round(geo.emprise_x/1000, 2),
+                "emprise_y_m": round(geo.emprise_y/1000, 2),
+                "nb_axes_x": len(geo.axes_x),
+                "nb_axes_y": len(geo.axes_y),
+                "nb_poteaux": len(geo.poteaux),
+                "nb_poutres": len(geo.poutres),
+                "portees_x_m": [round(p/1000, 2) for p in geo.portees_x],
+                "portees_y_m": [round(p/1000, 2) for p in geo.portees_y],
+                "nb_niveaux_annote": geo.nb_niveaux_annote,
+                "score_qualite": geo.score_qualite,
+            }
+
+        return JSONResponse(content=result)
+
+    finally:
+        os.unlink(tmp_path)
+
+
+@app.post("/calculate")
+async def calculate(params: ParamsProjet):
+    """
+    Calcul Eurocodes depuis paramètres.
+    Toujours disponible (pas besoin de fichier).
+    """
+    try:
+        DonneesProjet, calculer_projet = get_moteur()
+        donnees = params_to_donnees(params)
+        resultats = calculer_projet(donnees)
+        gc.collect()
+
+        return {
+            "ok": True,
+            "projet": params.nom,
+            "niveau_output": "partiel",
+            "poteaux": [
+                {
+                    "label": p.label,
+                    "NEd_kN": p.NEd_kN,
+                    "section_mm": p.section_mm,
+                    "nb_barres": p.nb_barres,
+                    "diametre_mm": p.diametre_mm,
+                    "cadre_diam_mm": p.cadre_diam_mm,
+                    "espacement_cadres_mm": p.espacement_cadres_mm,
+                    "taux_armature_pct": p.taux_armature_pct,
+                    "NRd_kN": p.NRd_kN,
+                    "verif_ok": p.verif_ok,
+                }
+                for p in resultats.poteaux_par_niveau
+            ],
+            "poutre": {
+                "b_mm": resultats.poutre_type.b_mm,
+                "h_mm": resultats.poutre_type.h_mm,
+                "As_inf_cm2": resultats.poutre_type.As_inf_cm2,
+                "As_sup_cm2": resultats.poutre_type.As_sup_cm2,
+                "etrier_diam_mm": resultats.poutre_type.etrier_diam_mm,
+                "etrier_esp_mm": resultats.poutre_type.etrier_esp_mm,
+                "portee_m": resultats.poutre_type.portee_m,
+            },
+            "fondation": {
+                "type": resultats.fondation.type_fond,
+                "nb_pieux": resultats.fondation.nb_pieux,
+                "diam_pieu_mm": resultats.fondation.diam_pieu_mm,
+                "longueur_pieu_m": resultats.fondation.longueur_pieu_m,
+                "As_cm2": resultats.fondation.As_cm2,
+            },
+            "boq_resume": {
+                "beton_m3": resultats.boq.beton_total_m3,
+                "acier_kg": resultats.boq.acier_total_kg,
+                "cout_bas_FCFA": resultats.boq.cout_total_bas,
+                "cout_haut_FCFA": resultats.boq.cout_total_haut,
+                "ratio_FCFA_m2": resultats.boq.ratio_fcfa_m2,
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"/calculate error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/generate")
-def generer(data: ProjetInput, background_tasks: BackgroundTasks):
+async def generate_note(params: ParamsProjet):
+    """Note de calcul PDF — disponible avec paramètres seuls"""
     try:
-        from engine_structural import calculer_structure_complete
-        from generate_pdf import generer_pdf
-        projet = input_vers_projet(data)
-        resultat = calculer_structure_complete(projet)
-        pdf_id = str(uuid.uuid4())
-        pdf_path = os.path.join(tempfile.gettempdir(), f"tijan_{pdf_id}.pdf")
-        ingenieur = data.ingenieur or "A completer par l'ingenieur responsable"
-        generer_pdf(resultat=resultat, projet=projet, output_path=pdf_path, ingenieur=ingenieur)
-        background_tasks.add_task(nettoyer_pdf, pdf_path)
-        nom_fichier = f"tijan_note_calcul_{projet.nom.replace(' ', '_')[:40]}.pdf"
-        return FileResponse(path=pdf_path, media_type="application/pdf", filename=nom_fichier,
-            headers={"Content-Disposition": f"attachment; filename={nom_fichier}"})
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur génération PDF : {str(e)}")
-    finally:
+        DonneesProjet, calculer_projet = get_moteur()
+        generer_note = get_note()
+        donnees = params_to_donnees(params)
+        resultats = calculer_projet(donnees)
+
+        buf = io.BytesIO()
+        generer_note(resultats, buf)
+        pdf_bytes = buf.getvalue()
         gc.collect()
 
-@app.post("/calculate/structure-only")
-def calculer_structure(data: ProjetInput):
-    try:
-        from engine_structural import calculer_structure_complete
-        projet = input_vers_projet(data)
-        resultat = calculer_structure_complete(projet)
-        return {
-            "statut": "success", "projet_nom": resultat.projet_nom,
-            "beton": {"classe": resultat.beton.classe_exposition.value, "fc28_MPa": resultat.beton.fc28_MPa,
-                      "enrobage_mm": resultat.beton.enrobage_mm},
-            "poteau_rdc": {"section_cm": f"{int(resultat.poteau.section_b_m*100)}x{int(resultat.poteau.section_h_m*100)}",
-                           "ferraillage": f"{resultat.poteau.nb_barres}HA{resultat.poteau.diametre_barres_mm}"},
-            "fondations": {"type": resultat.fondations.type_fondation,
-                           "diametre_pieux_m": resultat.fondations.diametre_pieux_m,
-                           "longueur_pieux_m": resultat.fondations.longueur_pieux_m},
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        gc.collect()
-
-@app.post("/calculate/edge-only")
-def calculer_edge(data: ProjetInput):
-    try:
-        from engine_structural import calculer_structure_complete
-        from generate_pdf import calculer_score_edge
-        projet = input_vers_projet(data)
-        resultat = calculer_structure_complete(projet)
-        score = calculer_score_edge(projet, resultat)
-        return {"statut": "success", "projet_nom": data.nom, "score_edge": score}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        gc.collect()
-
-@app.post("/parse-plans")
-async def parse_plans(files: List[UploadFile] = File(...), pression_sol_mpa: float = Form(None)):
-    try:
-        from parse_plans import parser_plans_architecturaux
-        resultat = await parser_plans_architecturaux(
-            fichiers=files,
-            pression_sol_mpa=pression_sol_mpa
+        return pdf_response(
+            pdf_bytes,
+            f"tijan_note_{params.nom.replace(' ', '_')[:20]}.pdf"
         )
-        return resultat
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur parsing : {str(e)}")
-    finally:
+        logger.error(f"/generate error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-boq")
+async def generate_boq(params: ParamsProjet):
+    """BOQ structure PDF — disponible avec paramètres seuls"""
+    try:
+        DonneesProjet, calculer_projet = get_moteur()
+        generer_boq = get_boq()
+        donnees = params_to_donnees(params)
+        resultats = calculer_projet(donnees)
+
+        buf = io.BytesIO()
+        generer_boq(resultats, buf)
+        pdf_bytes = buf.getvalue()
         gc.collect()
 
-@app.post("/parse-plans/preview")
-async def parse_plans_preview(files: List[UploadFile] = File(...)):
-    try:
-        from parse_plans import parser_plans_architecturaux
-        resultat = await parser_plans_architecturaux(fichiers=files)
-        return {
-            "projet": resultat.get("projet", {}),
-            "localisation": {
-                "ville": resultat.get("localisation", {}).get("ville"),
-                "pays": resultat.get("localisation", {}).get("pays"),
-                "zone_sismique": resultat.get("localisation", {}).get("zone_sismique"),
-            },
-            "geometrie": {
-                "nb_niveaux_total": resultat.get("geometrie", {}).get("nb_niveaux_total"),
-                "description_niveaux": resultat.get("geometrie", {}).get("description_niveaux"),
-                "longueur_m": resultat.get("geometrie", {}).get("longueur_m"),
-                "largeur_m": resultat.get("geometrie", {}).get("largeur_m"),
-                "surface_emprise_m2": resultat.get("geometrie", {}).get("surface_emprise_m2"),
-                "hauteur_etage_m": resultat.get("geometrie", {}).get("hauteur_etage_m"),
-            },
-            "trame": {
-                "portee_max_m": resultat.get("trame_structurelle", {}).get("portee_max_m"),
-                "portee_min_m": resultat.get("trame_structurelle", {}).get("portee_min_m"),
-                "nb_poteaux_estime": resultat.get("trame_structurelle", {}).get("nb_poteaux_estime"),
-                "description": resultat.get("trame_structurelle", {}).get("description_trame"),
-            },
-            "usage": {
-                "type_principal": resultat.get("usage", {}).get("type_principal"),
-                "nb_logements": resultat.get("usage", {}).get("nb_logements"),
-            },
-            "sol": {
-                "pression_MPa": resultat.get("parametres_eurocodes", {}).get("sol_pression_admissible_MPa"),
-                "type": resultat.get("parametres_eurocodes", {}).get("sol_type"),
-                "source": resultat.get("parametres_eurocodes", {}).get("sol_source"),
-            },
-            "confiance": resultat.get("confiance"),
-            "notes": resultat.get("notes_parser"),
-        }
-    except HTTPException:
-        raise
+        return pdf_response(
+            pdf_bytes,
+            f"tijan_boq_{params.nom.replace(' ', '_')[:20]}.pdf"
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur preview : {str(e)}")
-    finally:
+        logger.error(f"/generate-boq error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-planches")
+async def generate_planches(
+    file: UploadFile = File(...),
+    nb_niveaux: Optional[int] = Form(None),
+    ville: Optional[str] = Form(None),
+    beton: Optional[str] = Form(None),
+):
+    """
+    Planches BA PDF — nécessite DWG/DXF/IFC.
+    Refus propre si PDF/image fourni.
+    """
+    (_, _, traiter_fichier, _, geo_vers_donnees,
+     TypeInput, NiveauOutput) = get_parser()
+
+    tmp_path = await save_upload(file)
+    try:
+        overrides = {}
+        if nb_niveaux: overrides["nb_niveaux"] = nb_niveaux
+        if ville:      overrides["ville"] = ville
+        if beton:      overrides["beton"] = beton
+
+        result = traiter_fichier(tmp_path, overrides)
+
+        if not result["ok"] or result["niveau_output"] != "complet":
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "ok": False,
+                    "message": result.get("message"),
+                    "conseil": (
+                        "Les plans ne peuvent être générés qu'à partir d'un fichier "
+                        "DWG, DXF ou IFC. Pour une note de calcul sans plans, "
+                        "utilisez /generate avec saisie paramétrique."
+                    )
+                }
+            )
+
+        geo = result["geo"]
+        donnees_dict = result["donnees_moteur"]
+
+        DonneesProjet, calculer_projet = get_moteur()
+        generer_dossier_ba = get_planches_ba()
+
+        # Construire DonneesProjet depuis le dict
+        donnees = DonneesProjet(**donnees_dict)
+        resultats = calculer_projet(donnees)
+
+        # Paramètres géométriques pour les planches
+        portees_x = geo.portees_x if geo.portees_x else None
+        portees_y = geo.portees_y if geo.portees_y else None
+
+        # Construire poteaux depuis résultats moteur
+        poteaux = [
+            {
+                "label": p.label,
+                "b": p.section_mm,
+                "nb": p.nb_barres,
+                "diam": p.diametre_mm,
+                "cd": p.cadre_diam_mm,
+                "ce": p.espacement_cadres_mm,
+                "NEd": p.NEd_kN,
+            }
+            for p in resultats.poteaux_par_niveau
+        ]
+
+        poutre = {
+            "b": resultats.poutre_type.b_mm,
+            "h": resultats.poutre_type.h_mm,
+            "As_inf": resultats.poutre_type.As_inf_cm2,
+            "As_sup": resultats.poutre_type.As_sup_cm2,
+            "etrier_d": resultats.poutre_type.etrier_diam_mm,
+            "etrier_e": resultats.poutre_type.etrier_esp_mm,
+            "portee": int((portees_x[0] if portees_x else 5000)),
+        }
+
+        fond = {
+            "type": resultats.fondation.type_fond,
+            "nb": resultats.fondation.nb_pieux,
+            "diam": resultats.fondation.diam_pieu_mm,
+            "L": resultats.fondation.longueur_pieu_m,
+            "As_cm2": resultats.fondation.As_cm2,
+            "cerce_d": 12,
+            "cerce_e": 200,
+        }
+
+        proj = {
+            "nom": donnees.nom,
+            "ref": f"TIJAN-{datetime.now().strftime('%y%m')}",
+            "ville": donnees.ville,
+            "beton": donnees.classe_beton,
+            "acier": donnees.classe_acier,
+            "norme": "EN 1992-1-1",
+        }
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_out:
+            out_path = tmp_out.name
+
+        generer_dossier_ba(out_path, proj, portees_x, portees_y,
+                           poteaux, poutre, fond)
+
+        with open(out_path, "rb") as f:
+            pdf_bytes = f.read()
+
+        os.unlink(out_path)
         gc.collect()
+
+        return pdf_response(
+            pdf_bytes,
+            f"tijan_planches_BA_{donnees.nom.replace(' ', '_')[:20]}.pdf"
+        )
+
+    finally:
+        os.unlink(tmp_path)
+
+
+@app.post("/generate-mep")
+async def generate_mep(
+    file: UploadFile = File(...),
+    nb_niveaux: Optional[int] = Form(None),
+):
+    """
+    Planches MEP PDF — nécessite DWG/DXF/IFC.
+    Refus propre si PDF/image fourni.
+    """
+    (_, _, traiter_fichier, _, _,
+     TypeInput, NiveauOutput) = get_parser()
+
+    tmp_path = await save_upload(file)
+    try:
+        result = traiter_fichier(tmp_path, {"nb_niveaux": nb_niveaux} if nb_niveaux else {})
+
+        if not result["ok"] or result["niveau_output"] != "complet":
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "ok": False,
+                    "message": result.get("message"),
+                    "conseil": (
+                        "Les plans MEP nécessitent un fichier DWG, DXF ou IFC."
+                    )
+                }
+            )
+
+        generer_dossier_mep = get_planches_mep()
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_out:
+            out_path = tmp_out.name
+
+        generer_dossier_mep(out_path)
+
+        with open(out_path, "rb") as f:
+            pdf_bytes = f.read()
+
+        os.unlink(out_path)
+        gc.collect()
+
+        return pdf_response(pdf_bytes, "tijan_planches_MEP.pdf")
+
+    finally:
+        os.unlink(tmp_path)
+
 
 @app.post("/generate-ifc")
-async def generate_ifc_endpoint(projet: dict):
+async def generate_ifc_endpoint(params: ParamsProjet):
+    """Export IFC structurel — disponible avec paramètres seuls"""
     try:
-        from generate_ifc import generer_ifc
-        nom = projet.get("nom", "Tijan_Projet")
-        contenu_ifc = generer_ifc(projet, nom)
-        return Response(content=contenu_ifc, media_type="application/octet-stream",
-            headers={"Content-Disposition": f"attachment; filename={nom}.ifc"})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
+        DonneesProjet, calculer_projet = get_moteur()
+        generer_ifc = get_ifc()
+        donnees = params_to_donnees(params)
+        resultats = calculer_projet(donnees)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ifc") as tmp:
+            out_path = tmp.name
+
+        generer_ifc(resultats, out_path)
+
+        with open(out_path, "rb") as f:
+            ifc_bytes = f.read()
+        os.unlink(out_path)
         gc.collect()
 
-@app.post("/generate-speckle")
-async def generate_speckle_endpoint(req: SpeckleRequest):
-    try:
-        from generate_speckle import envoyer_sur_speckle
-        result = envoyer_sur_speckle(
-            resultats=req.resultats, nom_projet=req.nom_projet,
-            token=req.token, server_url=req.server_url)
-        return {"success": True, **result}
+        return StreamingResponse(
+            io.BytesIO(ifc_bytes),
+            media_type="application/x-step",
+            headers={
+                "Content-Disposition":
+                f"attachment; filename=tijan_{params.nom.replace(' ','_')[:20]}.ifc"
+            },
+        )
     except Exception as e:
+        logger.error(f"/generate-ifc error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
+
+
+@app.post("/dossier-complet")
+async def dossier_complet(
+    file: UploadFile = File(...),
+    nb_niveaux: Optional[int] = Form(None),
+    ville: Optional[str] = Form(None),
+    beton: Optional[str] = Form(None),
+):
+    """
+    Pipeline complet depuis un fichier DWG/DXF/IFC.
+    Retourne un JSON avec :
+      - diagnostic
+      - résultats de calcul
+      - URLs de téléchargement (si déployé avec stockage)
+    ou refus propre si format non supporté.
+    """
+    (_, _, traiter_fichier, _, _,
+     TypeInput, NiveauOutput) = get_parser()
+
+    tmp_path = await save_upload(file)
+    try:
+        overrides = {}
+        if nb_niveaux: overrides["nb_niveaux"] = nb_niveaux
+        if ville:      overrides["ville"] = ville
+        if beton:      overrides["beton"] = beton
+
+        result = traiter_fichier(tmp_path, overrides)
+
+        if not result["ok"]:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "ok": False,
+                    "message": result.get("message"),
+                }
+            )
+
+        # Calcul moteur
+        donnees_dict = result["donnees_moteur"]
+        DonneesProjet, calculer_projet = get_moteur()
+        donnees = DonneesProjet(**donnees_dict)
+        resultats = calculer_projet(donnees)
+
+        response = {
+            "ok": True,
+            "niveau_output": result["niveau_output"],
+            "message": result["message"],
+            "geometrie": result.get("geometrie"),
+            "score_qualite": result.get("score_qualite"),
+            "calcul": {
+                "nb_niveaux": donnees.nb_niveaux,
+                "section_rdc": f"{resultats.poteaux_par_niveau[0].section_mm}mm",
+                "armatures_rdc": (
+                    f"{resultats.poteaux_par_niveau[0].nb_barres}"
+                    f"HA{resultats.poteaux_par_niveau[0].diametre_mm}"
+                ),
+                "poutre": (
+                    f"{resultats.poutre_type.b_mm}×"
+                    f"{resultats.poutre_type.h_mm}mm"
+                ),
+                "fondation": resultats.fondation.type_fond,
+                "boq_ratio_fcfa_m2": resultats.boq.ratio_fcfa_m2,
+            },
+            "outputs_disponibles": (
+                ["note_calcul", "boq", "planches_ba", "planches_mep", "ifc"]
+                if result["niveau_output"] == "complet"
+                else ["note_calcul", "boq"]
+            ),
+        }
+
         gc.collect()
+        return JSONResponse(content=response)
+
+    finally:
+        os.unlink(tmp_path)
+
+
+# ════════════════════════════════════════════════════════════
+# ENTRÉE
+# ════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

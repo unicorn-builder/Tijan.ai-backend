@@ -1,11 +1,23 @@
-fastapi
-uvicorn[standard]
-python-multipart
-httpx
-pymupdf>=1.24.0
-anthropic>=0.25.0
-pypdf
-reportlab
-pydantic
-ifcopenshell
-python-dotenv
+# Tijan AI — Backend v4
+# Render Standard (1 CPU / 2GB RAM)
+
+fastapi==0.110.0
+uvicorn[standard]==0.27.1
+pydantic==2.6.4
+
+# PDF
+reportlab==4.1.0
+pypdf==4.1.0
+
+# Parsing géométrie
+ezdxf>=1.1.0
+ifcopenshell>=0.7.0
+
+# PDF vectoriel (extraction texte + cotes)
+pymupdf==1.23.26
+
+# IA (parsing plans scannés si besoin futur)
+anthropic>=0.20.0
+
+# Utilitaires
+python-multipart==0.0.9
