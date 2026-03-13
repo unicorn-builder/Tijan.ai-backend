@@ -1,10 +1,14 @@
 """
-Tijan AI — main.py v4
+Tijan AI — main.py v5
 Backend FastAPI — Render Standard (1 CPU / 2GB RAM)
+
+Nouveauté v5 :
+  - /parse utilise Autodesk APS pour lecture native DWG (tous formats)
+  - Plus de conversion DWG→DXF, lecture directe via API Autodesk officielle
 
 Endpoints :
   GET  /health              → statut serveur
-  POST /parse               → parse DWG/DXF/IFC → diagnostic + géométrie
+  POST /parse               → parse DWG/DXF/IFC → diagnostic + géométrie (APS)
   POST /calculate           → calcul Eurocodes (paramètres ou géométrie parsée)
   POST /generate            → génère note de calcul PDF
   POST /generate-boq        → génère BOQ structure PDF
@@ -57,6 +61,11 @@ app.add_middleware(
 def get_moteur():
     from engine_structural_v3 import DonneesProjet, calculer_projet
     return DonneesProjet, calculer_projet
+
+
+def get_aps_parser():
+    from aps_parser import parser_dwg_aps
+    return parser_dwg_aps
 
 
 def get_parser():
@@ -184,9 +193,12 @@ async def health():
     except ImportError:
         modules["ifcopenshell"] = "non installé"
 
+    aps_ok = bool(os.getenv("APS_CLIENT_ID"))
+    modules["aps"] = "configuré" if aps_ok else "non configuré"
+
     return {
         "status": "ok",
-        "version": "4.0.0",
+        "version": "5.0.0",
         "timestamp": datetime.utcnow().isoformat(),
         "modules": modules,
     }
@@ -200,11 +212,26 @@ async def parse_fichier(
     beton: Optional[str] = Form(None),
 ):
     """
-    Parse un fichier DWG/DXF/IFC et retourne le diagnostic + géométrie.
-    Ne génère PAS de documents — diagnostic uniquement.
+    Parse un fichier DWG/DXF/IFC via Autodesk APS (lecture native DWG).
+    Retourne le diagnostic + géométrie extraite.
     """
-    (diagnostiquer_input, _, traiter_fichier,
-     _, _, TypeInput, NiveauOutput) = get_parser()
+    from pathlib import Path
+
+    ext = Path(file.filename).suffix.lower()
+    REFUSES = {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff",
+               ".bmp", ".gif", ".webp", ".svg"}
+
+    if ext in REFUSES:
+        return JSONResponse(status_code=422, content={
+            "ok": False,
+            "niveau_output": "refuse",
+            "message": (
+                "✗ Format non supporté. "
+                "Fournissez un fichier DWG, DXF ou IFC. "
+                "Les PDF et images ne sont pas acceptés — "
+                "utilisez la saisie paramétrique pour les calculs sans plans."
+            )
+        })
 
     tmp_path = await save_upload(file)
     try:
@@ -213,41 +240,57 @@ async def parse_fichier(
         if ville: overrides["ville"] = ville
         if beton: overrides["beton"] = beton
 
-        result = traiter_fichier(tmp_path, overrides)
-        gc.collect()
+        if ext in (".dwg", ".dxf"):
+            # APS — lecture native, tous formats AutoCAD
+            parser_dwg_aps = get_aps_parser()
+            result = parser_dwg_aps(tmp_path)
+            if overrides:
+                dm = result.get("donnees_moteur", {})
+                dm.update(overrides)
 
-        if not result["ok"]:
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "ok": False,
-                    "niveau_output": result.get("niveau_output", "refuse"),
-                    "message": result.get("message", "Erreur de parsing"),
+        elif ext in (".ifc", ".ifczip"):
+            # IFC — ifcopenshell
+            (_, _, traiter_fichier, _, _, _, _) = get_parser()
+            result = traiter_fichier(tmp_path, overrides)
+            if result.get("geo"):
+                geo = result.pop("geo")
+                result["geometrie"] = {
+                    "projet_nom": geo.projet_nom,
+                    "emprise_x_m": round(geo.emprise_x/1000, 2),
+                    "emprise_y_m": round(geo.emprise_y/1000, 2),
+                    "nb_axes_x": len(geo.axes_x),
+                    "nb_axes_y": len(geo.axes_y),
+                    "portees_x_m": [round(p/1000, 2) for p in geo.portees_x],
+                    "portees_y_m": [round(p/1000, 2) for p in geo.portees_y],
+                    "score_qualite": geo.score_qualite,
                 }
-            )
+        else:
+            return JSONResponse(status_code=422, content={
+                "ok": False,
+                "niveau_output": "refuse",
+                "message": f"Format '{ext}' non reconnu. Acceptés : DWG, DXF, IFC."
+            })
 
-        # Convertir geo en dict serialisable
-        geo = result.pop("geo")
-        if geo:
-            result["geometrie"] = {
-                "projet_nom": geo.projet_nom,
-                "source": geo.source,
-                "emprise_x_m": round(geo.emprise_x/1000, 2),
-                "emprise_y_m": round(geo.emprise_y/1000, 2),
-                "nb_axes_x": len(geo.axes_x),
-                "nb_axes_y": len(geo.axes_y),
-                "nb_poteaux": len(geo.poteaux),
-                "nb_poutres": len(geo.poutres),
-                "portees_x_m": [round(p/1000, 2) for p in geo.portees_x],
-                "portees_y_m": [round(p/1000, 2) for p in geo.portees_y],
-                "nb_niveaux_annote": geo.nb_niveaux_annote,
-                "score_qualite": geo.score_qualite,
-            }
+        gc.collect()
+        if not result.get("ok"):
+            return JSONResponse(status_code=422, content={
+                "ok": False,
+                "niveau_output": result.get("niveau_output", "refuse"),
+                "message": result.get("message", "Erreur de parsing"),
+            })
 
         return JSONResponse(content=result)
 
+    except Exception as e:
+        logger.error(f"Erreur /parse : {e}")
+        return JSONResponse(status_code=500, content={
+            "ok": False,
+            "message": f"Erreur parsing : {str(e)[:300]}"
+        })
     finally:
-        os.unlink(tmp_path)
+        try: os.unlink(tmp_path)
+        except: pass
+        gc.collect()
 
 
 @app.post("/calculate")
