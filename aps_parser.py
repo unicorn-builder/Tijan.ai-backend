@@ -19,7 +19,7 @@ from typing import List
 
 APS_CLIENT_ID     = os.getenv("APS_CLIENT_ID", "")
 APS_CLIENT_SECRET = os.getenv("APS_CLIENT_SECRET", "")
-APS_BUCKET        = os.getenv("APS_BUCKET", "tijan-ai-dwg-bucket")
+APS_BUCKET = os.getenv("APS_BUCKET", "tijan-test-bucket-001")
 
 APS_AUTH_URL   = "https://developer.api.autodesk.com/authentication/v2/token"
 APS_OSS_URL    = "https://developer.api.autodesk.com/oss/v2/buckets"
