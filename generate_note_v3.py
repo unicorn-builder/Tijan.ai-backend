@@ -40,3 +40,29 @@ def generer_note(resultats_v3, buf, params_dict: dict = None):
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
+
+
+def generer_note_avec_donnees(resultats, donnees_v3, buf):
+    """Version avec donnees_v3 explicites — produit le vrai PDF."""
+    try:
+        from engine_structural import adapter_v3_vers_anciens
+        from generate_pdf import generer_pdf
+        import tempfile, os
+
+        projet, note = adapter_v3_vers_anciens(resultats, donnees_v3)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+            tmp_path = tmp.name
+
+        generer_pdf(note, projet, tmp_path)
+
+        with open(tmp_path, 'rb') as f:
+            buf.write(f.read())
+
+        os.unlink(tmp_path)
+
+    except Exception as e:
+        import traceback
+        print(f"generer_note_avec_donnees erreur: {e}")
+        traceback.print_exc()
+        generer_note(resultats, buf)
