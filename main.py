@@ -154,14 +154,10 @@ def params_to_donnees(params: ParamsProjet):
         portee_min_m=params.portee_min_m,
         nb_travees_x=params.nb_travees_x,
         nb_travees_y=params.nb_travees_y,
-        usage_principal=params.usage_principal,
         classe_beton=params.classe_beton,
         classe_acier=params.classe_acier,
         pression_sol_MPa=params.pression_sol_MPa,
-        profondeur_fondation_m=params.profondeur_fondation_m,
-        distance_mer_km=params.distance_mer_km,
-        zone_sismique=params.zone_sismique,
-        enrobage_mm=params.enrobage_mm,
+        zone_sismique=getattr(params, 'zone_sismique', 'faible'),
     )
 
 
