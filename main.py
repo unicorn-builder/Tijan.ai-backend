@@ -99,12 +99,12 @@ def get_planches_mep():
 
 
 def get_note():
-    from generate_note_v3 import generer_note
+    from generate_pdf import generer_note_calcul as generer_note
     return generer_note
 
 
 def get_boq():
-    from generate_boq_v3 import generer_boq
+    from generate_pdf import generer_boq_structure as generer_boq
     return generer_boq
 
 
@@ -428,104 +428,18 @@ async def generate_boq(params: ParamsProjet):
 
 
 @app.post("/generate-planches")
-async def generate_planches(
-    file: UploadFile = File(...),
-    nb_niveaux: Optional[int] = Form(None),
-    ville: Optional[str] = Form(None),
-    beton: Optional[str] = Form(None),
-):
-    """
-    Planches BA PDF — nécessite DWG/DXF/IFC.
-    Refus propre si PDF/image fourni.
-    """
-    (_, _, traiter_fichier, _, geo_vers_donnees,
-     TypeInput, NiveauOutput) = get_parser()
-
-    tmp_path = await save_upload(file)
+async def generate_planches(params: ParamsProjet):
+    """Planches BA PDF — disponible avec paramètres seuls"""
     try:
-        overrides = {}
-        if nb_niveaux: overrides["nb_niveaux"] = nb_niveaux
-        if ville:      overrides["ville"] = ville
-        if beton:      overrides["beton"] = beton
-
-        result = traiter_fichier(tmp_path, overrides)
-
-        if not result["ok"]:
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "ok": False,
-                    "message": result.get("message"),
-                    "conseil": (
-                        "Les plans ne peuvent être générés qu'à partir d'un fichier "
-                        "DWG, DXF ou IFC. Pour une note de calcul sans plans, "
-                        "utilisez /generate avec saisie paramétrique."
-                    )
-                }
-            )
-
-        geo = result["geo"]
-        donnees_dict = result["donnees_moteur"]
-
         DonneesProjet, calculer_projet = get_moteur()
-        generer_dossier_ba = get_planches_ba()
-
-        # Construire DonneesProjet depuis le dict
-        donnees = DonneesProjet(**donnees_dict)
+        generer_planches = get_planches_ba()
+        donnees = params_to_donnees(params)
         resultats = calculer_projet(donnees)
-
-        # Paramètres géométriques pour les planches
-        portees_x = geo.portees_x if geo.portees_x else None
-        portees_y = geo.portees_y if geo.portees_y else None
-
-        # Construire poteaux depuis résultats moteur
-        poteaux = [
-            {
-                "label": p.label,
-                "b": p.section_mm,
-                "nb": p.nb_barres,
-                "diam": p.diametre_mm,
-                "cd": p.cadre_diam_mm,
-                "ce": p.espacement_cadres_mm,
-                "NEd": p.NEd_kN,
-            }
-            for p in resultats.poteaux_par_niveau
-        ]
-
-        poutre = {
-            "b": resultats.poutre_type.b_mm,
-            "h": resultats.poutre_type.h_mm,
-            "As_inf": resultats.poutre_type.As_inf_cm2,
-            "As_sup": resultats.poutre_type.As_sup_cm2,
-            "etrier_d": resultats.poutre_type.etrier_diam_mm,
-            "etrier_e": resultats.poutre_type.etrier_esp_mm,
-            "portee": int((portees_x[0] if portees_x else 5000)),
-        }
-
-        fond = {
-            "type": resultats.fondation.type_fond,
-            "nb": resultats.fondation.nb_pieux,
-            "diam": resultats.fondation.diam_pieu_mm,
-            "L": resultats.fondation.longueur_pieu_m,
-            "As_cm2": resultats.fondation.As_cm2,
-            "cerce_d": 12,
-            "cerce_e": 200,
-        }
-
-        proj = {
-            "nom": donnees.nom,
-            "ref": f"TIJAN-{datetime.now().strftime('%y%m')}",
-            "ville": donnees.ville,
-            "beton": donnees.classe_beton,
-            "acier": donnees.classe_acier,
-            "norme": "EN 1992-1-1",
-        }
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_out:
             out_path = tmp_out.name
 
-        generer_dossier_ba(out_path, proj, portees_x, portees_y,
-                           poteaux, poutre, fond)
+        generer_planches(out_path, resultats)
 
         with open(out_path, "rb") as f:
             pdf_bytes = f.read()
@@ -533,43 +447,17 @@ async def generate_planches(
         os.unlink(out_path)
         gc.collect()
 
-        return pdf_response(
-            pdf_bytes,
-            f"tijan_planches_BA_{donnees.nom.replace(' ', '_')[:20]}.pdf"
-        )
+        return pdf_response(pdf_bytes, f"tijan_planches_BA_{params.nom.replace(' ', '_')[:20]}.pdf")
 
-    finally:
-        os.unlink(tmp_path)
+    except Exception as e:
+        logger.error(f"/generate-planches error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/generate-mep")
-async def generate_mep(
-    file: UploadFile = File(...),
-    nb_niveaux: Optional[int] = Form(None),
-):
-    """
-    Planches MEP PDF — nécessite DWG/DXF/IFC.
-    Refus propre si PDF/image fourni.
-    """
-    (_, _, traiter_fichier, _, _,
-     TypeInput, NiveauOutput) = get_parser()
-
-    tmp_path = await save_upload(file)
+async def generate_mep(params: ParamsProjet):
+    """Planches MEP PDF — disponible avec paramètres seuls"""
     try:
-        result = traiter_fichier(tmp_path, {"nb_niveaux": nb_niveaux} if nb_niveaux else {})
-
-        if not result["ok"]:
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "ok": False,
-                    "message": result.get("message"),
-                    "conseil": (
-                        "Les plans MEP nécessitent un fichier DWG, DXF ou IFC."
-                    )
-                }
-            )
-
         generer_dossier_mep = get_planches_mep()
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_out:
@@ -583,10 +471,11 @@ async def generate_mep(
         os.unlink(out_path)
         gc.collect()
 
-        return pdf_response(pdf_bytes, "tijan_planches_MEP.pdf")
+        return pdf_response(pdf_bytes, f"tijan_MEP_{params.nom.replace(' ', '_')[:20]}.pdf")
 
-    finally:
-        os.unlink(tmp_path)
+    except Exception as e:
+        logger.error(f"/generate-mep error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/generate-ifc")
