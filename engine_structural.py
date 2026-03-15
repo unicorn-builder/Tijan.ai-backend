@@ -220,7 +220,7 @@ def adapter_v3_vers_anciens(donnees_v3: dict, resultats_v3) -> tuple:
             pression_admissible_MPa=getattr(donnees_v3, "pression_sol_MPa", 0.15),
             profondeur_fondation_m=1.5,
             description="Sol latéritique — contrainte admissible "
-                        f"{donnees_v3.get('pression_sol_MPa', 0.15)} MPa",
+                        f"{getattr(donnees_v3, 'pression_sol_MPa', 0.15)} MPa",
         ),
         localisation=Localisation(
             ville=ville,
