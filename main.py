@@ -456,7 +456,22 @@ async def generate_planches(params: ParamsProjet):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_out:
             out_path = tmp_out.name
 
-        generer_planches(out_path, resultats)
+        # Adapter ResultatsCalcul v3 vers arguments generer_dossier_ba
+        
+        proj = type('P', (), {
+            'nom': params.nom, 'ville': params.ville,
+            'nb_niveaux': params.nb_niveaux,
+            'surface_emprise_m2': params.surface_emprise_m2,
+            'classe_beton': params.classe_beton,
+            'ref': f'TIJAN-{params.nom[:8].upper()}',
+        })()
+        portees_x = [params.portee_max_m] * params.nb_travees_x
+        portees_y = [params.portee_min_m] * params.nb_travees_y
+        generer_planches(out_path, proj=proj,
+            portees_x=portees_x, portees_y=portees_y,
+            poteaux=resultats.poteaux_par_niveau,
+            poutre=resultats.poutre_type,
+            fond=resultats.fondation)
 
         with open(out_path, "rb") as f:
             pdf_bytes = f.read()
