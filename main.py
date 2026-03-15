@@ -458,13 +458,7 @@ async def generate_planches(params: ParamsProjet):
 
         # Adapter ResultatsCalcul v3 vers arguments generer_dossier_ba
         
-        proj = type('P', (), {
-            'nom': params.nom, 'ville': params.ville,
-            'nb_niveaux': params.nb_niveaux,
-            'surface_emprise_m2': params.surface_emprise_m2,
-            'classe_beton': params.classe_beton,
-            'ref': f'TIJAN-{params.nom[:8].upper()}',
-        })()
+        proj = {'nom': params.nom, 'ville': params.ville + ', Senegal', 'beton': params.classe_beton, 'acier': params.classe_acier, 'ref': 'TIJAN-STR', 'norme': 'EN 1992-1-1'}
         portees_x = [params.portee_max_m] * params.nb_travees_x
         portees_y = [params.portee_min_m] * params.nb_travees_y
         generer_planches(out_path, proj=proj,
