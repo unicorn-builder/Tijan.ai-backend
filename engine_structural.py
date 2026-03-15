@@ -188,7 +188,7 @@ class NoteCalculComplete:
 # ADAPTATEUR v3 → anciens types
 # ══════════════════════════════════════════════════════════════
 
-def adapter_v3_vers_anciens(donnees_v3: dict, resultats_v3) -> tuple:
+def adapter_v3_vers_anciens(resultats_v3, donnees_v3) -> tuple:
     """
     Convertit les paramètres et résultats du moteur v3
     en ProjetStructurel + NoteCalculComplete pour generate_pdf.py
