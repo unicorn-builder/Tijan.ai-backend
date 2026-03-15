@@ -106,6 +106,15 @@ def get_fiches_structure():
     from generate_fiches_structure_v3 import generer_fiches_structure
     return generer_fiches_structure
 
+def get_boq_mep():
+    from generate_boq_mep_v3 import generer_boq_mep
+    return generer_boq_mep
+
+def get_fiches_mep():
+    from generate_fiches_mep_v3 import generer_fiches_mep
+    return generer_fiches_mep
+
+
 def get_note_mep():
     from generate_note_mep_v3 import generer_note_mep
     return generer_note_mep
@@ -706,6 +715,42 @@ async def generate_note_mep(params: ParamsProjet):
         return pdf_response(pdf_bytes, f"tijan_note_mep_{params.nom.replace(' ','_')[:20]}.pdf")
     except Exception as e:
         logger.error(f"/generate-note-mep error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-boq-mep")
+async def generate_boq_mep(params: ParamsProjet):
+    """BOQ MEP & Automation — 3 niveaux PDF"""
+    try:
+        DonneesProjet, calculer_projet = get_moteur()
+        generer = get_boq_mep()
+        donnees = params_to_donnees(params)
+        resultats = calculer_projet(donnees)
+        buf = io.BytesIO()
+        generer(resultats, buf, params.dict())
+        pdf_bytes = buf.getvalue()
+        gc.collect()
+        return pdf_response(pdf_bytes, f"tijan_boq_mep_{params.nom.replace(' ','_')[:20]}.pdf")
+    except Exception as e:
+        logger.error(f"/generate-boq-mep error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-fiches-mep")
+async def generate_fiches_mep(params: ParamsProjet):
+    """Fiches techniques equipements MEP PDF"""
+    try:
+        DonneesProjet, calculer_projet = get_moteur()
+        generer = get_fiches_mep()
+        donnees = params_to_donnees(params)
+        resultats = calculer_projet(donnees)
+        buf = io.BytesIO()
+        generer(resultats, buf, params.dict())
+        pdf_bytes = buf.getvalue()
+        gc.collect()
+        return pdf_response(pdf_bytes, f"tijan_fiches_mep_{params.nom.replace(' ','_')[:20]}.pdf")
+    except Exception as e:
+        logger.error(f"/generate-fiches-mep error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ════════════════════════════════════════════════════════════
