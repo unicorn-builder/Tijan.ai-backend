@@ -44,7 +44,7 @@ def generer_note(resultats_v3, buf, params_dict: dict = None):
 
 def generer_note_avec_donnees(resultats, donnees_v3, buf):
     """Version avec donnees_v3 explicites — produit le vrai PDF."""
-    try:
+    if False:
         from engine_structural import adapter_v3_vers_anciens
         from generate_pdf import generer_pdf
         import tempfile, os
