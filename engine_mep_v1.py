@@ -881,3 +881,4 @@ def calculer_mep(donnees: DonneesMEP) -> ResultatsMEP:
         analyse_cout_benefice=cb,
         note_sol_integree=bool(donnees.note_sol.strip()),
     )
+# redeploy 1773659148
