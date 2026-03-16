@@ -879,8 +879,8 @@ def calculer_mep(donnees: DonneesMEP) -> ResultatsMEP:
     shon = _shon(donnees)
 
     # BOQ structure estimé depuis données projet (ratios EC2)
-    # ep_dalle proportionnelle à portée, acier ~30-40 kg/m² selon nb niveaux
-    ep_dalle = max(donnees.portee_max_m / 35, 0.15)
+    # ep_dalle et acier estimés depuis nb_niveaux uniquement (portee_max_m pas dans DonneesMEP)
+    ep_dalle = max(0.20, 0.15 + donnees.nb_niveaux * 0.005)  # croît légèrement avec hauteur
     ratio_acier = 25 + donnees.nb_niveaux * 2.5   # kg/m² — croît avec la hauteur
     ratio_beton = ep_dalle + 0.08                   # m³/m² dalles + poteaux
     class _BOQ:
