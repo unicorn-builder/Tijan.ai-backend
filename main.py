@@ -415,10 +415,7 @@ async def generate_note(params: ParamsProjet):
         resultats._classe_acier = params.classe_acier
         resultats._pression_sol = params.pression_sol_MPa
 
-        generer_note = get_note()
-        buf = io.BytesIO()
-        generer_note(resultats, buf)
-        pdf_bytes = buf.getvalue()
+        pdf_bytes = get_note()(params.dict())
 
         gc.collect()
         return pdf_response(
