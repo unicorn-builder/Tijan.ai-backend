@@ -105,7 +105,7 @@ def get_planches_mep():
 
 
 def get_note():
-    from generate_note_v3 import generer_note
+    from generate_pdf_v4 import generer as generer_note
     return generer_note
 
 def get_fiches_structure():
@@ -416,7 +416,7 @@ async def generate_note(params: ParamsProjet):
         resultats._pression_sol = params.pression_sol_MPa
 
         try:
-            from generate_note_v3 import generer_note_avec_donnees
+            from generate_pdf_v4 import generer as generer_note_avec_donnees
             buf = io.BytesIO()
             generer_note_avec_donnees(resultats, donnees, buf)
             pdf_bytes = buf.getvalue()
