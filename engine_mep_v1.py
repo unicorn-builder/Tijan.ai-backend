@@ -554,22 +554,32 @@ def calculer_domotique(d: DonneesMEP, nb_logements: int) -> BilanDomotique:
 # ══════════════════════════════════════════════════════════════
 
 def calculer_edge(d: DonneesMEP, elec: BilanElectrique, plomb: BilanPlomberie,
-                  cvc: BilanCVC) -> AnalyseEDGE:
+                  cvc: BilanCVC, boq=None) -> AnalyseEDGE:
     """
     Calcul EDGE réel basé sur les mesures actives du projet.
     Référence : IFC EDGE Standard v3, bâtiment résidentiel, zone tropicale.
     """
     shon = _shon(d)
 
-    # ── ÉNERGIE — Méthode EDGE officielle par critères constructifs ──
+    # ── ÉNERGIE — Méthode EDGE basée sur données réelles du projet ──
     conso_ref = EDGE_REF["conso_ref_energie_kwh_m2"]
+    shon = _shon(d)
 
-    # Critères constructifs EDGE (méthode officielle)
-    eco_masse_thermique = 0.04   # Dalle béton e=22cm — inertie thermique
-    eco_isolation_toiture = min(0.06, d.isolation_toiture_mm / 80 * 0.06) if d.isolation_toiture_mm > 0 else 0.0
-    eco_vitrage = 0.05 if d.double_vitrage else 0.0    # Double vitrage Low-E
-    eco_ventilation = 0.07       # Ventilation naturelle Dakar (vents favorables)
-    eco_cesi = 0.06 if d.chauffe_eau_solaire else 0.0  # CESI — ECS solaire
+    # Masse thermique : fonction de l'épaisseur de dalle (liée à la portée)
+    ep_dalle = max(d.portee_max_m / 35, 0.15)  # épaisseur dalle réelle
+    eco_masse_thermique = min(0.06, ep_dalle / 0.22 * 0.04)  # proportionnel à l'épaisseur
+
+    # Ventilation naturelle : dépend du ratio surface/volume et nb niveaux
+    # R+1 → meilleure ventilation naturelle, R+8 → moins efficace
+    ratio_sv = (2 * shon / d.hauteur_etage_m + 2 * d.surface_emprise_m2) / (shon * d.hauteur_etage_m)
+    eco_ventilation = min(0.07, max(0.02, ratio_sv * 0.15))
+
+    # Isolation toiture : impact proportionnel à la surface de toiture / shon
+    ratio_toiture = d.surface_emprise_m2 / shon  # plus grand pour R+1, plus petit pour R+8
+    eco_isolation_toiture = min(0.06, d.isolation_toiture_mm / 80 * 0.06 * ratio_toiture * 2) if d.isolation_toiture_mm > 0 else 0.0
+
+    eco_vitrage = 0.05 if d.double_vitrage else 0.0
+    eco_cesi = 0.06 if d.chauffe_eau_solaire else 0.0
 
     eco_energie_total = eco_masse_thermique + eco_isolation_toiture + eco_vitrage + eco_ventilation + eco_cesi
     conso_projet_energie = conso_ref * (1 - eco_energie_total)
@@ -582,12 +592,15 @@ def calculer_edge(d: DonneesMEP, elec: BilanElectrique, plomb: BilanPlomberie,
     mesures_energie.append(f"Ventilation naturelle Dakar (vents favorables) → +{round(eco_ventilation*100,1)}%")
     if d.chauffe_eau_solaire: mesures_energie.append(f"Chauffe-eau solaires {plomb.nb_chauffe_eau_solaire} unités ECS → +{round(eco_cesi*100,1)}%")
 
-    # ── EAU ──────────────────────────────────────────────────
+    # ── EAU — basée sur nb logements et dotation réelle ──────
     conso_ref_eau = EDGE_REF["conso_ref_eau_L_pers_j"]
 
-    eco_wc = 0.13 if d.wc_double_chasse else 0.0      # WC 3/6L vs 9L : -13%
-    eco_rob = 0.08 if d.robinetterie_eco else 0.0      # 6L/min vs 12L : -8%
-    eco_cesi_eau = 0.05 if d.chauffe_eau_solaire else 0.0  # réduction eau chaude
+    eco_wc = 0.13 if d.wc_double_chasse else 0.0
+    eco_rob = 0.08 if d.robinetterie_eco else 0.0
+    # Impact CESI eau dépend du ratio logements/surface — plus efficace pour petits bâtiments
+    nb_logt = _estimer_nb_logements(d)
+    ratio_logt_surface = nb_logt / max(shon, 1) * 100  # logements/100m²
+    eco_cesi_eau = min(0.08, 0.05 * (1 + ratio_logt_surface)) if d.chauffe_eau_solaire else 0.0
 
     eco_eau_total = eco_wc + eco_rob + eco_cesi_eau
     conso_projet_eau = conso_ref_eau * (1 - eco_eau_total)
@@ -598,15 +611,21 @@ def calculer_edge(d: DonneesMEP, elec: BilanElectrique, plomb: BilanPlomberie,
     if d.robinetterie_eco:    mesures_eau.append(f"Robinetterie mousseurs 6L/min → -{round(eco_rob*100,1)}%")
     if d.chauffe_eau_solaire: mesures_eau.append(f"Réduction eau chaude sanitaire → -{round(eco_cesi_eau*100,1)}%")
 
-    # ── MATÉRIAUX ─────────────────────────────────────────────
+    # ── MATÉRIAUX — basés sur ratio béton/acier réels ────────
     ei_ref = EDGE_REF["ei_ref_kwh_m2"]
 
-    eco_ggbs = 0.08 if d.beton_ggbs else 0.0          # 10% substitution GGBS : -8%
-    eco_creux = 0.06 if d.parpaings_creux else 0.0    # -30% masse parpaings : -6%
-    eco_iso = min(0.06, d.isolation_toiture_mm / 80 * 0.05) if d.isolation_toiture_mm > 0 else 0.0
+    # Ratio acier/m² bâti — plus le ratio est faible, meilleur est le score matériaux
+    # Valeur de référence EDGE : 40 kg/m² acier, 0.16 m³/m² béton
+    ratio_acier_m2 = boq.acier_kg / max(shon, 1) if boq else 40.0
+    ratio_beton_m2 = boq.beton_m3 / max(shon, 1) if boq else 0.16
+    # Économie si ratios inférieurs à référence
+    eco_struct = max(0.0, min(0.08, (40 - ratio_acier_m2) / 40 * 0.08))
+    eco_ggbs = 0.08 if d.beton_ggbs else 0.0
+    eco_creux = 0.06 if d.parpaings_creux else 0.0
+    eco_iso = min(0.06, d.isolation_toiture_mm / 80 * 0.05 * ratio_toiture * 2) if d.isolation_toiture_mm > 0 else 0.0
     eco_vit_mat = 0.03 if d.double_vitrage else 0.0
 
-    eco_mat_total = eco_ggbs + eco_creux + eco_iso + eco_vit_mat
+    eco_mat_total = eco_struct + eco_ggbs + eco_creux + eco_iso + eco_vit_mat
     ei_projet = ei_ref * (1 - eco_mat_total)
     pct_mat = round(eco_mat_total * 100, 1)
 
@@ -857,12 +876,23 @@ def calculer_mep(donnees: DonneesMEP) -> ResultatsMEP:
     Zéro valeur codée en dur — tout est calculé depuis les inputs.
     """
     nb_logt = _estimer_nb_logements(donnees)
+    shon = _shon(donnees)
+
+    # BOQ structure estimé depuis données projet (ratios EC2)
+    # ep_dalle proportionnelle à portée, acier ~30-40 kg/m² selon nb niveaux
+    ep_dalle = max(donnees.portee_max_m / 35, 0.15)
+    ratio_acier = 25 + donnees.nb_niveaux * 2.5   # kg/m² — croît avec la hauteur
+    ratio_beton = ep_dalle + 0.08                   # m³/m² dalles + poteaux
+    class _BOQ:
+        acier_kg = ratio_acier * shon
+        beton_m3 = ratio_beton * shon
+    boq_struct = _BOQ()
 
     elec  = calculer_electrique(donnees, nb_logt)
     plomb = calculer_plomberie(donnees, nb_logt)
     cvc   = calculer_cvc(donnees, nb_logt)
     dom   = calculer_domotique(donnees, nb_logt)
-    edge  = calculer_edge(donnees, elec, plomb, cvc)
+    edge  = calculer_edge(donnees, elec, plomb, cvc, boq=boq_struct)
     lots, total_b, total_h, total_l, cb = calculer_boq_mep(
         donnees, nb_logt, elec, plomb, cvc, dom
     )
