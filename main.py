@@ -71,6 +71,12 @@ def get_moteur():
     from engine_structural_v3 import DonneesProjet, calculer_projet
     return DonneesProjet, calculer_projet
 
+def get_moteur_mep():
+    from engine_mep_v1 import DonneesMEP, calculer_mep
+    return DonneesMEP, calculer_mep
+
+
+
 
 def get_aps_parser():
     from aps_parser import parser_dwg_aps
@@ -648,6 +654,91 @@ async def generate_fiches_structure(params: ParamsProjet):
         logger.error(f"/generate-fiches-structure error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+@app.post("/calculate-mep")
+async def calculate_mep(params: ParamsProjet):
+    """Calcul MEP réel depuis paramètres projet — moteur engine_mep_v1"""
+    try:
+        DonneesMEP, calculer_mep = get_moteur_mep()
+        donnees = DonneesMEP(
+            nom=params.nom,
+            ville=params.ville,
+            nb_niveaux=params.nb_niveaux,
+            hauteur_etage_m=params.hauteur_etage_m,
+            surface_emprise_m2=params.surface_emprise_m2,
+            personnes_par_logement=4,
+            usage="residentiel",
+            distance_mer_km=getattr(params, 'distance_mer_km', 2.0),
+        )
+        r = calculer_mep(donnees)
+        gc.collect()
+        return {
+            "ok": True,
+            "projet": params.nom,
+            "electrique": {
+                "puissance_totale_kva": r.electrique.puissance_totale_souscrite_kva,
+                "transfo_kva": r.electrique.transfo_necessaire_kva,
+                "groupe_electrogene_kva": r.electrique.groupe_electrogene_kva,
+                "nb_compteurs": r.electrique.nb_compteurs_divisionnaires,
+                "conso_annuelle_kwh": r.electrique.conso_annuelle_estimee_kwh,
+                "facture_annuelle_fcfa": r.electrique.facture_annuelle_estimee_fcfa,
+            },
+            "plomberie": {
+                "nb_logements": r.plomberie.nb_logements,
+                "besoin_total_m3_j": r.plomberie.besoin_total_m3_j,
+                "volume_citerne_m3": r.plomberie.volume_citerne_m3,
+                "volume_bache_m3": r.plomberie.volume_bache_incendie_m3,
+                "debit_surpresseur_m3h": r.plomberie.debit_surpresseur_m3h,
+                "nb_chauffe_eau_solaire": r.plomberie.nb_chauffe_eau_solaire,
+                "facture_eau_fcfa": r.plomberie.facture_eau_annuelle_fcfa,
+            },
+            "cvc": {
+                "puissance_frigorifique_kw": r.cvc.puissance_frigorifique_installee_kW,
+                "nb_splits_sejour": r.cvc.nb_splits_sejour,
+                "nb_splits_chambre": r.cvc.nb_splits_chambre,
+                "nb_vmc": r.cvc.nb_vmc_double_flux,
+                "conso_cvc_kwh_an": r.cvc.conso_cvc_annuelle_kwh,
+            },
+            "edge": {
+                "economie_energie_pct": r.edge.economie_energie_pct,
+                "economie_eau_pct": r.edge.economie_eau_pct,
+                "economie_materiaux_pct": r.edge.economie_materiaux_pct,
+                "nb_criteres_conformes": r.edge.nb_criteres_conformes,
+                "certifiable": r.edge.certifiable,
+                "niveau_certification": r.edge.niveau_certification,
+                "mesures_energie": r.edge.mesures_energie,
+                "mesures_eau": r.edge.mesures_eau,
+                "mesures_materiaux": r.edge.mesures_materiaux,
+                "surcout_vert_pct": r.edge.surcout_vert_pct,
+                "payback_ans": r.edge.payback_ans,
+                "conso_ref_kwh_m2": r.edge.conso_reference_kwh_m2_an,
+                "conso_projet_kwh_m2": r.edge.conso_projet_kwh_m2_an,
+            },
+            "boq_mep": {
+                "basic_fcfa": r.boq_total_basic,
+                "hend_fcfa": r.boq_total_hend,
+                "luxury_fcfa": r.boq_total_luxury,
+                "lots": [
+                    {"nom": l.nom, "basic": l.basic_fcfa, "hend": l.hend_fcfa, "luxury": l.luxury_fcfa}
+                    for l in r.boq_lots
+                ],
+            },
+            "analyse_cout_benefice": {
+                "delta_basic_hend": r.analyse_cout_benefice.delta_basic_hend,
+                "delta_basic_luxury": r.analyse_cout_benefice.delta_basic_luxury,
+                "economie_hend_fcfa_an": r.analyse_cout_benefice.economie_energie_hend_fcfa_an,
+                "economie_luxury_fcfa_an": r.analyse_cout_benefice.economie_energie_luxury_fcfa_an,
+                "payback_hend_ans": r.analyse_cout_benefice.payback_hend_ans,
+                "payback_luxury_ans": r.analyse_cout_benefice.payback_luxury_ans,
+                "roi_hend_20ans_pct": r.analyse_cout_benefice.roi_hend_20ans_pct,
+                "roi_luxury_20ans_pct": r.analyse_cout_benefice.roi_luxury_20ans_pct,
+                "recommandation": r.analyse_cout_benefice.recommandation,
+            },
+        }
+    except Exception as e:
+        logger.error(f"/calculate-mep error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate-note-mep")
 async def generate_note_mep(params: ParamsProjet):
