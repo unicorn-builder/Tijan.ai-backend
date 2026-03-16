@@ -6,6 +6,10 @@ Fournisseurs Dakar inclus
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import mm
+
+import os as _os
+_HERE = _os.path.dirname(_os.path.abspath(__file__))
+_LOGO = next((c for c in [_os.path.join(_HERE,'tijan_logo_crop.png'),'/opt/render/project/src/tijan_logo_crop.png'] if _os.path.exists(c)), None)
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, PageBreak
 from datetime import datetime
