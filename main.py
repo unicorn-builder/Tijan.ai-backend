@@ -116,6 +116,11 @@ def get_boq_mep():
     from generate_boq_mep_v3 import generer_boq_mep
     return generer_boq_mep
 
+def get_edge():
+    from generate_edge_v3 import generer_edge
+    return generer_edge
+
+
 def get_fiches_mep():
     from generate_fiches_mep_v3 import generer_fiches_mep
     return generer_fiches_mep
@@ -843,6 +848,24 @@ async def generate_fiches_mep(params: ParamsProjet):
         return pdf_response(pdf_bytes, f"tijan_fiches_mep_{params.nom.replace(' ','_')[:20]}.pdf")
     except Exception as e:
         logger.error(f"/generate-fiches-mep error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-edge")
+async def generate_edge(params: ParamsProjet):
+    """Rapport conformite EDGE PDF"""
+    try:
+        DonneesProjet, calculer_projet = get_moteur()
+        generer = get_edge()
+        donnees = params_to_donnees(params)
+        resultats = calculer_projet(donnees)
+        buf = io.BytesIO()
+        generer(resultats, buf, params.dict())
+        pdf_bytes = buf.getvalue()
+        gc.collect()
+        return pdf_response(pdf_bytes, f"tijan_edge_{params.nom.replace(' ','_')[:20]}.pdf")
+    except Exception as e:
+        logger.error(f"/generate-edge error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ════════════════════════════════════════════════════════════
