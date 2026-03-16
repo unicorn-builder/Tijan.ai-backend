@@ -1,114 +1,148 @@
-"""
-parse_plans.py — Extraction paramètres projet depuis PDF plans archi
-Utilise pymupdf (fitz) + Claude API
-"""
-import os
-import json
-import re
-import anthropic
+import os, re, json, base64, logging, pathlib
+logger = logging.getLogger("tijan")
+CLAUDE_MODEL = "claude-sonnet-4-20250514"
+MAX_TEXT = 8000
+MIN_TEXT_LEN = 80
+DEFAULTS = {"nb_niveaux":5,"hauteur_etage_m":3.0,"surface_emprise_m2":500.0,"portee_max_m":6.0,"portee_min_m":4.5,"nb_travees_x":4,"nb_travees_y":3,"classe_beton":"C30/37","classe_acier":"HA500","pression_sol_MPa":0.15}
+PROMPT = """Tu es un ingenieur structure expert. Analyse ce contenu extrait de plans architecturaux. Reponds UNIQUEMENT avec un JSON valide sans markdown:\n{"nom":"nom du projet","ville":"ville","nb_niveaux":entier,"hauteur_etage_m":float,"surface_emprise_m2":float,"portee_max_m":float,"portee_min_m":float,"nb_travees_x":entier,"nb_travees_y":entier,"classe_beton":"C30/37","pression_sol_MPa":float}\nSi valeur absente mets null."""
 
-def extraire_params_pdf(pdf_path: str) -> dict:
-    """
-    Extrait les paramètres structurels depuis un PDF de plans archi.
-    Retourne un dict compatible ParamsProjet.
-    """
+def _client():
+    import anthropic
+    key = os.getenv("ANTHROPIC_API_KEY")
+    if not key: raise RuntimeError("ANTHROPIC_API_KEY manquante")
+    return anthropic.Anthropic(api_key=key)
+
+def _defaults(p):
+    for k,v in DEFAULTS.items():
+        if k not in p or p[k] is None: p[k]=v
+    p.setdefault("classe_acier","HA500")
+    return p
+
+def _clean(raw):
+    raw=raw.strip()
+    raw=re.sub(r'^```json\s*','',raw)
+    raw=re.sub(r'^```\s*','',raw)
+    raw=re.sub(r'\s*```$','',raw)
+    return json.loads(raw)
+
+def _claude_text(texte, client):
+    msg=client.messages.create(model=CLAUDE_MODEL,max_tokens=600,messages=[{"role":"user","content":f"{PROMPT}\n\nCONTENU:\n{texte[:MAX_TEXT]}"}])
+    return _clean(msg.content[0].text)
+
+def _claude_vision(img_b64, client):
+    msg=client.messages.create(model=CLAUDE_MODEL,max_tokens=600,messages=[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":img_b64}},{"type":"text","text":f"{PROMPT}\n\nAnalyse ce plan architectural."}]}])
+    return _clean(msg.content[0].text)
+
+def _parse_pdf(path, client):
     try:
-        import fitz  # pymupdf
+        import fitz
     except ImportError:
-        return {"ok": False, "message": "pymupdf non installé"}
-
-    # Extraction texte PDF
+        return {"ok":False,"message":"pymupdf non installe"}
     try:
-        doc = fitz.open(pdf_path)
-        texte = ""
-        for page in doc:
-            texte += page.get_text()
+        doc=fitz.open(path)
+    except Exception as e:
+        return {"ok":False,"message":f"PDF illisible: {e}"}
+    if len(doc)==0:
         doc.close()
-    except Exception as e:
-        return {"ok": False, "message": f"Erreur lecture PDF : {e}"}
-
-    if len(texte.strip()) < 50:
-        return {"ok": False, "message": "PDF non vectoriel ou vide — texte non extractible"}
-
-    # Limiter à 8000 chars pour l'API
-    texte_tronque = texte[:8000]
-
-    # Appel Claude API
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        return {"ok": False, "message": "ANTHROPIC_API_KEY non configurée"}
-
+        return {"ok":False,"message":"PDF vide"}
+    texte="".join(page.get_text() for page in doc).strip()
+    if len(texte)>=MIN_TEXT_LEN:
+        doc.close()
+        try:
+            p=_claude_text(texte,client)
+            p=_defaults(p); p["ok"]=True; p["source"]="pdf_vectoriel"
+            return p
+        except Exception as e:
+            return {"ok":False,"message":f"Claude PDF: {e}"}
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-        prompt = f"""Tu es un ingénieur structure expert. Analyse ce texte extrait de plans architecturaux et extrait les paramètres du projet.
-
-TEXTE DES PLANS :
-{texte_tronque}
-
-Extrais ces paramètres et réponds UNIQUEMENT avec un JSON valide (pas de markdown, pas d'explication) :
-{{
-  "nom": "nom du projet ou bâtiment",
-  "ville": "ville du projet",
-  "nb_niveaux": nombre_entier_niveaux_total_incluant_rdc,
-  "hauteur_etage_m": hauteur_en_metres_float,
-  "surface_emprise_m2": surface_emprise_au_sol_m2_float,
-  "portee_max_m": portee_maximale_entre_poteaux_m_float,
-  "portee_min_m": portee_minimale_entre_poteaux_m_float,
-  "nb_travees_x": nombre_entier_travees_direction_x,
-  "nb_travees_y": nombre_entier_travees_direction_y,
-  "classe_beton": "C25/30 ou C30/37 ou C35/45",
-  "pression_sol_MPa": valeur_float
-}}
-
-Règles :
-- Si une valeur n'est pas trouvée, utilise ces défauts : hauteur_etage=3.0, portee_max=6.0, portee_min=4.5, nb_travees_x=4, nb_travees_y=3, classe_beton=C30/37, pression_sol=0.15
-- nb_niveaux inclut RDC + étages + éventuellement sous-sol
-- surface_emprise = surface au sol du bâtiment (footprint), PAS la surface totale plancher
-- Réponds uniquement avec le JSON, rien d'autre"""
-
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=500,
-            messages=[{"role": "user", "content": prompt}]
-        )
-
-        raw = message.content[0].text.strip()
-        # Nettoyer si markdown
-        raw = re.sub(r'^```json\s*', '', raw)
-        raw = re.sub(r'^```\s*', '', raw)
-        raw = re.sub(r'\s*```$', '', raw)
-
-        params = json.loads(raw)
-
-        # Valider et compléter
-        defaults = {
-            "nom": "Projet",
-            "ville": "Dakar",
-            "nb_niveaux": 5,
-            "hauteur_etage_m": 3.0,
-            "surface_emprise_m2": 500.0,
-            "portee_max_m": 6.0,
-            "portee_min_m": 4.5,
-            "nb_travees_x": 4,
-            "nb_travees_y": 3,
-            "classe_beton": "C30/37",
-            "classe_acier": "HA500",
-            "pression_sol_MPa": 0.15,
-        }
-        for k, v in defaults.items():
-            if k not in params or params[k] is None:
-                params[k] = v
-
-        params["classe_acier"] = "HA500"
-        params["ok"] = True
-        params["source"] = "pdf_claude"
-        return params
-
-    except json.JSONDecodeError as e:
-        return {"ok": False, "message": f"Réponse Claude non parsable : {e}"}
+        mat=fitz.Matrix(120/72,120/72)
+        pix=doc[0].get_pixmap(matrix=mat,alpha=False)
+        img_bytes=pix.tobytes("jpeg")
+        doc.close()
+        if len(img_bytes)>3500000:
+            doc2=fitz.open(path); mat=fitz.Matrix(90/72,90/72)
+            pix=doc2[0].get_pixmap(matrix=mat,alpha=False); img_bytes=pix.tobytes("jpeg"); doc2.close()
+        img_b64=base64.standard_b64encode(img_bytes).decode()
+        p=_claude_vision(img_b64,client)
+        p=_defaults(p); p["ok"]=True; p["source"]="pdf_scanne_vision"
+        return p
     except Exception as e:
-        return {"ok": False, "message": f"Erreur Claude API : {e}"}
+        return {"ok":False,"message":f"PDF scanne: {e}"}
 
+def _extract_ezdxf(doc, client, label):
+    msp=doc.modelspace()
+    textes=[]; dims=[]; xmin=xmax=ymin=ymax=None; n=0
+    for ent in msp:
+        t=ent.dxftype(); n+=1
+        if t in("TEXT","ATTDEF","ATTRIB"):
+            try:
+                v=ent.dxf.text.strip()
+                if v and len(v)<300: textes.append(v)
+            except: pass
+        elif t=="MTEXT":
+            try:
+                v=ent.plain_mtext().strip()
+                if v and len(v)<500: textes.append(v)
+            except: pass
+        elif t=="DIMENSION":
+            try:
+                val=ent.dxf.actual_measurement
+                if val and 0.01<abs(val)<200000: dims.append(round(abs(val),2))
+            except: pass
+        elif t in("LINE","LWPOLYLINE","POLYLINE"):
+            try:
+                bb=ent.get_bounding_box()
+                if bb:
+                    xmin=bb.extmin.x if xmin is None else min(xmin,bb.extmin.x)
+                    xmax=bb.extmax.x if xmax is None else max(xmax,bb.extmax.x)
+                    ymin=bb.extmin.y if ymin is None else min(ymin,bb.extmin.y)
+                    ymax=bb.extmax.y if ymax is None else max(ymax,bb.extmax.y)
+            except: pass
+    geo=""
+    if xmin is not None:
+        dx=abs(xmax-xmin); dy=abs(ymax-ymin)
+        if max(dx,dy)>500: dx_m=round(dx/1000,2); dy_m=round(dy/1000,2)
+        else: dx_m=round(dx,2); dy_m=round(dy,2)
+        geo=f"Etendue: {dx_m}m x {dy_m}m | Surface estimee: {round(dx_m*dy_m,1)} m2"
+    contenu="\n".join(list(dict.fromkeys(textes))[:100])
+    if geo: contenu+=f"\n{geo}"
+    if dims: contenu+=f"\nDimensions: {sorted(set(dims))[:40]}"
+    contenu+=f"\nEntites: {n}"
+    if len(contenu.strip())<15:
+        return {"ok":False,"message":"Fichier lu mais sans annotations suffisantes","source":label+"_vide"}
+    try:
+        p=_claude_text(contenu,client)
+        p=_defaults(p); p["ok"]=True; p["source"]=label
+        return p
+    except Exception as e:
+        return {"ok":False,"message":f"Claude {label}: {e}"}
 
-def extraire_params(fichier_path: str) -> dict:
-    return extraire_params_pdf(fichier_path)
+def _parse_dwg(path, client):
+    try:
+        from ezdxf.recover import readfile
+        doc,_=readfile(path)
+        return _extract_ezdxf(doc,client,"dwg_ezdxf")
+    except Exception as e:
+        return {"ok":False,"message":f"DWG non lu: {e}. Exportez en PDF depuis AutoCAD pour une extraction optimale."}
+
+def _parse_dxf(path, client):
+    try:
+        import ezdxf
+        doc=ezdxf.readfile(path)
+        return _extract_ezdxf(doc,client,"dxf_ezdxf")
+    except Exception as e:
+        return {"ok":False,"message":f"DXF non lu: {e}"}
+
+def extraire_params(fichier_path):
+    ext=pathlib.Path(fichier_path).suffix.lower()
+    try: c=_client()
+    except RuntimeError as e: return {"ok":False,"message":str(e)}
+    try:
+        if ext==".pdf": return _parse_pdf(fichier_path,c)
+        elif ext==".dwg": return _parse_dwg(fichier_path,c)
+        elif ext==".dxf": return _parse_dxf(fichier_path,c)
+        else: return {"ok":False,"message":f"Format '{ext}' non supporte. Acceptes: PDF, DWG, DXF."}
+    except Exception as e:
+        return {"ok":False,"message":f"Erreur: {e}"}
+
+def extraire_params_pdf(path): return extraire_params(path)
