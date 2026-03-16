@@ -348,7 +348,6 @@ async def calculate(params: ParamsProjet):
             logger.warning(f"Claude analyse: {e}")
         return {
             "ok": True,
-        "params_input": params.dict(),
             "projet": params.nom,
             "niveau_output": "partiel",
             "poteaux": [
