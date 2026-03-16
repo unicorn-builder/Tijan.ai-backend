@@ -108,3 +108,7 @@ Règles :
         return {"ok": False, "message": f"Réponse Claude non parsable : {e}"}
     except Exception as e:
         return {"ok": False, "message": f"Erreur Claude API : {e}"}
+
+
+def extraire_params(fichier_path: str) -> dict:
+    return extraire_params_pdf(fichier_path)
