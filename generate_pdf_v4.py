@@ -382,6 +382,11 @@ def generer(params: dict) -> bytes:
         pression_sol_MPa=params.get("pression_sol_MPa", 0.15),
     )
     resultats = calculer(d)
-    import dataclasses
-    res_dict = dataclasses.asdict(resultats) if hasattr(resultats, '__dataclass_fields__') else resultats
+    import dataclasses, json
+    if hasattr(resultats, '__dataclass_fields__'):
+        res_dict = dataclasses.asdict(resultats)
+    else:
+        res_dict = resultats
+    # Ajouter params dans res_dict pour le BOQ
+    res_dict['params'] = params
     return generer_note_structure(res_dict, params)
