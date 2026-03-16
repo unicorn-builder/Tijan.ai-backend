@@ -155,6 +155,7 @@ class ParamsProjet(BaseModel):
     classe_beton: str = "C30/37"
     classe_acier: str = "HA500"
     pression_sol_MPa: float = 0.15
+    sol_context: Optional[str] = None  # JSON stringifié des params sol
     profondeur_fondation_m: float = 1.5
     distance_mer_km: float = 2.0
     zone_sismique: int = 1
@@ -166,8 +167,23 @@ class ParamsProjet(BaseModel):
 # ════════════════════════════════════════════════════════════
 
 def params_to_donnees(params: ParamsProjet):
-    """Convertit ParamsProjet → DonneesProjet du moteur v3"""
+    """Convertit ParamsProjet → DonneesProjet du moteur v3.
+    Si sol_context fourni, utilise la pression admissible réelle de l'étude de sol."""
+    import json as _json
     DonneesProjet, _ = get_moteur()
+
+    # Pression sol : priorité à l'étude de sol si fournie
+    pression_sol = params.pression_sol_MPa
+    sol_data = {}
+    if params.sol_context:
+        try:
+            sol_data = _json.loads(params.sol_context)
+            if sol_data.get('pression_admissible_MPa'):
+                pression_sol = float(sol_data['pression_admissible_MPa'])
+                logger.info(f"Étude sol intégrée : {sol_data.get('type_sol')} / {pression_sol} MPa")
+        except Exception as e:
+            logger.warning(f"sol_context parse error: {e}")
+
     return DonneesProjet(
         nom=params.nom,
         ville=params.ville,
@@ -180,7 +196,7 @@ def params_to_donnees(params: ParamsProjet):
         nb_travees_y=params.nb_travees_y,
         classe_beton=params.classe_beton,
         classe_acier=params.classe_acier,
-        pression_sol_MPa=params.pression_sol_MPa,
+        pression_sol_MPa=pression_sol,
         zone_sismique=getattr(params, 'zone_sismique', 'faible'),
     )
 
@@ -270,6 +286,27 @@ async def parse_fichier(
         except Exception:
             pass
 
+
+
+@app.post("/parse-sol")
+async def parse_sol_fichier(file: UploadFile = File(...)):
+    """
+    Parse un PDF d'étude de sol.
+    Extrait : type sol, pression admissible, nappe, ancrage, agressivité, recommandation fondation.
+    """
+    from parse_sol import extraire_params_sol
+    tmp_path = await save_upload(file)
+    try:
+        result = extraire_params_sol(tmp_path)
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"/parse-sol error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
 @app.post("/calculate")
 async def calculate(params: ParamsProjet):
@@ -660,7 +697,17 @@ async def generate_fiches_structure(params: ParamsProjet):
 async def calculate_mep(params: ParamsProjet):
     """Calcul MEP réel depuis paramètres projet — moteur engine_mep_v1"""
     try:
+        import json as _json
         DonneesMEP, calculer_mep = get_moteur_mep()
+
+        # Intégrer étude de sol si fournie
+        sol_data = {}
+        if params.sol_context:
+            try:
+                sol_data = _json.loads(params.sol_context)
+            except Exception:
+                pass
+
         donnees = DonneesMEP(
             nom=params.nom,
             ville=params.ville,
@@ -670,6 +717,11 @@ async def calculate_mep(params: ParamsProjet):
             personnes_par_logement=4,
             usage="residentiel",
             distance_mer_km=getattr(params, 'distance_mer_km', 2.0),
+            note_sol=sol_data.get('observations', '') + (
+                f" Type : {sol_data.get('type_sol','')}."
+                f" Nappe : {sol_data.get('profondeur_nappe_m','?')}m."
+                f" Agressivité : {sol_data.get('classe_agressivite','?')}."
+            ) if sol_data else "",
         )
         r = calculer_mep(donnees)
         gc.collect()
