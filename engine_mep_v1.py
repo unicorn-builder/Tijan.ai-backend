@@ -34,16 +34,16 @@ class DonneesMEP:
     # Étude de sol (texte parsé si fourni)
     note_sol: str = ""
     # Options techniques (EDGE)
-    cvc_inverter: bool = True
-    vmc_double_flux: bool = True
-    chauffe_eau_solaire: bool = True
-    wc_double_chasse: bool = True
-    robinetterie_eco: bool = True
-    led_100pct: bool = True
-    beton_ggbs: bool = True        # substitution laitier
+    cvc_inverter: bool = False
+    vmc_double_flux: bool = False
+    chauffe_eau_solaire: bool = False
+    wc_double_chasse: bool = False
+    robinetterie_eco: bool = False
+    led_100pct: bool = False
+    beton_ggbs: bool = False        # substitution laitier
     parpaings_creux: bool = True
-    isolation_toiture_mm: float = 80.0
-    double_vitrage: bool = True
+    isolation_toiture_mm: float = 0.0
+    double_vitrage: bool = False
     # Prix marché Dakar Mars 2026 (FCFA)
     prix_kwh_senelec: float = 105.0   # FCFA/kWh tranche résidentielle
     prix_m3_eau_sde: float = 750.0    # FCFA/m³
