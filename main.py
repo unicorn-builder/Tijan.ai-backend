@@ -1,626 +1,557 @@
 """
-Archito-Genie FastAPI Backend
-=============================
-Deploy this on your external server (e.g., Railway, Render, AWS, etc.)
+Tijan AI — main.py v6
+Backend FastAPI — Render Standard (1 CPU / 2GB RAM)
 
-Requirements:
-- Python 3.9+
-- pip install fastapi uvicorn openai python-multipart pydantic
+Moteurs v2 :
+  - engine_structure_v2.py  — Structure EC2/EC8 paramétrique tous usages
+  - engine_mep_v2.py        — MEP complet (élec, plomberie, CVC, CF, SI, ASC, AUTO, EDGE)
+  - prix_marche.py          — Base de prix multi-pays (Dakar, Abidjan, Casablanca, Lagos, Accra)
 
-Environment variables:
-- OPENAI_API_KEY: Your OpenAI API key
+Générateurs PDF v2 (données 100% issues des moteurs) :
+  - gen_note_structure.py   — Note de calcul structure 9 pages
+  - gen_boq_structure.py    — BOQ structure détaillé 7 lots
+  - gen_mep.py              — Note MEP, BOQ MEP résumé, EDGE, Rapport exécutif
+  - gen_boq_mep_detail.py   — BOQ MEP détaillé 7 lots
 
-Run locally:
-    uvicorn main:app --reload --host 0.0.0.0 --port 8000
+Endpoints :
+  GET  /health
+  POST /parse                     → parse PDF/DWG → paramètres projet
+  POST /parse-sol                 → parse étude de sol PDF
+  POST /calculate                 → calcul structure EC2/EC8
+  POST /calculate-mep             → calcul MEP complet
+  POST /generate                  → note de calcul structure PDF
+  POST /generate-boq              → BOQ structure détaillé PDF
+  POST /generate-note-mep         → note de calcul MEP PDF
+  POST /generate-boq-mep          → BOQ MEP détaillé PDF
+  POST /generate-edge             → rapport EDGE PDF
+  POST /generate-rapport-executif → rapport synthèse maître d'ouvrage PDF
+  POST /generate-fiches-structure → fiches techniques structure PDF
+  POST /generate-fiches-mep       → fiches techniques MEP PDF
+  POST /generate-planches         → planches BA PDF
 """
 
+import gc
 import os
-import uuid
-import json
-from typing import List, Optional
+import io
+import json as _json
+import tempfile
+import logging
+import dataclasses
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-from openai import OpenAI
+from typing import Optional
 
-# ==============================================================================
-# CONFIGURATION
-# ==============================================================================
+from fastapi import Request, FastAPI, File, UploadFile, HTTPException, Form
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("tijan")
 
 app = FastAPI(
-    title="Archito-Genie API",
-    description="AI-assisted structural, MEPF and sustainability conceptual design generator",
-    version="1.0.0"
+    title="Tijan AI API",
+    description="Bureau d'études automatisé — Structure + MEP + BOQ + EDGE",
+    version="6.0.0",
 )
 
-# CORS - Allow frontend to connect
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict to your frontend domain
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Create files directory if not exists
-os.makedirs("files", exist_ok=True)
 
-# Mount static files
-app.mount("/files", StaticFiles(directory="files"), name="files")
+# ════════════════════════════════════════════════════════════
+# IMPORTS LAZY
+# ════════════════════════════════════════════════════════════
 
-# In-memory storage (replace with database in production)
-PROJECTS: dict = {}
-ENGINEERING_RESULTS: dict = {}
+def get_moteur_structure():
+    from engine_structure_v2 import DonneesProjet, Usage, calculer_structure
+    return DonneesProjet, Usage, calculer_structure
 
-# ==============================================================================
-# PYDANTIC MODELS
-# ==============================================================================
+def get_moteur_mep():
+    from engine_mep_v2 import calculer_mep
+    return calculer_mep
 
-class ProjectCreate(BaseModel):
-    name: str
-    location: str
-    building_type: str
-    levels: int
-    gross_floor_area_m2: float
-    climate_zone: Optional[str] = "hot-humid"
-    target_certifications: Optional[List[str]] = ["EDGE"]
+def get_gen_note_structure():
+    from gen_note_structure import generer
+    return generer
 
+def get_gen_boq_structure():
+    from gen_boq_structure import generer_boq_structure
+    return generer_boq_structure
 
-class Project(BaseModel):
-    id: str
-    name: str
-    location: str
-    building_type: str
-    levels: int
-    gross_floor_area_m2: float
-    climate_zone: str
-    target_certifications: List[str]
-    files: List[str]
-    analyzed: bool
-    created_at: str
+def get_gen_note_mep():
+    from gen_mep import generer_note_mep
+    return generer_note_mep
 
+def get_gen_boq_mep():
+    from gen_boq_mep_detail import generer_boq_mep_detail
+    return generer_boq_mep_detail
 
-class BOQItem(BaseModel):
-    item: str
-    description: str
-    unit: str
-    quantity: float
-    unit_rate: float
-    total: float
+def get_gen_edge():
+    from gen_mep import generer_edge
+    return generer_edge
 
+def get_gen_executif():
+    from gen_mep import generer_rapport_executif
+    return generer_rapport_executif
 
-class BOQOption(BaseModel):
-    tier: str  # Basic, High-End, Luxury
-    items: List[BOQItem]
-    subtotal: float
-    cost_per_m2: float
+def get_gen_fiches_structure():
+    from generate_fiches_structure_v3 import generer_fiches_structure
+    return generer_fiches_structure
+
+def get_gen_fiches_mep():
+    from generate_fiches_mep_v3 import generer_fiches_mep
+    return generer_fiches_mep
+
+def get_gen_planches():
+    from generate_plans_v3 import generer_dossier_ba
+    return generer_dossier_ba
 
 
-class SustainabilityResult(BaseModel):
-    edge_energy_savings_percent: float
-    edge_water_savings_percent: float
-    edge_materials_savings_percent: float
-    edge_level: str
-    leed_points: Optional[int] = None
-    leed_level: Optional[str] = None
+# ════════════════════════════════════════════════════════════
+# MODÈLE PYDANTIC
+# ════════════════════════════════════════════════════════════
+
+class ParamsProjet(BaseModel):
+    nom:                str   = "Projet Tijan"
+    ville:              str   = "Dakar"
+    pays:               str   = "Senegal"
+    usage:              str   = "residentiel"
+    nb_niveaux:         int   = 4
+    hauteur_etage_m:    float = 3.0
+    surface_emprise_m2: float = 500.0
+    surface_terrain_m2: float = 0.0
+    portee_max_m:       float = 5.5
+    portee_min_m:       float = 4.0
+    nb_travees_x:       int   = 3
+    nb_travees_y:       int   = 2
+    # Matériaux — vide = auto-sélection par le moteur
+    classe_beton:       str   = ""
+    classe_acier:       str   = ""
+    # Site — 0 = auto depuis ville
+    pression_sol_MPa:   float = 0.0
+    distance_mer_km:    float = 0.0
+    zone_sismique:      int   = -1
+    # Optionnel
+    sol_context:        Optional[str] = None
+    avec_sous_sol:      bool  = False
 
 
-class EngineeringResult(BaseModel):
-    project_id: str
-    summary: dict
-    structural: dict
-    mepf: dict
-    automation: dict
-    sustainability: SustainabilityResult
-    boq_options: List[BOQOption]
+# ════════════════════════════════════════════════════════════
+# UTILITAIRES
+# ════════════════════════════════════════════════════════════
+
+def params_to_donnees(params: ParamsProjet):
+    """Convertit ParamsProjet → DonneesProjet v2."""
+    DonneesProjet, Usage, _ = get_moteur_structure()
+
+    # Mapping usage
+    usage_map = {
+        "residentiel": Usage.RESIDENTIEL,
+        "bureau":      Usage.BUREAU,
+        "hotel":       Usage.HOTEL,
+        "mixte":       Usage.MIXTE,
+        "commercial":  Usage.COMMERCIAL,
+        "industriel":  Usage.INDUSTRIEL,
+    }
+    usage = usage_map.get(params.usage.lower(), Usage.RESIDENTIEL)
+
+    # Pression sol depuis étude de sol si fournie
+    pression_sol = params.pression_sol_MPa
+    if params.sol_context:
+        try:
+            sol_data = _json.loads(params.sol_context)
+            if sol_data.get('pression_admissible_MPa'):
+                pression_sol = float(sol_data['pression_admissible_MPa'])
+                logger.info(f"Étude sol : {sol_data.get('type_sol')} / {pression_sol} MPa")
+        except Exception as e:
+            logger.warning(f"sol_context parse error: {e}")
+
+    return DonneesProjet(
+        nom=params.nom,
+        ville=params.ville,
+        pays=params.pays,
+        usage=usage,
+        nb_niveaux=params.nb_niveaux,
+        hauteur_etage_m=params.hauteur_etage_m,
+        surface_emprise_m2=params.surface_emprise_m2,
+        surface_terrain_m2=params.surface_terrain_m2,
+        portee_max_m=params.portee_max_m,
+        portee_min_m=params.portee_min_m,
+        nb_travees_x=params.nb_travees_x,
+        nb_travees_y=params.nb_travees_y,
+        classe_beton=params.classe_beton,
+        classe_acier=params.classe_acier,
+        pression_sol_MPa=pression_sol,
+        distance_mer_km=params.distance_mer_km,
+        zone_sismique=params.zone_sismique,
+        avec_sous_sol=params.avec_sous_sol,
+        nb_sous_sols=1 if params.avec_sous_sol else 0,
+    )
+
+def pdf_response(pdf_bytes: bytes, filename: str) -> StreamingResponse:
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+async def save_upload(file: UploadFile) -> str:
+    suffix = os.path.splitext(file.filename)[1].lower()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        content = await file.read()
+        tmp.write(content)
+        return tmp.name
+
+def fname(params: ParamsProjet, prefix: str) -> str:
+    return f"tijan_{prefix}_{params.nom.replace(' ','_')[:20]}.pdf"
 
 
-class ReportResponse(BaseModel):
-    project_id: str
-    report_markdown: str
+# ════════════════════════════════════════════════════════════
+# ENDPOINTS
+# ════════════════════════════════════════════════════════════
 
-
-# ==============================================================================
-# ARCHITO-GENIE SYSTEM PROMPT
-# ==============================================================================
-
-ARCHITO_GENIE_SYSTEM_PROMPT = """You are Archito-Genie, an AI structural & MEPF conceptual design generator.
-
-You receive a single JSON called `engineering_result`.
-You MUST NOT invent new numerical values.
-Use only the numbers present inside the JSON.
-
-Always begin the output with this disclaimer:
-
-"**Disclaimer:** The following outputs are conceptual and for preliminary studies only. They must be reviewed, completed, and validated by licensed structural and MEPF engineers and official sustainability consultants (EDGE/LEED) before any construction or certification."
-
-Then output the following **7 sections, in order**:
-
-## 1. DESIGN NARRATIVE & PRINCIPLES
-- Project overview and design philosophy
-- Key design drivers and constraints
-- Sustainability approach
-
-## 2. CALCULATIONS (CONCEPTUAL / PRELIMINARY)
-- Structural load assumptions
-- MEPF sizing basis
-- All values must come from the input JSON
-
-## 3. DESIGN SCHEMATICS
-- Conceptual layout descriptions
-- System integration approach
-- Zoning concepts
-
-## 4. STRUCTURAL DRAWINGS (CONCEPTUAL)
-- Foundation concept
-- Framing system description
-- Structural grid layout
-
-## 5. MEPF / INTEGRATION / AUTOMATION DRAWINGS (CONCEPTUAL)
-- HVAC system layout concept
-- Plumbing riser concept
-- Electrical distribution concept
-- Fire protection concept
-- BMS/automation scope
-
-## 6. DATASHEETS
-- Equipment specifications summary
-- Material specifications
-- Performance targets
-
-## 7. BILL OF QUANTITIES – 3 OPTIONS (Basic, High-End, Luxury)
-Present the BOQ data from the JSON in a clear table format for each tier.
-
-Use markdown headings, tables, and bullet lists.
-Avoid fluff. Be precise.
-Do not omit any section."""
-
-
-# ==============================================================================
-# HELPER FUNCTIONS
-# ==============================================================================
-
-def is_coastal_city(location: str) -> bool:
-    """Check if location is a known coastal city."""
-    coastal_cities = [
-        "dakar", "abidjan", "bissau", "lagos", "accra", "lome", "cotonou",
-        "libreville", "douala", "luanda", "maputo", "mombasa", "dar es salaam",
-        "zanzibar", "cape town", "durban", "casablanca", "tunis", "algiers",
-        "alexandria", "saint-louis", "conakry", "freetown", "monrovia"
-    ]
-    location_lower = location.lower()
-    return any(city in location_lower for city in coastal_cities)
-
-
-def calculate_structural_design(project: Project) -> dict:
-    """Generate conceptual structural design based on project parameters."""
-    area = project.gross_floor_area_m2
-    levels = project.levels
-    building_type = project.building_type.lower()
-    
-    # Determine structural system based on building type and size
-    if levels <= 3:
-        system_type = "Load-bearing masonry walls with RC slabs"
-        foundation_type = "Strip foundations"
-        typical_span = "4.0m - 5.0m"
-        slab_thickness = 150
-    elif levels <= 8:
-        system_type = "RC frame with infill masonry"
-        foundation_type = "Isolated pad footings with tie beams"
-        typical_span = "6.0m - 7.5m"
-        slab_thickness = 180
-    else:
-        system_type = "RC shear wall core with perimeter frame"
-        foundation_type = "Raft foundation or piled foundations"
-        typical_span = "7.5m - 9.0m"
-        slab_thickness = 200
-    
-    # Grid calculation
-    floor_area_per_level = area / levels
-    grid_x = round((floor_area_per_level ** 0.5) / 6) + 1
-    grid_y = round((floor_area_per_level ** 0.5) / 6) + 1
-    
+@app.get("/health")
+async def health():
     return {
-        "system_type": system_type,
-        "grid_spacing": f"{grid_x} x {grid_y} grid @ 6.0m c/c",
-        "slab_thickness_mm": slab_thickness,
-        "foundation_type": foundation_type,
-        "spans": typical_span,
-        "structural_concrete_grade": "C30/37",
-        "reinforcement_grade": "B500B",
-        "design_code": "Eurocode 2 / ACI 318"
-    }
-
-
-def calculate_mepf_design(project: Project) -> dict:
-    """Generate conceptual MEPF design based on project parameters."""
-    area = project.gross_floor_area_m2
-    levels = project.levels
-    climate = project.climate_zone
-    building_type = project.building_type.lower()
-    
-    # HVAC sizing (W/m² based on climate and building type)
-    cooling_load_factor = {
-        "hot-humid": 150,
-        "hot-dry": 130,
-        "tropical": 160,
-        "temperate": 100,
-        "mediterranean": 110,
-        "cold": 80
-    }.get(climate, 120)
-    
-    cooling_load_kw = round(area * cooling_load_factor / 1000, 1)
-    
-    # HVAC system type based on building size
-    if area < 500:
-        hvac_system = "Split system AC units"
-    elif area < 2000:
-        hvac_system = "VRF (Variable Refrigerant Flow) system"
-    else:
-        hvac_system = "Chilled water system with AHUs"
-    
-    # Electrical sizing
-    electrical_factor = 50  # VA/m² typical
-    electrical_load_kva = round(area * electrical_factor / 1000, 1)
-    
-    # Water demand
-    water_demand_lpd = round(area * 10)  # 10 L/m²/day typical
-    
-    return {
-        "hvac_system": hvac_system,
-        "cooling_load_kw": cooling_load_kw,
-        "cooling_load_per_m2": cooling_load_factor,
-        "water_supply": f"Municipal connection with {round(water_demand_lpd/1000, 1)}m³/day demand",
-        "drainage": "Gravity drainage to municipal sewer",
-        "electrical_load_kva": electrical_load_kva,
-        "electrical_system": "3-phase 400V/230V supply",
-        "fire_protection": "Wet sprinkler system per NFPA 13" if area > 500 else "Fire extinguishers and smoke detectors",
-        "ventilation": f"Mechanical ventilation with {round(area * 10)} L/s fresh air"
-    }
-
-
-def calculate_automation(project: Project) -> dict:
-    """Generate BMS/automation scope."""
-    area = project.gross_floor_area_m2
-    
-    if area < 1000:
-        return {
-            "bms_scope": ["Basic lighting control", "Individual AC control"],
-            "iot_sensors": ["Motion sensors", "Temperature sensors"]
-        }
-    elif area < 5000:
-        return {
-            "bms_scope": [
-                "Centralized HVAC control",
-                "Lighting automation with daylight harvesting",
-                "Energy monitoring",
-                "Access control integration"
-            ],
-            "iot_sensors": [
-                "Occupancy sensors",
-                "Temperature/humidity sensors",
-                "CO2 sensors",
-                "Energy meters"
-            ]
-        }
-    else:
-        return {
-            "bms_scope": [
-                "Full BMS integration",
-                "HVAC optimization with AI",
-                "Lighting automation",
-                "Fire alarm integration",
-                "Vertical transport monitoring",
-                "Energy management system",
-                "Fault detection and diagnostics"
-            ],
-            "iot_sensors": [
-                "Occupancy sensors",
-                "Environmental sensors (T/RH/CO2/PM2.5)",
-                "Water leak sensors",
-                "Energy meters per floor",
-                "Air quality monitors"
-            ]
-        }
-
-
-def calculate_sustainability(project: Project) -> SustainabilityResult:
-    """Calculate sustainability metrics."""
-    # Baseline EDGE calculations
-    energy_savings = 25  # Base 25% from efficient HVAC
-    water_savings = 20   # Base 20% from efficient fixtures
-    materials_savings = 15  # Base 15% from local materials
-    
-    # Adjust based on certifications
-    if "EDGE" in project.target_certifications:
-        energy_savings += 5
-        water_savings += 5
-    if "LEED" in project.target_certifications:
-        energy_savings += 10
-        water_savings += 10
-        materials_savings += 5
-    
-    # Determine EDGE level
-    if energy_savings >= 40 and water_savings >= 40 and materials_savings >= 20:
-        edge_level = "EDGE Advanced"
-    elif energy_savings >= 20 and water_savings >= 20:
-        edge_level = "EDGE Certified"
-    else:
-        edge_level = "Pre-certification"
-    
-    # LEED points estimation
-    leed_points = min(round((energy_savings + water_savings + materials_savings) * 0.8), 80)
-    leed_level = (
-        "Platinum" if leed_points >= 80 else
-        "Gold" if leed_points >= 60 else
-        "Silver" if leed_points >= 50 else
-        "Certified" if leed_points >= 40 else None
-    )
-    
-    return SustainabilityResult(
-        edge_energy_savings_percent=energy_savings,
-        edge_water_savings_percent=water_savings,
-        edge_materials_savings_percent=materials_savings,
-        edge_level=edge_level,
-        leed_points=leed_points,
-        leed_level=leed_level
-    )
-
-
-def generate_boq_options(project: Project, structural: dict, mepf: dict) -> List[BOQOption]:
-    """Generate 3 BOQ options: Basic, High-End, Luxury."""
-    area = project.gross_floor_area_m2
-    
-    # Cost multipliers per m² (USD)
-    tiers = {
-        "Basic": {"structure": 150, "mepf": 100, "finishes": 50, "automation": 20, "multiplier": 1.0},
-        "High-End": {"structure": 200, "mepf": 150, "finishes": 100, "automation": 50, "multiplier": 1.5},
-        "Luxury": {"structure": 280, "mepf": 220, "finishes": 180, "automation": 100, "multiplier": 2.2}
-    }
-    
-    options = []
-    for tier_name, costs in tiers.items():
-        items = [
-            BOQItem(
-                item="Structure",
-                description=f"{structural['system_type']} - {structural['foundation_type']}",
-                unit="m²",
-                quantity=area,
-                unit_rate=costs["structure"],
-                total=area * costs["structure"]
-            ),
-            BOQItem(
-                item="MEPF",
-                description=f"{mepf['hvac_system']} + {mepf['electrical_system']}",
-                unit="m²",
-                quantity=area,
-                unit_rate=costs["mepf"],
-                total=area * costs["mepf"]
-            ),
-            BOQItem(
-                item="Finishes",
-                description=f"{tier_name} grade finishes and fixtures",
-                unit="m²",
-                quantity=area,
-                unit_rate=costs["finishes"],
-                total=area * costs["finishes"]
-            ),
-            BOQItem(
-                item="Automation",
-                description="BMS and smart building features",
-                unit="m²",
-                quantity=area,
-                unit_rate=costs["automation"],
-                total=area * costs["automation"]
-            )
-        ]
-        
-        subtotal = sum(item.total for item in items)
-        
-        options.append(BOQOption(
-            tier=tier_name,
-            items=items,
-            subtotal=subtotal,
-            cost_per_m2=round(subtotal / area, 2)
-        ))
-    
-    return options
-
-
-# ==============================================================================
-# API ENDPOINTS
-# ==============================================================================
-
-@app.get("/")
-async def root():
-    """Health check endpoint."""
-    return {"status": "ok", "service": "Archito-Genie API", "version": "1.0.0"}
-
-
-@app.post("/projects", response_model=Project)
-async def create_project(data: ProjectCreate):
-    """Create a new project."""
-    project_id = str(uuid.uuid4())
-    
-    project = Project(
-        id=project_id,
-        name=data.name,
-        location=data.location,
-        building_type=data.building_type,
-        levels=data.levels,
-        gross_floor_area_m2=data.gross_floor_area_m2,
-        climate_zone=data.climate_zone or "hot-humid",
-        target_certifications=data.target_certifications or ["EDGE"],
-        files=[],
-        analyzed=False,
-        created_at=datetime.now().isoformat()
-    )
-    
-    PROJECTS[project_id] = project
-    return project
-
-
-@app.post("/projects/{project_id}/files", response_model=Project)
-async def upload_files(
-    project_id: str,
-    architectural_plan: UploadFile = File(...),
-    soil_report: Optional[UploadFile] = File(None),
-    additional_files: List[UploadFile] = File(default=[])
-):
-    """Upload project files."""
-    if project_id not in PROJECTS:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    project = PROJECTS[project_id]
-    uploaded_files = []
-    
-    # Validate architectural plan extension
-    allowed_extensions = ['.rvt', '.dwg', '.pdf']
-    ext = os.path.splitext(architectural_plan.filename)[1].lower()
-    if ext not in allowed_extensions:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Architectural plan must be one of: {', '.join(allowed_extensions)}"
-        )
-    
-    # Save architectural plan (mandatory)
-    arch_filename = f"{project_id}_arch_{architectural_plan.filename}"
-    arch_path = os.path.join("files", arch_filename)
-    with open(arch_path, "wb") as f:
-        content = await architectural_plan.read()
-        f.write(content)
-    uploaded_files.append(arch_filename)
-    
-    # Save soil report (optional)
-    if soil_report:
-        soil_filename = f"{project_id}_soil_{soil_report.filename}"
-        soil_path = os.path.join("files", soil_filename)
-        with open(soil_path, "wb") as f:
-            content = await soil_report.read()
-            f.write(content)
-        uploaded_files.append(soil_filename)
-    
-    # Save additional files (optional)
-    for file in additional_files:
-        if file.filename:
-            add_filename = f"{project_id}_add_{file.filename}"
-            add_path = os.path.join("files", add_filename)
-            with open(add_path, "wb") as f:
-                content = await file.read()
-                f.write(content)
-            uploaded_files.append(add_filename)
-    
-    # Update project
-    project.files = uploaded_files
-    PROJECTS[project_id] = project
-    
-    return project
-
-
-@app.post("/projects/{project_id}/analyze", response_model=EngineeringResult)
-async def analyze_project(project_id: str):
-    """Run technical conceptual analysis."""
-    if project_id not in PROJECTS:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    project = PROJECTS[project_id]
-    
-    if not project.files:
-        raise HTTPException(status_code=400, detail="No files uploaded")
-    
-    # Infer environmental data
-    proximity_to_sea = is_coastal_city(project.location)
-    
-    # Generate conceptual designs
-    structural = calculate_structural_design(project)
-    mepf = calculate_mepf_design(project)
-    automation = calculate_automation(project)
-    sustainability = calculate_sustainability(project)
-    boq_options = generate_boq_options(project, structural, mepf)
-    
-    result = EngineeringResult(
-        project_id=project_id,
-        summary={
-            "building_type": project.building_type,
-            "location": project.location,
-            "levels": project.levels,
-            "gross_floor_area_m2": project.gross_floor_area_m2,
-            "climate_zone": project.climate_zone,
-            "proximity_to_sea": proximity_to_sea,
-            "target_certifications": project.target_certifications
+        "status": "ok",
+        "version": "6.0.0",
+        "timestamp": datetime.utcnow().isoformat(),
+        "moteurs": {
+            "structure": "engine_structure_v2",
+            "mep":       "engine_mep_v2",
+            "prix":      "prix_marche — Dakar/Abidjan/Casablanca/Lagos/Accra",
         },
-        structural=structural,
-        mepf=mepf,
-        automation=automation,
-        sustainability=sustainability,
-        boq_options=boq_options
-    )
-    
-    # Store result
-    ENGINEERING_RESULTS[project_id] = result
-    project.analyzed = True
-    PROJECTS[project_id] = project
-    
-    return result
+    }
 
 
-@app.get("/projects/{project_id}/engineering-result", response_model=EngineeringResult)
-async def get_engineering_result(project_id: str):
-    """Get the engineering analysis result."""
-    if project_id not in ENGINEERING_RESULTS:
-        raise HTTPException(status_code=404, detail="Engineering result not found. Run analysis first.")
-    
-    return ENGINEERING_RESULTS[project_id]
-
-
-@app.get("/projects/{project_id}/report", response_model=ReportResponse)
-async def generate_report(project_id: str):
-    """Generate the full AI report using OpenAI API."""
-    if project_id not in ENGINEERING_RESULTS:
-        raise HTTPException(status_code=404, detail="Engineering result not found. Run analysis first.")
-    
-    # Get OpenAI API key
-    openai_api_key = os.environ.get("OPENAI_API_KEY")
-    if not openai_api_key:
-        raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured on server")
-    
-    engineering_result = ENGINEERING_RESULTS[project_id]
-    project = PROJECTS[project_id]
-    
-    # Convert to JSON for the prompt
-    result_json = json.dumps(engineering_result.dict(), indent=2)
-    
-    # Call OpenAI API
-    client = OpenAI(api_key=openai_api_key)
-    
+@app.post("/parse")
+async def parse_fichier(
+    file: UploadFile = File(...),
+    nb_niveaux: Optional[int] = Form(None),
+    ville: Optional[str] = Form(None),
+    beton: Optional[str] = Form(None),
+):
+    from parse_plans import extraire_params
+    tmp_path = await save_upload(file)
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o",  # or "gpt-5" when available
-            messages=[
-                {"role": "system", "content": ARCHITO_GENIE_SYSTEM_PROMPT},
-                {"role": "user", "content": f"Project: {project.name}\n\nEngineering Result JSON:\n```json\n{result_json}\n```\n\nGenerate the complete 7-section Archito-Genie design report."}
-            ],
-            max_tokens=8000,
-            temperature=0.7
-        )
-        
-        report_markdown = response.choices[0].message.content
-        
+        result = extraire_params(tmp_path)
+        if result.get("ok"):
+            if nb_niveaux: result["nb_niveaux"] = nb_niveaux
+            if ville:      result["ville"] = ville
+            if beton:      result["classe_beton"] = beton
+        return JSONResponse(content=result)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OpenAI API error: {str(e)}")
-    
-    return ReportResponse(
-        project_id=project_id,
-        report_markdown=report_markdown
-    )
+        logger.error(f"/parse error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try: os.unlink(tmp_path)
+        except: pass
 
 
-# ==============================================================================
-# MAIN
-# ==============================================================================
+@app.post("/parse-sol")
+async def parse_sol(file: UploadFile = File(...)):
+    from parse_sol import extraire_params_sol
+    tmp_path = await save_upload(file)
+    try:
+        result = extraire_params_sol(tmp_path)
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"/parse-sol error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try: os.unlink(tmp_path)
+        except: pass
+
+
+@app.post("/calculate")
+async def calculate(params: ParamsProjet):
+    """Calcul structure EC2/EC8 — retourne tous les résultats."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        gc.collect()
+
+        return {
+            "ok": True,
+            "params_input": params.dict(),
+            "projet": params.nom,
+            "classe_beton": rs.classe_beton,
+            "classe_acier": rs.classe_acier,
+            "distance_mer_km": rs.distance_mer_km,
+            "pression_sol_MPa": rs.pression_sol_MPa,
+            "zone_sismique": rs.zone_sismique,
+            "charge_G_kNm2": rs.charge_G_kNm2,
+            "charge_Q_kNm2": rs.charge_Q_kNm2,
+            "poteaux": [dataclasses.asdict(p) for p in rs.poteaux],
+            "poutre_principale": dataclasses.asdict(rs.poutre_principale),
+            "poutre_secondaire": dataclasses.asdict(rs.poutre_secondaire) if rs.poutre_secondaire else None,
+            "dalle": dataclasses.asdict(rs.dalle),
+            "cloisons": {
+                "surface_totale_m2": rs.cloisons.surface_totale_m2,
+                "option_recommandee": rs.cloisons.option_recommandee.value,
+                "charge_dalle_kn_m2": rs.cloisons.charge_dalle_kn_m2,
+                "options": [
+                    {
+                        "type": o.type.value,
+                        "materiau": o.materiau,
+                        "epaisseur_cm": o.epaisseur_cm,
+                        "prix_fcfa_m2": o.prix_fcfa_m2,
+                        "avantages": o.avantages,
+                        "inconvenients": o.inconvenients,
+                    }
+                    for o in rs.cloisons.options
+                ],
+            },
+            "fondation": dataclasses.asdict(rs.fondation),
+            "sismique": dataclasses.asdict(rs.sismique),
+            "boq": dataclasses.asdict(rs.boq),
+            "analyse": dataclasses.asdict(rs.analyse),
+        }
+    except Exception as e:
+        logger.error(f"/calculate error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/calculate-mep")
+async def calculate_mep_endpoint(params: ParamsProjet):
+    """Calcul MEP complet — retourne tous les résultats."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+        gc.collect()
+
+        e = rm.edge
+        return {
+            "ok": True,
+            "projet": params.nom,
+            "surf_batie_m2": rm.surf_batie_m2,
+            "nb_logements": rm.nb_logements,
+            "nb_personnes": rm.nb_personnes,
+            "electrique": dataclasses.asdict(rm.electrique),
+            "plomberie": dataclasses.asdict(rm.plomberie),
+            "cvc": dataclasses.asdict(rm.cvc),
+            "courants_faibles": dataclasses.asdict(rm.courants_faibles),
+            "securite_incendie": dataclasses.asdict(rm.securite_incendie),
+            "ascenseurs": dataclasses.asdict(rm.ascenseurs),
+            "automatisation": dataclasses.asdict(rm.automatisation),
+            "edge": {
+                "economie_energie_pct": e.economie_energie_pct,
+                "economie_eau_pct": e.economie_eau_pct,
+                "economie_materiaux_pct": e.economie_materiaux_pct,
+                "certifiable": e.certifiable,
+                "niveau_certification": e.niveau_certification,
+                "mesures_energie": e.mesures_energie,
+                "mesures_eau": e.mesures_eau,
+                "mesures_materiaux": e.mesures_materiaux,
+                "plan_action": e.plan_action,
+                "cout_mise_conformite_fcfa": e.cout_mise_conformite_fcfa,
+                "roi_ans": e.roi_ans,
+                "methode_calcul": e.methode_calcul,
+                "note_generale": e.note_generale,
+            },
+            "boq_mep": {
+                "basic_fcfa": rm.boq.total_basic_fcfa,
+                "hend_fcfa": rm.boq.total_hend_fcfa,
+                "luxury_fcfa": rm.boq.total_luxury_fcfa,
+                "ratio_basic_m2": rm.boq.ratio_basic_m2,
+                "ratio_hend_m2": rm.boq.ratio_hend_m2,
+                "recommandation": rm.boq.recommandation,
+                "note_choix": rm.boq.note_choix,
+                "lots": [
+                    {
+                        "lot": l.lot,
+                        "designation": l.designation,
+                        "basic_fcfa": l.pu_basic_fcfa,
+                        "hend_fcfa": l.pu_hend_fcfa,
+                        "luxury_fcfa": l.pu_luxury_fcfa,
+                        "note": l.note_impact,
+                    }
+                    for l in rm.boq.lots
+                ],
+            },
+        }
+    except Exception as e:
+        logger.error(f"/calculate-mep error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate")
+async def generate_note_structure(params: ParamsProjet):
+    """Note de calcul structure PDF — 9 pages EC2/EC8."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        generer = get_gen_note_structure()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        pdf_bytes = generer(rs, params.dict())
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, "note_structure"))
+    except Exception as e:
+        logger.error(f"/generate error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-boq")
+async def generate_boq_structure(params: ParamsProjet):
+    """BOQ structure détaillé PDF — 7 lots."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        generer = get_gen_boq_structure()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        pdf_bytes = generer(rs, params.dict())
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, "boq_structure"))
+    except Exception as e:
+        logger.error(f"/generate-boq error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-note-mep")
+async def generate_note_mep(params: ParamsProjet):
+    """Note de calcul MEP complète PDF."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        generer = get_gen_note_mep()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+        pdf_bytes = generer(rm, params.dict())
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, "note_mep"))
+    except Exception as e:
+        logger.error(f"/generate-note-mep error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-boq-mep")
+async def generate_boq_mep(params: ParamsProjet):
+    """BOQ MEP détaillé PDF — 7 lots × 3 gammes."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        generer = get_gen_boq_mep()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+        pdf_bytes = generer(rm, params.dict())
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, "boq_mep"))
+    except Exception as e:
+        logger.error(f"/generate-boq-mep error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-edge")
+async def generate_edge(params: ParamsProjet):
+    """Rapport EDGE IFC v3 PDF — scores réels + plan d'action."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        generer = get_gen_edge()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+        pdf_bytes = generer(rm, params.dict())
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, "edge"))
+    except Exception as e:
+        logger.error(f"/generate-edge error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-rapport-executif")
+async def generate_rapport_executif(params: ParamsProjet):
+    """Rapport de synthèse exécutif PDF — maître d'ouvrage."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        generer = get_gen_executif()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+        pdf_bytes = generer(rs, rm, params.dict())
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, "rapport_executif"))
+    except Exception as e:
+        logger.error(f"/generate-rapport-executif error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-fiches-structure")
+async def generate_fiches_structure(params: ParamsProjet):
+    """Fiches techniques structure PDF."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        generer = get_gen_fiches_structure()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        buf = io.BytesIO()
+        generer(rs, buf, params.dict())
+        pdf_bytes = buf.getvalue()
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, "fiches_structure"))
+    except Exception as e:
+        logger.error(f"/generate-fiches-structure error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-fiches-mep")
+async def generate_fiches_mep(params: ParamsProjet):
+    """Fiches techniques MEP PDF."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        generer = get_gen_fiches_mep()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+        buf = io.BytesIO()
+        generer(rm, buf, params.dict())
+        pdf_bytes = buf.getvalue()
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, "fiches_mep"))
+    except Exception as e:
+        logger.error(f"/generate-fiches-mep error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-planches")
+async def generate_planches(params: ParamsProjet):
+    """Planches BA PDF."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        generer = get_gen_planches()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            out_path = tmp.name
+        generer(out_path, resultats=rs, params=params.dict())
+        with open(out_path, "rb") as f:
+            pdf_bytes = f.read()
+        os.unlink(out_path)
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, "planches_BA"))
+    except Exception as e:
+        logger.error(f"/generate-planches error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ════════════════════════════════════════════════════════════
+# ENTRÉE
+# ════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+# redeploy 1773678828
