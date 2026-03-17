@@ -1078,7 +1078,7 @@ def _calculer_edge(d: DonneesProjet, surf_batie: float,
     note_gen = (
         f"Énergie {pct_energie}% | Eau {pct_eau}% | Matériaux {pct_mat}% "
         f"(seuil EDGE : 20% sur les 3 piliers). "
-        f"{'Certifiable EDGE Basique.' if certifiable else 'Non certifiable — voir plan d\'action.'}"
+        f"{'Certifiable EDGE Basique.' if certifiable else 'Non certifiable.'}"
     )
 
     return ScoreEDGE(
