@@ -1253,7 +1253,7 @@ def _calculer_boq_mep(d: DonneesProjet, shon: float,
 # POINT D'ENTRÉE PRINCIPAL
 # ══════════════════════════════════════════════════════════════
 
-def calculer_mep(d: DonneesProjet, struct_resultats=None) -> ResultatsMEP:
+def calculer_mep(d: DonneesProjet, struct_resultats=None, edge_optimise: bool = False) -> ResultatsMEP:
     """
     Calcule l'ensemble MEP depuis les données projet.
     Accepte optionnellement les résultats structure pour EDGE matériaux.
@@ -1315,7 +1315,7 @@ def calculer_mep(d: DonneesProjet, struct_resultats=None) -> ResultatsMEP:
     si    = _calculer_securite_incendie(d, shon, nb_pers)
     asc   = _calculer_ascenseurs(d, shon, nb_pers, prix_mep)
     auto  = _calculer_automatisation(d, shon, nb_log)
-    edge  = _calculer_edge(d, shon, nb_log, nb_pers, elec, plomb, cvc_, struct_boq_dict)
+    edge  = _calculer_edge(d, shon, nb_log, nb_pers, elec, plomb, cvc_, struct_boq_dict, edge_optimise=edge_optimise)
     boq   = _calculer_boq_mep(d, shon, nb_log, elec, plomb, cvc_, cf, si, asc, auto, prix_mep)
 
     return ResultatsMEP(
