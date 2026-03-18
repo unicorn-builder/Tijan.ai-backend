@@ -10,7 +10,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, Spacer, Page
 from tijan_theme import *
 
 
-def generer_boq_mep_detail(rm, params: dict) -> bytes:
+def generer_boq_mep_detail(rm, params: dict, lang: str = "fr") -> bytes:
     buf = io.BytesIO()
     hf = HeaderFooter(rm.params.nom, 'BOQ MEP — Détaillé')
     doc = SimpleDocTemplate(buf, pagesize=A4,
