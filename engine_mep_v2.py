@@ -276,7 +276,7 @@ class BOQ_MEP:
 @dataclass
 class ResultatsMEP:
     params:             DonneesProjet
-    shon_m2:            float
+    surf_batie_m2:            float
     nb_logements:       int
     nb_personnes:       int
     # Bilans par corps d'état
@@ -297,22 +297,22 @@ class ResultatsMEP:
 # UTILITAIRES
 # ══════════════════════════════════════════════════════════════
 
-def _shon(d: DonneesProjet) -> float:
+def _surf_batie(d: DonneesProjet) -> float:
     return d.surface_emprise_m2 * d.nb_niveaux
 
 def _get_ville_key(ville: str) -> str:
     return ville.lower().strip()
 
-def _estimer_logements(d: DonneesProjet, shon: float) -> int:
+def _estimer_logements(d: DonneesProjet, surf_batie: float) -> int:
     if d.usage == Usage.RESIDENTIEL:
-        return max(1, round(shon * 0.85 / 80))  # 80m² moyen/logement, 85% SHON habitable
+        return max(1, round(surf_batie * 0.85 / 80))  # 80m² moyen/logement, 85% SURFACE_BATIE habitable
     elif d.usage == Usage.HOTEL:
-        return max(1, round(shon * 0.60 / 35))  # 35m² chambre, 60% SHON chambres
+        return max(1, round(surf_batie * 0.60 / 35))  # 35m² chambre, 60% SURFACE_BATIE chambres
     elif d.usage == Usage.BUREAU:
-        return max(1, round(shon * 0.85 / 15))  # 15m²/poste de travail
+        return max(1, round(surf_batie * 0.85 / 15))  # 15m²/poste de travail
     elif d.usage == Usage.MIXTE:
-        return max(1, round(shon * 0.50 / 80))
-    return max(1, round(shon / 100))
+        return max(1, round(surf_batie * 0.50 / 80))
+    return max(1, round(surf_batie / 100))
 
 def _get_tarifs(ville: str) -> dict:
     return TARIFS.get(_get_ville_key(ville), TARIFS["dakar"])
@@ -341,17 +341,17 @@ def _categorie_erp(d: DonneesProjet, nb_personnes: int) -> str:
 # CALCUL ÉLECTRICITÉ
 # ══════════════════════════════════════════════════════════════
 
-def _calculer_electrique(d: DonneesProjet, shon: float,
+def _calculer_electrique(d: DonneesProjet, surf_batie: float,
                           nb_logements: int, prix_mep) -> BilanElectrique:
     ville_key = _get_ville_key(d.ville)
     tarifs = _get_tarifs(ville_key)
 
     # Puissances par poste (kW)
-    p_eclairage = shon * 0.010   # 10 W/m²
-    p_prises     = shon * PUISSANCE_ELEC_Wm2[d.usage] / 1000 * 0.4
-    p_cvc        = shon * 0.060  # 60 W/m² CVC (tropiques)
+    p_eclairage = surf_batie * 0.010   # 10 W/m²
+    p_prises     = surf_batie * PUISSANCE_ELEC_Wm2[d.usage] / 1000 * 0.4
+    p_cvc        = surf_batie * 0.060  # 60 W/m² CVC (tropiques)
     p_asc        = max(0, (d.nb_niveaux - 2) * 5.5) if d.nb_niveaux > 2 else 0
-    p_divers     = shon * 0.008  # Divers (pompes, ventilation, secours)
+    p_divers     = surf_batie * 0.008  # Divers (pompes, ventilation, secours)
 
     p_total_kw   = p_eclairage + p_prises + p_cvc + p_asc + p_divers
     foisonnement = max(0.55, 0.85 - nb_logements * 0.008)  # Décroît avec nb logements
@@ -415,7 +415,7 @@ def _calculer_electrique(d: DonneesProjet, shon: float,
 # CALCUL PLOMBERIE
 # ══════════════════════════════════════════════════════════════
 
-def _calculer_plomberie(d: DonneesProjet, shon: float,
+def _calculer_plomberie(d: DonneesProjet, surf_batie: float,
                          nb_logements: int, nb_personnes: int,
                          prix_mep) -> BilanPlomberie:
     tarifs = _get_tarifs(_get_ville_key(d.ville))
@@ -439,8 +439,8 @@ def _calculer_plomberie(d: DonneesProjet, shon: float,
         nb_cesi = 0  # Pas d'ECS en bureau standard
 
     # WC double chasse et robinetterie éco
-    nb_wc = nb_logements * 2 if d.usage in [Usage.RESIDENTIEL, Usage.HOTEL] else math.ceil(shon / 50)
-    nb_rob = nb_logements * 3 if d.usage in [Usage.RESIDENTIEL, Usage.HOTEL] else math.ceil(shon / 30)
+    nb_wc = nb_logements * 2 if d.usage in [Usage.RESIDENTIEL, Usage.HOTEL] else math.ceil(surf_batie / 50)
+    nb_rob = nb_logements * 3 if d.usage in [Usage.RESIDENTIEL, Usage.HOTEL] else math.ceil(surf_batie / 30)
 
     # Diamètre colonne montante
     Q_max_ls = Q_pointe_m3h * 1000 / 3600  # L/s
@@ -487,7 +487,7 @@ def _calculer_plomberie(d: DonneesProjet, shon: float,
 # CALCUL CVC
 # ══════════════════════════════════════════════════════════════
 
-def _calculer_cvc(d: DonneesProjet, shon: float,
+def _calculer_cvc(d: DonneesProjet, surf_batie: float,
                    nb_logements: int, prix_mep) -> BilanCVC:
     climat = _get_climat(_get_ville_key(d.ville))
     delta_T = climat["T_ext"] - climat["T_confort"]
@@ -498,7 +498,7 @@ def _calculer_cvc(d: DonneesProjet, shon: float,
     q_clim_Wm2 = 60 * coeff_soleil  # W/m² de base
 
     # Puissance frigorifique totale
-    P_frigo_kW = shon * q_clim_Wm2 / 1000
+    P_frigo_kW = surf_batie * q_clim_Wm2 / 1000
 
     # Ventilation — VMC
     # Résidentiel : VMC simple flux (économique)
@@ -516,7 +516,7 @@ def _calculer_cvc(d: DonneesProjet, shon: float,
     # Cassettes pour bureaux/hôtels
     nb_cassettes = 0
     if d.usage in [Usage.BUREAU, Usage.HOTEL, Usage.COMMERCIAL]:
-        nb_cassettes = math.ceil(shon / 60)  # 1 cassette / 60m²
+        nb_cassettes = math.ceil(surf_batie / 60)  # 1 cassette / 60m²
         nb_splits_sej = 0
         nb_splits_ch  = 0
 
@@ -526,7 +526,7 @@ def _calculer_cvc(d: DonneesProjet, shon: float,
     conso_cvc_kwh = P_frigo_kW / COP * h_clim
 
     # Note impact prix
-    note = f"Charge thermique {P_frigo_kW:.0f} kW pour {shon:.0f} m² (T ext={climat['T_ext']}°C)"
+    note = f"Charge thermique {P_frigo_kW:.0f} kW pour {surf_batie:.0f} m² (T ext={climat['T_ext']}°C)"
     if type_vmc == "double_flux":
         cout_vmc = nb_vmc * prix_mep.vmc_double_flux
         note += f". VMC double flux recommandée ({d.usage.value}) : {cout_vmc/1e6:.1f} M FCFA"
@@ -556,17 +556,17 @@ def _calculer_cvc(d: DonneesProjet, shon: float,
 # CALCUL COURANTS FAIBLES
 # ══════════════════════════════════════════════════════════════
 
-def _calculer_courants_faibles(d: DonneesProjet, shon: float,
+def _calculer_courants_faibles(d: DonneesProjet, surf_batie: float,
                                  nb_logements: int) -> BilanCourantsFaibles:
     # Réseau informatique
-    nb_rj45 = math.ceil(shon / 10)  # 1 prise RJ45 / 10m²
+    nb_rj45 = math.ceil(surf_batie / 10)  # 1 prise RJ45 / 10m²
 
     # Vidéosurveillance
     perimetre_m = 4 * math.sqrt(d.surface_emprise_m2)
     nb_cam_ext = max(2, math.ceil(perimetre_m / 15))  # 1 caméra / 15m périmètre
-    nb_cam_int = math.ceil(shon / 200)  # 1 caméra / 200m² intérieur
+    nb_cam_int = math.ceil(surf_batie / 200)  # 1 caméra / 200m² intérieur
     if d.usage in [Usage.HOTEL, Usage.BUREAU, Usage.COMMERCIAL]:
-        nb_cam_int = math.ceil(shon / 100)
+        nb_cam_int = math.ceil(surf_batie / 100)
 
     # Contrôle d'accès
     nb_portes_ca = d.nb_niveaux + 2  # 1 par palier + entrées
@@ -578,8 +578,8 @@ def _calculer_courants_faibles(d: DonneesProjet, shon: float,
 
     # Baies serveur
     nb_baies = 1
-    if shon > 3000 or d.usage in [Usage.BUREAU, Usage.HOTEL]:
-        nb_baies = max(1, math.ceil(shon / 2000))
+    if surf_batie > 3000 or d.usage in [Usage.BUREAU, Usage.HOTEL]:
+        nb_baies = max(1, math.ceil(surf_batie / 2000))
 
     # Audio/vidéo collectif
     audio_video = d.usage in [Usage.HOTEL, Usage.COMMERCIAL, Usage.MIXTE]
@@ -610,14 +610,14 @@ def _calculer_courants_faibles(d: DonneesProjet, shon: float,
 # CALCUL SÉCURITÉ INCENDIE
 # ══════════════════════════════════════════════════════════════
 
-def _calculer_securite_incendie(d: DonneesProjet, shon: float,
+def _calculer_securite_incendie(d: DonneesProjet, surf_batie: float,
                                   nb_personnes: int) -> BilanSecuriteIncendie:
     cat = _categorie_erp(d, nb_personnes)
     igh = "IGH" in cat
     erp_cat = 1 if "1ère" in cat else (2 if "2ème" in cat else (3 if "3ème" in cat else 4))
 
     # Détecteurs fumée (1 / 60m²)
-    nb_det = math.ceil(shon / 60)
+    nb_det = math.ceil(surf_batie / 60)
 
     # Déclencheurs manuels (1 par palier, 2 par niveau bureaux/hôtel)
     nb_decl = d.nb_niveaux * (2 if d.usage in [Usage.BUREAU, Usage.HOTEL] else 1)
@@ -626,8 +626,8 @@ def _calculer_securite_incendie(d: DonneesProjet, shon: float,
     nb_sir = d.nb_niveaux + 1
 
     # Extincteurs
-    nb_ext_co2 = math.ceil(shon / 200)       # 1 CO2 / 200m²
-    nb_ext_pdr = math.ceil(shon / 150)       # 1 poudre / 150m²
+    nb_ext_co2 = math.ceil(surf_batie / 200)       # 1 CO2 / 200m²
+    nb_ext_pdr = math.ceil(surf_batie / 150)       # 1 poudre / 150m²
 
     # RIA (Robinet d'Incendie Armé) — obligatoire ERP cat 1-3
     L_ria = 0.0
@@ -636,13 +636,13 @@ def _calculer_securite_incendie(d: DonneesProjet, shon: float,
 
     # Sprinklers — obligatoire IGH et ERP cat 1-2
     sprinklers_requis = igh or erp_cat <= 2
-    nb_sprinklers = math.ceil(shon / 9) if sprinklers_requis else 0  # 1 / 9m²
+    nb_sprinklers = math.ceil(surf_batie / 9) if sprinklers_requis else 0  # 1 / 9m²
 
     # Désenfumage — obligatoire R+8 et plus, IGH, hôtel ERP 1-2
     desenfumage = d.nb_niveaux >= 8 or igh or (d.usage == Usage.HOTEL and erp_cat <= 2)
 
     # Centrale incendie
-    nb_zones = max(d.nb_niveaux, math.ceil(shon / 500))
+    nb_zones = max(d.nb_niveaux, math.ceil(surf_batie / 500))
     centrale_zones = 32 if nb_zones > 16 else 16
 
     note = f"{cat} — IT 246 Sénégal/France"
@@ -677,7 +677,7 @@ def _calculer_securite_incendie(d: DonneesProjet, shon: float,
 # CALCUL ASCENSEURS
 # ══════════════════════════════════════════════════════════════
 
-def _calculer_ascenseurs(d: DonneesProjet, shon: float,
+def _calculer_ascenseurs(d: DonneesProjet, surf_batie: float,
                           nb_personnes: int, prix_mep) -> BilanAscenseurs:
     nb_niv = d.nb_niveaux
 
@@ -700,8 +700,8 @@ def _calculer_ascenseurs(d: DonneesProjet, shon: float,
         nb_asc = 2
         cap_kg = 1000
         vitesse = 2.5
-        if shon > 10000:
-            nb_asc = max(2, math.ceil(shon / 5000))
+        if surf_batie > 10000:
+            nb_asc = max(2, math.ceil(surf_batie / 5000))
 
     # Monte-charge
     nb_mc = 0
@@ -736,7 +736,7 @@ def _calculer_ascenseurs(d: DonneesProjet, shon: float,
 
         note = f"{nb_asc} ascenseur(s) {cap_kg}kg à {vitesse} m/s — EN 81-20/50"
         note_prix = (f"Ascenseurs : {cout_asc/1e6:.1f} M FCFA "
-                     f"({cout_asc/shon:.0f} FCFA/m² bâti). "
+                     f"({cout_asc/surf_batie:.0f} FCFA/m² bâti). "
                      f"Marques Otis/Schindler/Kone disponibles à Dakar.")
         if d.usage in [Usage.HOTEL, Usage.BUREAU]:
             note += f" + {nb_mc} monte-charge (service)"
@@ -763,7 +763,7 @@ def _calculer_ascenseurs(d: DonneesProjet, shon: float,
 # CALCUL AUTOMATISATION
 # ══════════════════════════════════════════════════════════════
 
-def _calculer_automatisation(d: DonneesProjet, shon: float,
+def _calculer_automatisation(d: DonneesProjet, surf_batie: float,
                                nb_logements: int) -> BilanAutomatisation:
     # Niveau selon usage
     if d.usage == Usage.RESIDENTIEL and d.nb_niveaux <= 4:
@@ -784,7 +784,7 @@ def _calculer_automatisation(d: DonneesProjet, shon: float,
         bms = d.nb_niveaux >= 8
 
     # Points de contrôle estimés
-    pts_eclairage = math.ceil(shon / 30)
+    pts_eclairage = math.ceil(surf_batie / 30)
     pts_cvc       = nb_logements * 2
     pts_acces     = d.nb_niveaux * 3
     pts_total     = pts_eclairage + pts_cvc + pts_acces
@@ -818,10 +818,11 @@ def _calculer_automatisation(d: DonneesProjet, shon: float,
 # CALCUL EDGE V2 — SCORES RÉELS
 # ══════════════════════════════════════════════════════════════
 
-def _calculer_edge(d: DonneesProjet, shon: float,
+def _calculer_edge(d: DonneesProjet, surf_batie: float,
                     nb_logements: int, nb_personnes: int,
                     elec: BilanElectrique, plomb: BilanPlomberie,
-                    cvc: BilanCVC, struct_boq=None, edge_optimise: bool = False) -> ScoreEDGE:
+                    cvc: BilanCVC, struct_boq=None,
+                    edge_optimise: bool = False) -> ScoreEDGE:
     """
     Calcul scores EDGE réels depuis données projet.
     Référence IFC EDGE Standard v3 — Sénégal/Afrique Subsaharienne.
@@ -855,7 +856,7 @@ def _calculer_edge(d: DonneesProjet, shon: float,
 
     # 2. Ventilation naturelle (selon ratio surface/volume et nb niveaux)
     ht_bat = d.nb_niveaux * d.hauteur_etage_m
-    ratio_sv = (2 * shon / ht_bat + 2 * d.surface_emprise_m2) / max(shon * ht_bat, 1)
+    ratio_sv = (2 * surf_batie / ht_bat + 2 * d.surface_emprise_m2) / max(surf_batie * ht_bat, 1)
     eco_vent = min(0.07, max(0.02, ratio_sv * 0.15))
     # R+1 villa : meilleure ventilation naturelle possible
     if d.nb_niveaux <= 3:
@@ -871,22 +872,22 @@ def _calculer_edge(d: DonneesProjet, shon: float,
     eco_energie += eco_vent
 
     # 3. Éclairage LED (non standard = 0, si LED = +6%)
-    eco_led = 0.0
+    eco_led = 0.06 if edge_optimise else 0.0
     mesures_energie.append({
         "mesure": "Éclairage LED 100% (à spécifier)",
         "gain_pct": 6.0,
-        "statut": "À spécifier — non intégré par défaut",
-        "impact_prix": f"Surcoût ~{int(shon * 3500 / 1e6)}M FCFA vs tubes fluorescents — ROI 2-3 ans",
+        "statut": "Intégré — mode EDGE activé" if edge_optimise else "À spécifier — non intégré par défaut",
+        "impact_prix": f"Surcoût ~{int(surf_batie * 3500 / 1e6)}M FCFA vs tubes fluorescents — ROI 2-3 ans",
     })
     eco_energie += eco_led
 
     # 4. Isolation toiture (non standard Dakar = 0, si isolée = +8%)
-    eco_iso = 0.0
-    ratio_toiture = d.surface_emprise_m2 / max(shon, 1)
+    ratio_toiture = d.surface_emprise_m2 / max(surf_batie, 1)
+    eco_iso = round(8 * ratio_toiture * 2, 1) / 100 if edge_optimise else 0.0
     mesures_energie.append({
         "mesure": "Isolation toiture terrasse (laine de roche 80mm + SBS)",
         "gain_pct": round(8 * ratio_toiture * 2, 1),
-        "statut": "À spécifier — non inclus standard",
+        "statut": "Intégré — mode EDGE activé" if edge_optimise else "À spécifier — non inclus standard",
         "impact_prix": f"Surcoût ~{int(d.surface_emprise_m2 * 8500 / 1e6 + 1)}M FCFA",
     })
     eco_energie += eco_iso
@@ -921,23 +922,23 @@ def _calculer_edge(d: DonneesProjet, shon: float,
         eco_eau += eco_base_dotation
 
     # 2. WC double chasse (non standard = 0)
-    eco_wc = 0.0
-    cout_wc = plomb.nb_wc_double_chasse * 45000  # surcoût vs WC standard
+    eco_wc = 0.13 if edge_optimise else 0.0
+    cout_wc = plomb.nb_wc_double_chasse * 45000
     mesures_eau.append({
         "mesure": "WC double chasse 3/6L (vs 9L standard)",
         "gain_pct": 13.0,
-        "statut": "À spécifier — non inclus standard",
+        "statut": "Intégré — mode EDGE activé" if edge_optimise else "À spécifier — non inclus standard",
         "impact_prix": f"Surcoût {cout_wc/1e6:.1f} M FCFA pour {plomb.nb_wc_double_chasse} WC — économie eau 13%",
     })
     eco_eau += eco_wc
 
     # 3. Robinetterie éco (non standard = 0)
-    eco_rob = 0.0
+    eco_rob = 0.08 if edge_optimise else 0.0
     cout_rob = plomb.nb_robinets_eco * 30000
     mesures_eau.append({
         "mesure": "Robinetterie mousseurs 6 L/min (vs 12 L/min standard)",
         "gain_pct": 8.0,
-        "statut": "À spécifier — non inclus standard",
+        "statut": "Intégré — mode EDGE activé" if edge_optimise else "À spécifier — non inclus standard",
         "impact_prix": f"Surcoût {cout_rob/1e6:.1f} M FCFA pour {plomb.nb_robinets_eco} robinets — économie eau 8%",
     })
     eco_eau += eco_rob
@@ -965,7 +966,7 @@ def _calculer_edge(d: DonneesProjet, shon: float,
     # 1. Ratio acier réel vs référence (40 kg/m² référence EDGE)
     ratio_acier_ref = 40.0
     if struct_boq:
-        ratio_acier_reel = struct_boq.get("acier_kg", 0) / max(shon, 1)
+        ratio_acier_reel = struct_boq.get("acier_kg", 0) / max(surf_batie, 1)
     else:
         # Estimation depuis nb niveaux
         ratio_acier_reel = 25 + d.nb_niveaux * 2.5
@@ -1021,7 +1022,7 @@ def _calculer_edge(d: DonneesProjet, shon: float,
         deficit_e = seuil - pct_energie
         # LED + isolation + double vitrage pour combler le déficit
         if eco_led == 0:
-            cout_led = int(shon * 3500)
+            cout_led = int(surf_batie * 3500)
             plan_action.append({
                 "action": "Éclairage LED 100% sur tout le bâtiment",
                 "gain_pct": 6.0, "pilier": "Énergie",
@@ -1108,7 +1109,7 @@ def _calculer_edge(d: DonneesProjet, shon: float,
 # CALCUL BOQ MEP
 # ══════════════════════════════════════════════════════════════
 
-def _calculer_boq_mep(d: DonneesProjet, shon: float,
+def _calculer_boq_mep(d: DonneesProjet, surf_batie: float,
                        nb_logements: int, elec: BilanElectrique,
                        plomb: BilanPlomberie, cvc: BilanCVC,
                        cf: BilanCourantsFaibles, si: BilanSecuriteIncendie,
@@ -1121,8 +1122,8 @@ def _calculer_boq_mep(d: DonneesProjet, shon: float,
     # Lot 1 — Électricité courants forts
     cout_elec_basic  = int(elec.transfo_kva * p.transfo_160kva / 160 * 0.8 +
                             elec.nb_compteurs * p.compteur_monophase +
-                            shon * p.canalisation_cuivre_ml * 0.8 +
-                            shon / 15 * p.luminaire_led_standard)
+                            surf_batie * p.canalisation_cuivre_ml * 0.8 +
+                            surf_batie / 15 * p.luminaire_led_standard)
     cout_elec_hend   = int(cout_elec_basic * 1.35)
     cout_elec_luxury = int(cout_elec_basic * 1.80)
     lots.append(BOQ_Lot("E1", "Électricité courants forts — TGBT, câblage, luminaires",
@@ -1133,7 +1134,7 @@ def _calculer_boq_mep(d: DonneesProjet, shon: float,
     cout_plomb_basic = int(plomb.nb_logements * (p.wc_standard + p.robinet_standard * 2) +
                             p.cuve_eau_5000l * max(1, plomb.volume_citerne_m3/5) +
                             p.pompe_surpresseur_1kw +
-                            shon * p.tuyau_pvc_dn100_ml * 0.3)
+                            surf_batie * p.tuyau_pvc_dn100_ml * 0.3)
     cout_plomb_hend   = int(cout_plomb_basic * 1.40)
     cout_plomb_luxury = int(cout_plomb_basic * 1.90)
     note_plomb = f"Citerne {int(plomb.volume_citerne_m3)}m³ + surpresseur {plomb.debit_surpresseur_m3h}m³/h"
@@ -1224,8 +1225,8 @@ def _calculer_boq_mep(d: DonneesProjet, shon: float,
     tot_hend   = sum(l.pu_hend_fcfa for l in lots)
     tot_luxury = sum(l.pu_luxury_fcfa for l in lots)
 
-    ratio_basic = int(tot_basic / shon) if shon > 0 else 0
-    ratio_hend  = int(tot_hend / shon) if shon > 0 else 0
+    ratio_basic = int(tot_basic / surf_batie) if surf_batie > 0 else 0
+    ratio_hend  = int(tot_hend / surf_batie) if surf_batie > 0 else 0
 
     # Recommandation
     if d.usage == Usage.RESIDENTIEL:
@@ -1294,8 +1295,8 @@ def calculer_mep(d: DonneesProjet, struct_resultats=None, edge_optimise: bool = 
             eclairage_detecteur_presence = 95_000
         prix_mep = _PrixFallback()
 
-    shon = _shon(d)
-    nb_log = _estimer_logements(d, shon)
+    surf_batie = _surf_batie(d)
+    nb_log = _estimer_logements(d, surf_batie)
     nb_pers = nb_log * d.personnes_par_logement if hasattr(d, 'personnes_par_logement') else nb_log * 4
 
     # Données BOQ structure pour EDGE
@@ -1308,18 +1309,18 @@ def calculer_mep(d: DonneesProjet, struct_resultats=None, edge_optimise: bool = 
             if hasattr(struct_resultats, 'dalle') else 0.20,
         }
 
-    elec  = _calculer_electrique(d, shon, nb_log, prix_mep)
-    plomb = _calculer_plomberie(d, shon, nb_log, nb_pers, prix_mep)
-    cvc_  = _calculer_cvc(d, shon, nb_log, prix_mep)
-    cf    = _calculer_courants_faibles(d, shon, nb_log)
-    si    = _calculer_securite_incendie(d, shon, nb_pers)
-    asc   = _calculer_ascenseurs(d, shon, nb_pers, prix_mep)
-    auto  = _calculer_automatisation(d, shon, nb_log)
-    edge  = _calculer_edge(d, shon, nb_log, nb_pers, elec, plomb, cvc_, struct_boq_dict, edge_optimise=edge_optimise)
-    boq   = _calculer_boq_mep(d, shon, nb_log, elec, plomb, cvc_, cf, si, asc, auto, prix_mep)
+    elec  = _calculer_electrique(d, surf_batie, nb_log, prix_mep)
+    plomb = _calculer_plomberie(d, surf_batie, nb_log, nb_pers, prix_mep)
+    cvc_  = _calculer_cvc(d, surf_batie, nb_log, prix_mep)
+    cf    = _calculer_courants_faibles(d, surf_batie, nb_log)
+    si    = _calculer_securite_incendie(d, surf_batie, nb_pers)
+    asc   = _calculer_ascenseurs(d, surf_batie, nb_pers, prix_mep)
+    auto  = _calculer_automatisation(d, surf_batie, nb_log)
+    edge  = _calculer_edge(d, surf_batie, nb_log, nb_pers, elec, plomb, cvc_, struct_boq_dict, edge_optimise=edge_optimise)
+    boq   = _calculer_boq_mep(d, surf_batie, nb_log, elec, plomb, cvc_, cf, si, asc, auto, prix_mep)
 
     return ResultatsMEP(
-        params=d, shon_m2=shon,
+        params=d, surf_batie_m2=surf_batie,
         nb_logements=nb_log, nb_personnes=nb_pers,
         electrique=elec, plomberie=plomb, cvc=cvc_,
         courants_faibles=cf, securite_incendie=si,
@@ -1354,7 +1355,7 @@ if __name__ == "__main__":
         e = r.edge
         print(f"{'='*60}")
         print(f"PROJET : {proj.nom} ({proj.ville}) — R+{proj.nb_niveaux-1} {proj.usage.value}")
-        print(f"SHON : {r.shon_m2:.0f} m² | Logements : {r.nb_logements} | Personnes : {r.nb_personnes}")
+        print(f"SURFACE_BATIE : {r.surf_batie_m2:.0f} m² | Logements : {r.nb_logements} | Personnes : {r.nb_personnes}")
         print(f"ÉLEC  : {r.electrique.puissance_totale_kva:.0f} kVA | Transfo {r.electrique.transfo_kva} kVA")
         print(f"EAU   : {r.plomberie.besoin_total_m3_j:.1f} m³/j | Citerne {r.plomberie.volume_citerne_m3:.0f} m³")
         print(f"CVC   : {r.cvc.puissance_frigorifique_kw:.0f} kW | VMC {r.cvc.type_vmc}")
