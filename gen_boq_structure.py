@@ -11,7 +11,7 @@ from reportlab.platypus import (SimpleDocTemplate, Paragraph, Table,
 from tijan_theme import *
 
 
-def generer_boq_structure(rs, params: dict, lang: str = "fr") -> bytes:
+def generer_boq_structure(rs, params: dict) -> bytes:
     buf = io.BytesIO()
     hf = HeaderFooter(rs.params.nom, 'BOQ Structure — Détaillé')
     doc = SimpleDocTemplate(buf, pagesize=A4,

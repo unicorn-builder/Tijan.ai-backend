@@ -14,7 +14,7 @@ from tijan_theme import *
 # NOTE DE CALCUL MEP
 # ══════════════════════════════════════════════════════════════
 
-def generer_note_mep(rm, params: dict, lang: str = "fr") -> bytes:
+def generer_note_mep(rm, params: dict) -> bytes:
     buf = io.BytesIO()
     hf = HeaderFooter(rm.params.nom, 'Note de calcul MEP')
     doc = SimpleDocTemplate(buf, pagesize=A4,
@@ -172,7 +172,7 @@ def _build_note_mep(rm):
 # BOQ MEP
 # ══════════════════════════════════════════════════════════════
 
-def generer_boq_mep(rm, params: dict, lang: str = "fr") -> bytes:
+def generer_boq_mep(rm, params: dict) -> bytes:
     buf = io.BytesIO()
     hf = HeaderFooter(rm.params.nom, 'BOQ MEP')
     doc = SimpleDocTemplate(buf, pagesize=A4,
@@ -242,7 +242,7 @@ def _build_boq_mep(rm):
 # RAPPORT EDGE
 # ══════════════════════════════════════════════════════════════
 
-def generer_edge(rm, params: dict, lang: str = "fr") -> bytes:
+def generer_edge(rm, params: dict) -> bytes:
     buf = io.BytesIO()
     hf = HeaderFooter(rm.params.nom, 'Pré-évaluation EDGE')
     doc = SimpleDocTemplate(buf, pagesize=A4,
@@ -363,7 +363,7 @@ def _build_edge(rm):
 # RAPPORT DE SYNTHÈSE EXÉCUTIF
 # ══════════════════════════════════════════════════════════════
 
-def generer_rapport_executif(rs, rm, params: dict, lang: str = "fr") -> bytes:
+def generer_rapport_executif(rs, rm, params: dict) -> bytes:
     """
     Rapport 1-2 pages destiné au maître d'ouvrage non-technique.
     Synthèse tous corps d'état — coût global — EDGE.
