@@ -15,25 +15,21 @@ from tijan_theme import *
 # ══════════════════════════════════════════════════════════════
 
 def generer_note_mep(rm, params: dict, lang: str = "fr") -> bytes:
-        _th.Paragraph = _P
     buf = io.BytesIO()
     hf = HeaderFooter(rm.params.nom, 'Note de calcul MEP')
     doc = SimpleDocTemplate(buf, pagesize=A4,
         leftMargin=ML, rightMargin=MR, topMargin=26*mm, bottomMargin=18*mm)
     doc.build(_build_note_mep(rm), onFirstPage=hf, onLaterPages=hf)
-        _th.Paragraph = _P
     buf = io.BytesIO()
     hf = HeaderFooter(rm.params.nom, 'BOQ MEP')
     doc = SimpleDocTemplate(buf, pagesize=A4,
         leftMargin=ML, rightMargin=MR, topMargin=26*mm, bottomMargin=18*mm)
     doc.build(_build_boq_mep(rm), onFirstPage=hf, onLaterPages=hf)
-        _th.Paragraph = _P
     buf = io.BytesIO()
     hf = HeaderFooter(rm.params.nom, 'Pré-évaluation EDGE')
     doc = SimpleDocTemplate(buf, pagesize=A4,
         leftMargin=ML, rightMargin=MR, topMargin=26*mm, bottomMargin=18*mm)
     doc.build(_build_edge(rm), onFirstPage=hf, onLaterPages=hf)
-        _th.Paragraph = _P
     buf = io.BytesIO()
     hf = HeaderFooter(rs.params.nom, 'Rapport de synthèse exécutif')
     doc = SimpleDocTemplate(buf, pagesize=A4,
