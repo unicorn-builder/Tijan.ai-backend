@@ -7,7 +7,6 @@ import os
 from datetime import datetime
 from reportlab.lib import colors
 try:
-    from translate_pdf import translate as _tr
 except:
     _tr = lambda t, lang="fr": t
 from reportlab.lib.pagesizes import A4
@@ -76,9 +75,8 @@ S = make_styles()
 
 # ── Helpers ───────────────────────────────────────────────────
 def p(txt, style='td', lang='fr'):
-    from translate_pdf import translate as _tr
     text = str(txt) if txt is not None else '—'
-    return Paragraph(_tr(text, lang), S[style])
+    return Paragraph(text, S[style])
 
 # Version sans lang pour compatibilité
 _p_orig = p
