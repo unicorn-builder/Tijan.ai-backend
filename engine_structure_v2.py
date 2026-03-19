@@ -1028,22 +1028,13 @@ def _analyser(d: DonneesProjet, poteaux: List[ResultatPoteau],
     conf_ec8 = "Conforme DCL" if d.zone_sismique <= 2 else "Analyse complémentaire requise"
 
     # Note ingénieur
-    if lang == 'en':
-        note = (
-            f"R+{d.nb_niveaux-1} structure ({d.usage.value}) designed to EC2/EC8. "
-            f"Concrete {classe_beton} — Steel {classe_acier}. "
-            f"{'All elements meet resistance requirements.' if 'Compliant' in conf_ec2 else 'Additional verifications required.'} "
-            f"Estimated structure cost: {boq.total_bas_fcfa/1e9:.2f} – {boq.total_haut_fcfa/1e9:.2f} Bn FCFA "
-            f"({boq.ratio_fcfa_m2_bati:,} FCFA/m² built).".replace(',', ' ')
-        )
-    else:
-        note = (
-            f"Structure R+{d.nb_niveaux-1} ({d.usage.value}) dimensionnée selon EC2/EC8. "
-            f"Béton {classe_beton} — Acier {classe_acier}. "
-            f"{'Tous les éléments vérifient les exigences de résistance.' if conf_ec2 == 'Conforme' else 'Des vérifications complémentaires sont nécessaires.'} "
-            f"Coût structure estimé : {boq.total_bas_fcfa/1e9:.2f} – {boq.total_haut_fcfa/1e9:.2f} Mds FCFA "
-            f"({boq.ratio_fcfa_m2_bati:,} FCFA/m² bâti).".replace(',', ' ')
-        )
+    note = (
+        f"Structure R+{d.nb_niveaux-1} ({d.usage.value}) dimensionnée selon EC2/EC8. "
+        f"Béton {classe_beton} — Acier {classe_acier}. "
+        f"{'Tous les éléments vérifient les exigences de résistance.' if conf_ec2 == 'Conforme' else 'Des vérifications complémentaires sont nécessaires.'} "
+        f"Coût structure estimé : {boq.total_bas_fcfa/1e9:.2f} – {boq.total_haut_fcfa/1e9:.2f} Mds FCFA "
+        f"({boq.ratio_fcfa_m2_bati:,} FCFA/m² bâti).".replace(',', ' ')
+    )
 
     return AnalyseIngenieur(
         classe_beton_choisie=classe_beton,
