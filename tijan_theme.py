@@ -7,6 +7,7 @@ import os
 from datetime import datetime
 from reportlab.lib import colors
 try:
+    pass
 except:
     _tr = lambda t, lang="fr": t
 from reportlab.lib.pagesizes import A4
