@@ -135,7 +135,6 @@ class DonneesProjet:
     # Options
     avec_sous_sol:       bool  = False
     nb_sous_sols:        int   = 0
-    lang:                str   = 'fr'
 
 
 # ══════════════════════════════════════════════════════════════

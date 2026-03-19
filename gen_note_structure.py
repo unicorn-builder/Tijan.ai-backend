@@ -7,9 +7,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, Spacer, PageBreak, KeepTogether
 from tijan_theme import *
-from pdf_strings import get_strings
 
-def generer(rs, params: dict, lang: str = "fr") -> bytes:
+def generer(rs, params: dict) -> bytes:
     """
     rs : ResultatsStructure (output de engine_structure_v2.calculer_structure)
     params : dict avec nom, ville, etc.
@@ -19,13 +18,12 @@ def generer(rs, params: dict, lang: str = "fr") -> bytes:
     doc = SimpleDocTemplate(buf, pagesize=A4,
         leftMargin=ML, rightMargin=MR, topMargin=26*mm, bottomMargin=18*mm)
 
-    story = _build(rs, lang=lang)
+    story = _build(rs)
     doc.build(story, onFirstPage=hf, onLaterPages=hf)
     return buf.getvalue()
 
 
-def _build(rs, lang="fr"):
-    s = get_strings(lang)
+def _build(rs):
     story = []
     d = rs.params
     boq = rs.boq
