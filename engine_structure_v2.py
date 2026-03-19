@@ -347,7 +347,7 @@ def _enrobage(distance_mer_km: float, usage: Usage) -> float:
     else:
         return 30.0  # XC2/XC3 — intérieur/extérieur normal
 
-def _surf_batie(d: DonneesProjet) -> float:
+def _shon(d: DonneesProjet) -> float:
     return d.surface_emprise_m2 * d.nb_niveaux
 
 def _surface_tributaire_poteau(d: DonneesProjet) -> float:
@@ -582,11 +582,11 @@ def _calculer_cloisons(d: DonneesProjet, prix_struct) -> ResultatCloisons:
     Dimensionnement et recommandation cloisons selon usage.
     Propose toutes les options pertinentes avec impacts prix.
     """
-    surf_batie = _surf_batie(d)
+    shon = _shon(d)
     # Estimation surfaces
-    surf_separative = surf_batie * 0.08   # Cloisons séparatives ~8% SURFACE_BATIE
-    surf_legere     = surf_batie * 0.12   # Cloisons intérieures légères ~12%
-    surf_gaines     = surf_batie * 0.02   # Gaines techniques ~2%
+    surf_separative = shon * 0.08   # Cloisons séparatives ~8% SHON
+    surf_legere     = shon * 0.12   # Cloisons intérieures légères ~12%
+    surf_gaines     = shon * 0.02   # Gaines techniques ~2%
     surf_totale     = surf_separative + surf_legere + surf_gaines
 
     options = []
@@ -798,7 +798,7 @@ def _calculer_fondations(d: DonneesProjet, poteaux: List[ResultatPoteau],
 # ANALYSE SISMIQUE EC8
 # ══════════════════════════════════════════════════════════════
 
-def _calculer_sismique(d: DonneesProjet, zone: int, surf_batie: float) -> ResultatSismique:
+def _calculer_sismique(d: DonneesProjet, zone: int, shon: float) -> ResultatSismique:
     """Analyse sismique simplifiée EC8 §4.3.3."""
     # Paramètres sismiques par zone
     ag_values = {0: 0.0, 1: 0.07, 2: 0.11, 3: 0.16, 4: 0.22}
@@ -826,7 +826,7 @@ def _calculer_sismique(d: DonneesProjet, zone: int, surf_batie: float) -> Result
         Sd = ag * S * 2.5 / q * TC * TD / T1**2
 
     # Masse totale estimée (G + 0.3Q)
-    masse_totale = surf_batie * (d.charge_G if hasattr(d, 'charge_G') else 6.5) / 9.81 * 1000  # kg
+    masse_totale = shon * (d.charge_G if hasattr(d, 'charge_G') else 6.5) / 9.81 * 1000  # kg
     # Force sismique de base
     Fb_kN = Sd * masse_totale / 1000 * 0.85
 
@@ -866,13 +866,13 @@ def _calculer_boq(d: DonneesProjet, poteaux: List[ResultatPoteau],
                    fondation: ResultatFondation, cloisons: ResultatCloisons,
                    prix_struct) -> BOQStructure:
     """BOQ structure complet depuis données moteur."""
-    surf_batie = _surf_batie(d)
-    surf_batie = surf_batie
-    surf_habitable = surf_batie * 0.78
+    shon = _shon(d)
+    surf_batie = shon
+    surf_habitable = shon * 0.78
 
     # ── Volumes béton ──
     ep_dalle = dalle.epaisseur_mm / 1000
-    V_dalles = surf_batie * ep_dalle * 0.85  # 85% dalle pleine (trémies)
+    V_dalles = shon * ep_dalle * 0.85  # 85% dalle pleine (trémies)
 
     # Poteaux
     V_poteaux = 0.0
@@ -909,7 +909,7 @@ def _calculer_boq(d: DonneesProjet, poteaux: List[ResultatPoteau],
     kg_total   = kg_dalles + kg_poteaux + kg_poutres + kg_fond
 
     # ── Coffrage ──
-    coff_dalles  = surf_batie * 0.85
+    coff_dalles  = shon * 0.85
     coff_poteaux = V_poteaux / (d.portee_max_m/2 * 0.3) * 4 * 0.3 * d.hauteur_etage_m * 0.5
     coff_poutres = (L_poutres_x + L_poutres_y) * (b_p + 2*(h_p - ep_dalle)) * 0.6
     V_coffrage   = coff_dalles + abs(coff_poteaux) + abs(coff_poutres)
@@ -918,7 +918,7 @@ def _calculer_boq(d: DonneesProjet, poteaux: List[ResultatPoteau],
     V_terr = d.surface_emprise_m2 * (fondation.profondeur_m + 0.3)
 
     # ── Maçonnerie ──
-    surf_maco = surf_batie * 0.22  # ~22% SURFACE_BATIE
+    surf_maco = shon * 0.22  # ~22% SHON
 
     # ── Étanchéité ──
     surf_etanch = d.surface_emprise_m2
@@ -1125,8 +1125,8 @@ def calculer_structure(d: DonneesProjet) -> ResultatsStructure:
     dalle     = _calculer_dalle(d.portee_min_m, d.portee_max_m, G, Q, fck, fyk)
     cloisons  = _calculer_cloisons(d, prix_struct)
     fondation = _calculer_fondations(d, poteaux, fck, prix_struct)
-    surf_batie_val  = _surf_batie(d)
-    sismique  = _calculer_sismique(d, zone, surf_batie_val)
+    shon_val  = _shon(d)
+    sismique  = _calculer_sismique(d, zone, shon_val)
     boq       = _calculer_boq(d, poteaux, poutre_p, dalle, fondation, cloisons, prix_struct)
     analyse   = _analyser(d, poteaux, poutre_p, dalle, fondation, boq, classe_beton, classe_acier)
 
