@@ -647,7 +647,7 @@ PAYDUNYA_HEADERS = {
     "Content-Type": "application/json",
     "PAYDUNYA-MASTER-KEY": "BQepwkZk-8QAT-Gn2L-Jaio-Chtp8s41cX3U",
     "PAYDUNYA-PRIVATE-KEY": "live_private_Ei0b9wQzTbBqKBcIVRDCun1FwPA",
-    "PAYDUNYA-TOKEN": "wi01lPshMeBp4iaiEQ7Lw",
+    "PAYDUNYA-TOKEN": "wi0lPshMeBp4iaiEQ7Lw",
 }
 
 @app.post("/create-payment")
