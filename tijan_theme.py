@@ -14,6 +14,9 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT, TA_JUSTIFY
+
+_current_lang = 'fr'
+def set_pdf_lang(lang): global _current_lang; _current_lang = lang
 from reportlab.platypus import Table, TableStyle, Paragraph, HRFlowable, Spacer
 
 # ── Couleurs ──────────────────────────────────────────────────
@@ -75,7 +78,7 @@ def make_styles():
 S = make_styles()
 
 # ── Helpers ───────────────────────────────────────────────────
-def p(txt, style='td', lang='fr'):
+def p_original(txt, style='td', lang='fr'):
     text = str(txt) if txt is not None else '—'
     return Paragraph(text, S[style])
 
@@ -205,3 +208,13 @@ class HeaderFooter:
         canv.setFillColor(GRIS3)
         canv.drawRightString(w-MR, 5*mm, f'Page {doc.page} | Tijan AI © {datetime.now().year}')
         canv.restoreState()
+
+# Wrapper p() avec traduction
+def p(text, style='td', *args, **kw):
+    if _current_lang == 'en':
+        try:
+            from pdf_translate import translate_pdf_text
+            text = translate_pdf_text(str(text))
+        except:
+            pass
+    return p_original(text, style, *args, **kw)
