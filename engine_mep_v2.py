@@ -873,6 +873,9 @@ def _calculer_edge(d: DonneesProjet, surf_batie: float,
 
     # 3. Éclairage LED (non standard = 0, si LED = +6%)
     eco_led = 0.06 if edge_optimise else 0.0
+    eco_cvc_inv = 0.05 if edge_optimise else 0.0  # CVC inverter
+    eco_vitrage_opt = 0.05 if edge_optimise else 0.0  # Double vitrage Low-E
+    eco_cesi_opt = 0.04 if edge_optimise else 0.0  # Chauffe-eau solaires
     mesures_energie.append({
         "mesure": "Éclairage LED 100% (à spécifier)",
         "gain_pct": 6.0,
