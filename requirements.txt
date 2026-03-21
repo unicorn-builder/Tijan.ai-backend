@@ -22,3 +22,4 @@ anthropic>=0.20.0
 # Utilitaires
 python-multipart==0.0.9
 requests>=2.31.0
+httpx

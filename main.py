@@ -637,3 +637,51 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
 # redeploy 1773678828
+
+
+# ── PAYDUNYA ──────────────────────────────────────────────
+import httpx
+
+PAYDUNYA_URL = "https://app.paydunya.com/sandbox-api/v1/checkout-invoice/create"
+PAYDUNYA_HEADERS = {
+    "Content-Type": "application/json",
+    "PAYDUNYA-MASTER-KEY": "BQepwkZk-BQAT-Gn2L-Jaio-Chtp8s41cX3U",
+    "PAYDUNYA-PRIVATE-KEY": "test_private_Q6QXJ5DerwC3e0qWfrjjcFeQT8w",
+    "PAYDUNYA-TOKEN": "jsWWcyFc9mTHQZJWnabw",
+}
+
+@app.post("/create-payment")
+async def create_payment(request: Request):
+    body = await request.json()
+    credits = body.get("credits", 1)
+    prix = body.get("prix", 150000)
+    user_id = body.get("user_id", "")
+
+    payload = {
+        "invoice": {
+            "total_amount": prix,
+            "description": f"Tijan AI — {credits} crédit{'s' if credits > 1 else ''} technique{'s' if credits > 1 else ''}",
+        },
+        "store": {
+            "name": "Tijan AI",
+            "tagline": "Engineering Intelligence for Africa",
+            "website_url": "https://tijan-frontend.vercel.app",
+        },
+        "custom_data": {
+            "user_id": user_id,
+            "nb_credits": credits,
+        },
+        "actions": {
+            "return_url": f"https://tijan-frontend.vercel.app/payment-success?credits={credits}",
+            "cancel_url": "https://tijan-frontend.vercel.app/pricing",
+        },
+    }
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(PAYDUNYA_URL, json=payload, headers=PAYDUNYA_HEADERS)
+        data = resp.json()
+
+    if data.get("response_code") == "00":
+        return {"ok": True, "url": data.get("response_text"), "token": data.get("token")}
+    else:
+        return {"ok": False, "error": data.get("response_text", "Erreur PayDunya")}
