@@ -642,12 +642,12 @@ if __name__ == "__main__":
 # ── PAYDUNYA ──────────────────────────────────────────────
 import httpx
 
-PAYDUNYA_URL = "https://app.paydunya.com/sandbox-api/v1/checkout-invoice/create"
+PAYDUNYA_URL = "https://app.paydunya.com/api/v1/checkout-invoice/create"
 PAYDUNYA_HEADERS = {
     "Content-Type": "application/json",
     "PAYDUNYA-MASTER-KEY": "BQepwkZk-8QAT-Gn2L-Jaio-Chtp8s41cX3U",
-    "PAYDUNYA-PRIVATE-KEY": "test_private_Q6QXJ5DerwC3e0qWfrjjcFeQT8w",
-    "PAYDUNYA-TOKEN": "jsWWcyFc9mTHQZJWnabw",
+    "PAYDUNYA-PRIVATE-KEY": "live_private_Ei0b9wQzTbBqKBcIVRDCun1FwPA",
+    "PAYDUNYA-TOKEN": "wi01lPshMeBp4iaiEQ7Lw",
 }
 
 @app.post("/create-payment")
