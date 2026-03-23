@@ -137,6 +137,7 @@ class ParamsProjet(BaseModel):
     pression_sol_MPa:   float = 0.0
     distance_mer_km:    float = 0.0
     zone_sismique:      int   = -1
+    lang:               str   = "fr"
     # Optionnel
     sol_context:        Optional[str] = None
     avec_sous_sol:      bool  = False
