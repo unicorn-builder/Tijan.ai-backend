@@ -34,9 +34,7 @@ def _build(rs):
     story.append(Spacer(1, 3*mm))
     story.append(p(d.nom, 'titre'))
     story.append(p(f'{d.ville} — {d.usage.value.capitalize()} R+{d.nb_niveaux-1} ({d.nb_niveaux} niveaux)', 'sous_titre'))
-    story.append(Paragraph(
-        'Calculs indicatifs ±15% — À vérifier par un ingénieur structure habilité.',
-        S['disc']))
+    story.append(p('Calculs indicatifs ±15% — À vérifier par un ingénieur structure habilité.', 'disc'))
     story.append(Spacer(1, 3*mm))
 
     # Fiche projet
@@ -82,10 +80,7 @@ def _build(rs):
     # ── PAGE 3 — POTEAUX ─────────────────────────────────────
     story.append(PageBreak())
     story += section_title('3', 'DESCENTE DE CHARGES — POTEAUX (EC2/EC8)')
-    story.append(Paragraph(
-        f'Portées {d.portee_min_m}–{d.portee_max_m} m — grille {d.nb_travees_x}×{d.nb_travees_y} — '
-        f'combinaison ELU : {1.35*rs.charge_G_kNm2+1.5*rs.charge_Q_kNm2:.1f} kN/m².',
-        S['body_j']))
+    story.append(p(f'Portées {d.portee_min_m}–{d.portee_max_m} m — grille {d.nb_travees_x}×{d.nb_travees_y} — combinaison ELU : {1.35*rs.charge_G_kNm2+1.5*rs.charge_Q_kNm2:.1f} kN/m².', 'body_j'))
 
     cw_p = [CW*w for w in [0.09, 0.10, 0.12, 0.08, 0.08, 0.08, 0.10, 0.09, 0.10, 0.10, 0.06]]
     rows = [[p(h,'th') for h in ['Niveau','NEd (kN)','Section','Nb bar.','Ø (mm)','Ø cad.','Esp. cad.','ρ (%)','NRd (kN)','NEd/NRd','Vérif.']]]
@@ -154,10 +149,7 @@ def _build(rs):
     story.append(PageBreak())
     story += section_title('6', 'CLOISONS ET MAÇONNERIE')
     cl = rs.cloisons
-    story.append(Paragraph(
-        f'Surface totale cloisons estimée : {int(cl.surface_totale_m2)} m² '
-        f'(séparatives {int(cl.surface_separative_m2)} m² | légères {int(cl.surface_legere_m2)} m² | gaines {int(cl.surface_gaines_m2)} m²)',
-        S['body']))
+    story.append(p(f'Surface totale cloisons estimée : {int(cl.surface_totale_m2)} m² (séparatives {int(cl.surface_separative_m2)} m² | légères {int(cl.surface_legere_m2)} m² | gaines {int(cl.surface_gaines_m2)} m²)', 'body'))
     story.append(p(f'Option recommandée : {cl.option_recommandee.value} — charge retenue : {cl.charge_dalle_kn_m2} kN/m²', 'body'))
     story.append(Spacer(1, 2*mm))
 
@@ -210,11 +202,7 @@ def _build(rs):
             px = get_prix_structure(rs.params.ville)
             cout_pieux = fond.nb_pieux * fond.longueur_pieu_m * px.pieu_fore_d800_ml
             story.append(Spacer(1, 2*mm))
-            story.append(Paragraph(
-                f'ℹ Impact prix fondations : {fmt_fcfa(cout_pieux)} estimés '
-                f'({cout_pieux/boq.total_bas_fcfa*100:.0f}% du budget structure). '
-                f'Fondations profondes = poste le plus coûteux après gros œuvre.',
-                S['note']))
+            story.append(p(f'ℹ Impact prix fondations : {fmt_fcfa(cout_pieux)} estimés ({cout_pieux/boq.total_bas_fcfa*100:.0f}% du budget structure). Fondations profondes = poste le plus coûteux après gros œuvre.', 'note'))
         except: pass
     else:
         fond_data += [
@@ -230,9 +218,7 @@ def _build(rs):
     story.append(PageBreak())
     story += section_title('8', 'ANALYSE SISMIQUE (EC8 — NF EN 1998-1)')
     sism = rs.sismique
-    story.append(Paragraph(
-        f'Zone sismique {sism.zone} — ag = {sism.ag_g}g — T₁ = {sism.T1_s}s — Fb = {sism.Fb_kN:.0f} kN',
-        S['body']))
+    story.append(p(f'Zone sismique {sism.zone} — ag = {sism.ag_g}g — T₁ = {sism.T1_s}s — Fb = {sism.Fb_kN:.0f} kN', 'body'))
     story.append(Spacer(1, 2*mm))
 
     sism_data = [
@@ -251,7 +237,7 @@ def _build(rs):
     for disp in sism.dispositions:
         prefix = '⚠' if '⚠' in disp else '•'
         style = 'note' if '⚠' in disp else 'body'
-        story.append(Paragraph(f'{prefix} {disp.replace("⚠ ","")}', S[style]))
+        story.append(p(f'{prefix} {disp.replace("⚠ ","")}', style))
 
     # ── PAGE 8 — ANALYSE ─────────────────────────────────────
     story.append(PageBreak())
@@ -293,9 +279,7 @@ def _build(rs):
     # ── PAGE 9 — BOQ ────────────────────────────────────────
     story.append(PageBreak())
     story += section_title('10', 'BORDEREAU DES QUANTITÉS ET DES PRIX — STRUCTURE')
-    story.append(Paragraph(
-        f'Prix unitaires marché {rs.params.ville} 2026 (fournis-posés). Marge estimée ±15%.',
-        S['small']))
+    story.append(p(f'Prix unitaires marché {rs.params.ville} 2026 (fournis-posés). Marge estimée ±15%.', 'small'))
     story.append(Spacer(1, 2*mm))
 
     cw_b = [CW*w for w in [0.05, 0.37, 0.09, 0.07, 0.13, 0.14, 0.15]]
