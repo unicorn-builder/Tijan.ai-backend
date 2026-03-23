@@ -1,9 +1,187 @@
 """
 pdf_translate.py — Traduction post-génération des textes PDF
 Ne modifie PAS les moteurs. Traduit uniquement les labels/textes dans les PDFs.
+v2: ajout de tous les fragments dynamiques des moteurs structure + MEP.
 """
 
 FR_TO_EN = {
+    # ══════════════════════════════════════════════════════════
+    # TEXTES DYNAMIQUES MOTEUR STRUCTURE (engine_structure_v2)
+    # ══════════════════════════════════════════════════════════
+
+    # note_ingenieur fragments
+    "dimensionnée selon EC2/EC8": "designed per EC2/EC8",
+    "Tous les éléments vérifient les exigences de résistance": "All elements meet strength requirements",
+    "Des vérifications complémentaires sont nécessaires": "Additional checks are required",
+    "Coût structure estimé": "Estimated structural cost",
+    "Mds FCFA": "B FCFA",
+    "FCFA/m² bâti": "FCFA/m² built",
+
+    # justification_materiaux
+    "Sélection automatique": "Automatic selection",
+    "distance mer": "distance to sea",
+
+    # commentaire_global
+    "Dimensionnement cohérent pour un": "Consistent design for a",
+    "niveaux à": "levels in",
+    # NOTE: "de" removed — too short, corrupts words like "dimensionnée" → "ofsignée"
+    # Instead, translate full phrases containing "de" (already covered above)
+
+    # conformite
+    "Conforme": "Compliant",
+    "Conforme DCL": "Compliant DCL",
+    "À vérifier": "To be verified",
+    "Analyse complémentaire requise": "Additional analysis required",
+
+    # alertes
+    "Taux armature max": "Max reinforcement ratio",
+    "proche limite EC2 (4%) — vérifier sections": "near EC2 limit (4%) — check sections",
+    "élevé — envisager augmentation section béton": "high — consider increasing concrete section",
+    "Certains poteaux proches de la résistance limite — marge de sécurité faible": "Some columns near capacity — low safety margin",
+    "Sol très compressible": "Very compressible soil",
+    "étude géotechnique obligatoire": "geotechnical study mandatory",
+    "Taux d'armature": "Reinforcement ratio",
+
+    # points_forts
+    "Fondations profondes adaptées aux conditions de sol": "Deep foundations adapted to soil conditions",
+    "Taux d'armature dans la plage optimale EC2 sur tous les niveaux": "Reinforcement ratio within EC2 optimal range on all levels",
+    "Tous les poteaux vérifiés — structure conforme EC2": "All columns verified — EC2 compliant structure",
+    "adapté à l'exposition et à la hauteur du bâtiment": "adapted to exposure and building height",
+
+    # recommandations
+    "Envisager pieux forés pour bâtiment R+5 et plus": "Consider bored piles for buildings R+5 and above",
+    "Augmenter les sections de poteaux pour réduire le taux d'armature": "Increase column sections to reduce reinforcement ratio",
+    "Exposition marine (distance mer": "Marine exposure (distance to sea",
+    "enrobage ≥ 40mm impératif": "cover ≥ 40mm mandatory",
+    "Faire établir les plans d'exécution par un BET agréé avant travaux": "Have execution drawings prepared by a certified engineering firm before construction",
+    "Prévoir essais béton sur site (au moins 3 éprouvettes par coulée)": "Plan concrete testing on site (at least 3 specimens per pour)",
+    "Prévoir essais béton sur site": "Plan concrete testing on site",
+    "au moins 3 éprouvettes par coulée": "at least 3 specimens per pour",
+
+    # fondation.justification
+    "Sol portant": "Bearing soil",
+    "charges modérées": "moderate loads",
+    "Sol intermédiaire, ouvrage moyen — radier général recommandé": "Intermediate soil, medium structure — raft foundation recommended",
+    "Sol compressible": "Compressible soil",
+    "et/ou ouvrage élevé": "and/or tall structure",
+    "ouvrage élevé": "tall structure",
+
+    # sismique.dispositions
+    "Zone sismique": "Seismic zone",
+    "Spectre Type 1": "Response spectrum Type 1",
+    "Système : Cadres BA non ductiles (DCL)": "System: Non-ductile RC frames (DCL)",
+    "Cadres BA non ductiles": "Non-ductile RC frames",
+    "Période fondamentale": "Fundamental period",
+    "Enrobage nominal ≥ 30mm (armatures longitudinales)": "Nominal cover ≥ 30mm (longitudinal reinforcement)",
+    "Enrobage nominal": "Nominal cover",
+    "armatures longitudinales": "longitudinal reinforcement",
+    "Recouvrements ≥ 50Ø en zone sismique": "Lap splices ≥ 50Ø in seismic zone",
+    "Recouvrements": "Lap splices",
+    "en zone sismique": "in seismic zone",
+    "Étriers denses en zones critiques": "Dense stirrups in critical zones",
+    "Confinement nœuds poteaux-poutres obligatoire": "Column-beam joint confinement mandatory",
+    "Continuité armatures longitudinales sur toute la hauteur": "Longitudinal reinforcement continuity over full height",
+    "Zone sismique élevée — analyse dynamique modale recommandée": "High seismic zone — modal dynamic analysis recommended",
+    "Considérer DCM (ductilité moyenne)": "Consider DCM (medium ductility)",
+
+    # ══════════════════════════════════════════════════════════
+    # TEXTES DYNAMIQUES MOTEUR MEP (engine_mep_v2)
+    # ══════════════════════════════════════════════════════════
+
+    # Électricité note_dimensionnement
+    "Puissance installée": "Installed power",
+    "transformateur": "transformer",
+    "Transformateur": "Transformer",
+    "coût élevé": "high cost",
+    "Ascenseurs représentent": "Lifts represent",
+    "de la puissance installée": "of installed power",
+
+    # Plomberie note_dimensionnement
+    "Dotation": "Allowance",
+    "personnes": "persons",
+    "investissement significatif": "significant investment",
+    "Citerne": "Tank",
+    "CESI": "Solar water heater",
+    "économies eau chaude ~30%": "hot water savings ~30%",
+    "économies eau chaude": "hot water savings",
+
+    # CVC note_dimensionnement
+    "Charge thermique": "Cooling load",
+    "pour": "for",
+    "VMC double flux recommandée": "Heat recovery ventilation recommended",
+    "économie énergie 30-40% vs simple flux": "energy savings 30-40% vs single flow",
+    "économie énergie": "energy savings",
+    "vs simple flux": "vs single flow",
+    "cassettes plafond recommandées pour": "ceiling cassettes recommended for",
+    "cassettes plafond recommandées": "ceiling cassettes recommended",
+
+    # Courants faibles note_dimensionnement
+    "Câblage structuré Cat6A pour": "Cat6A structured cabling for",
+    "Câblage structuré": "Structured cabling",
+    "prises réseau": "network outlets",
+    "Système de gestion hôtelière/immeuble intégré recommandé": "Integrated hotel/building management system recommended",
+    "Système de gestion": "Management system",
+
+    # Sécurité incendie note_dimensionnement
+    "IT 246 Sénégal/France": "IT 246 Senegal/France",
+    "Sprinklers obligatoires : coût significatif": "Sprinklers required: significant cost",
+    "Sprinklers obligatoires": "Sprinklers required",
+    "coût significatif": "significant cost",
+    "têtes": "heads",
+    "Désenfumage obligatoire — prévoir gaines et volets": "Smoke extraction required — plan for ducts and dampers",
+    "Désenfumage obligatoire": "Smoke extraction required",
+    "prévoir gaines et volets": "plan for ducts and dampers",
+
+    # Ascenseurs note_dimensionnement / note_impact_prix
+    "ascenseur": "lift",
+    "Ascenseur": "Lift",
+    "monte-charges": "goods lift",
+    "escalator": "escalator",
+    "représentant local": "local distributor",
+
+    # Automatisation note_dimensionnement
+    "Niveau basique": "Basic level",
+    "Niveau standard": "Standard level",
+    "Niveau premium": "Premium level",
+    "Protocole": "Protocol",
+    "points de contrôle": "control points",
+    "Gestion éclairage": "Lighting control",
+    "Gestion CVC": "HVAC control",
+    "Gestion accès": "Access control",
+    "Gestion énergie": "Energy management",
+    "BMS requis": "BMS required",
+
+    # EDGE mesures (common fragments in dicts)
+    "Éclairage LED 100% sur tout le bâtiment": "100% LED lighting throughout the building",
+    "Éclairage LED": "LED lighting",
+    "Isolation toiture terrasse laine de roche 80mm": "Roof insulation 80mm mineral wool",
+    "Isolation toiture terrasse": "Roof insulation",
+    "laine de roche": "mineral wool",
+    "WC double chasse 3/6L": "Dual-flush WC 3/6L",
+    "WC double chasse": "Dual-flush WC",
+    "unités": "units",
+    "Robinetterie économique 6 L/min": "Water-saving faucets 6 L/min",
+    "Robinetterie économique": "Water-saving faucets",
+    "Béton avec 30% substitution ciment par laitier GGBS": "Concrete with 30% GGBS cement substitution",
+    "substitution ciment par laitier": "cement substitution with slag",
+    "Masse thermique dalle e=150mm": "Slab thermal mass e=150mm",
+    "Masse thermique dalle": "Slab thermal mass",
+    "Intégré — construction standard": "Integrated — standard construction",
+    "Inclus dans coût structure": "Included in structural cost",
+    "Ventilation naturelle": "Natural ventilation",
+    "vents favorables": "favorable winds",
+    "Aucun coût additionnel si orientation correcte": "No additional cost with correct orientation",
+    "orientation à optimiser": "orientation to optimize",
+    "Intégré": "Integrated",
+    "Activé": "Activated",
+    "Désactivé": "Deactivated",
+    "Non applicable": "Not applicable",
+    "construction standard": "standard construction",
+
+    # ══════════════════════════════════════════════════════════
+    # LABELS STATIQUES (existants, conservés)
+    # ══════════════════════════════════════════════════════════
+
     # Structure
     "Note de calcul structure": "Structural Analysis Report",
     "Descente de charges": "Load Path Analysis",
@@ -15,17 +193,14 @@ FR_TO_EN = {
     "Béton": "Concrete",
     "Fondations": "Foundations",
     "Recommandations": "Recommendations",
-    "Conforme": "Compliant",
     "Non conforme": "Non-compliant",
     "Dimensionnement": "Design",
     "résidentiel": "residential",
     "bureau": "office",
     "commercial": "commercial",
     "hôtel": "hotel",
-    "Sélection automatique": "Automatic selection",
-    "distance mer": "distance to sea",
     "usage": "use",
-    
+
     # BOQ
     "BOQ Structure": "Structural BOQ",
     "BOQ MEP": "MEP BOQ",
@@ -42,7 +217,7 @@ FR_TO_EN = {
     "Terrassement": "Earthwork",
     "Maçonnerie": "Masonry",
     "Estimation": "Estimate",
-    
+
     # MEP
     "Note de calcul MEP": "MEP Analysis Report",
     "Électricité": "Electrical",
@@ -52,8 +227,7 @@ FR_TO_EN = {
     "Courants faibles": "Low Current Systems",
     "Automatisation": "Automation",
     "Puissance totale": "Total Power",
-    "Transformateur": "Transformer",
-    "Groupe électrogène": "Generator",
+    "Groupe électrogène": "Backup Generator",
     "Nb compteurs": "No. meters",
     "Conso annuelle": "Annual Consumption",
     "Facture annuelle": "Annual Bill",
@@ -71,7 +245,7 @@ FR_TO_EN = {
     "Indicateur": "Indicator",
     "Valeur": "Value",
     "Paramètre": "Parameter",
-    
+
     # EDGE
     "Pré-évaluation EDGE": "EDGE Pre-assessment",
     "Conformité EDGE": "EDGE Compliance",
@@ -85,7 +259,7 @@ FR_TO_EN = {
     "Mesures matériaux": "Materials Measures",
     "Plan d'action": "Action Plan",
     "Coût de mise en conformité": "Compliance Cost",
-    
+
     # Rapport exécutif
     "Rapport de synthèse exécutif": "Executive Summary Report",
     "Budget global estimé": "Estimated Global Budget",
@@ -95,7 +269,7 @@ FR_TO_EN = {
     "Fiche projet": "Project Overview",
     "Performance environnementale": "Environmental Performance",
     "Points clés et recommandations": "Key Points and Recommendations",
-    
+
     # Fiches techniques
     "Fiches techniques structure": "Structural Datasheets",
     "Fiches techniques MEP": "MEP Datasheets",
@@ -103,7 +277,7 @@ FR_TO_EN = {
     "Fiche fondations": "Foundations Datasheet",
     "Fiche électricité": "Electrical Datasheet",
     "Fiche plomberie": "Plumbing Datasheet",
-    
+
     # Communs
     "Ce document": "This document",
     "maître d'ouvrage": "project owner",
@@ -118,6 +292,8 @@ FR_TO_EN = {
     "Hauteur": "Height",
     "Usage": "Use",
     "Certification EDGE": "EDGE Certification",
+
+    # Section titles (uppercase)
     "NOTE DE CALCUL STRUCTURE": "STRUCTURAL CALCULATION REPORT",
     "DESCENTE DE CHARGES": "LOAD PATH ANALYSIS",
     "POTEAUX": "COLUMNS",
@@ -131,7 +307,6 @@ FR_TO_EN = {
     "Sol admissible": "Allowable soil",
     "Distance mer": "Distance to sea",
     "Charges G / Q": "Loads G / Q",
-    "Zone sismique": "Seismic zone",
     "DOMAINE": "DOMAIN",
     "NORME": "STANDARD",
     "Séismique": "Seismic",
@@ -158,22 +333,12 @@ FR_TO_EN = {
     "Exposition marine": "Marine exposure",
     "enrobage": "cover",
     "impératif": "mandatory",
-    "Faire établir les plans d'exécution par un BET agréé avant travaux": "Have execution drawings prepared by a certified engineering firm before construction",
-    "Prévoir essais béton sur site": "Plan for concrete testing on site",
-    "au moins 3 éprouvettes par coulée": "at least 3 test specimens per pour",
-    "Fondations profondes adaptées aux conditions de sol": "Deep foundations adapted to soil conditions",
-    "Tous les poteaux vérifiés — structure conforme EC2": "All columns verified — EC2 compliant structure",
-    "adapté à l'exposition et à la hauteur du bâtiment": "adapted to exposure and building height",
     "Vérifiée": "Verified",
     "Résidentiel": "Residential",
-    "dimensionnée selon": "designed according to",
-    "Tous les éléments vérifient les exigences de résistance": "All elements meet strength requirements",
-    "Coût structure estimé": "Estimated structural cost",
+    "dimensionnée selon": "designed per",
     "Page": "Page",
     "Calculs indicatifs ±15%": "Indicative calculations ±15%",
     "À vérifier par un ingénieur structure habilité": "To be verified by a qualified structural engineer",
-    "Dimensionnement cohérent pour un": "Consistent design for a",
-    "niveaux à": "levels in",
     "ANALYSE ET RECOMMANDATIONS": "ANALYSIS AND RECOMMENDATIONS",
     "BORDEREAU DES QUANTITÉS ET DES PRIX — STRUCTURE": "BILL OF QUANTITIES AND PRICES — STRUCTURE",
     "DIMENSIONNEMENT POUTRES": "BEAM DESIGN",
@@ -208,7 +373,6 @@ FR_TO_EN = {
     "portée": "span",
     "Vérif. flèche": "Deflection check",
     "Effort tranchant": "Shear",
-    "À vérifier": "To check",
     "Épaisseur": "Thickness",
     "Flèche admissible": "Allowable deflection",
     "Vérification": "Verification",
@@ -239,8 +403,6 @@ FR_TO_EN = {
     "Si plusieurs options ont des impacts prix significatifs": "If several options have significant price impacts",
     "les soumettre au maître d'ouvrage avant validation": "submit them to the project owner before validation",
     "Justification": "Justification",
-    "Sol compressible": "Compressible soil",
-    "ouvrage élevé": "tall structure",
     "Adapté aux conditions de sol et à la hauteur": "Adapted to soil conditions and building height",
     "Foré à la tarière creuse": "Bored with hollow auger",
     "Jusqu'à horizon porteur": "Down to bearing stratum",
@@ -262,15 +424,6 @@ FR_TO_EN = {
     "Force de base Fb": "Base shear Fb",
     "Conformité DCL": "DCL compliance",
     "Système": "System",
-    "Cadres BA non ductiles": "Non-ductile RC frames",
-    "Période fondamentale": "Fundamental period",
-    "Enrobage nominal": "Nominal cover",
-    "armatures longitudinales": "longitudinal reinforcement",
-    "Recouvrements": "Lap splices",
-    "en zone sismique": "in seismic zone",
-    "Étriers denses en zones critiques": "Dense stirrups in critical zones",
-    "Confinement nœuds poteaux-poutres obligatoire": "Column-beam joint confinement mandatory",
-    "Continuité armatures longitudinales sur toute la hauteur": "Longitudinal reinforcement continuity over full height",
     "Note de synthèse": "Summary note",
     "Maçonnerie — agglos 15cm enduits 2 faces": "Masonry — 15cm blocks plastered both sides",
     "Divers — joints, acrotères, réservations": "Miscellaneous — joints, parapets, openings",
@@ -288,7 +441,6 @@ FR_TO_EN = {
     "Portée": "Span",
     "requis": "required",
     "taux armature": "reinforcement ratio",
-    "residentiel": "residential",
     "Structure seule": "Structure only",
     "hors MEP, finitions, VRD": "excl. MEP, finishes, utilities",
     "Surface habitable ≈ 78% surface bâtie": "Living area ≈ 78% of built area",
@@ -297,12 +449,22 @@ FR_TO_EN = {
     "Qté": "Qty",
     "Terrassement — décapage + fouilles méca.": "Earthwork — stripping + mech. excavation",
     "Fondations — pieux/semelles/radier béton armé": "Foundations — piles/footings/raft RC",
+    "Largeur semelle": "Footing width",
+    "Section carrée": "Square section",
+    "Profondeur": "Depth",
+    "Hors gel + horizon porteur": "Below frost + bearing stratum",
+    "Gamme Basic à High-End recommandée pour usage résidentiel standard": "Basic to High-End range recommended for standard residential use",
+    "Gamme Basic à High-End recommandée": "Basic to High-End range recommended",
+    "usage résidentiel standard": "standard residential use",
+    "Détail complet disponible dans le PDF": "Full detail available in the PDF",
+    "Recommandation": "Recommendation",
 }
 
 def translate_pdf_text(text: str) -> str:
-    """Traduit un texte français en anglais en utilisant le dictionnaire."""
+    """Traduit un texte français en anglais en utilisant le dictionnaire.
+    Trie par longueur décroissante pour éviter les remplacements partiels.
+    """
     result = text
-    # Trier par longueur décroissante pour éviter les remplacements partiels
     for fr, en in sorted(FR_TO_EN.items(), key=lambda x: len(x[0]), reverse=True):
         result = result.replace(fr, en)
     return result
