@@ -1,145 +1,111 @@
 """
-gen_boq_structure_en.py — English Structural Bill of Quantities (7 lots)
-Native EN generator. Mirrors gen_boq_structure.py (FR).
+gen_boq_structure_en.py — English Structural BOQ
+Uses tijan_theme.py for identical design to FR version.
 Signature: generer_boq_structure(rs, params_dict) → bytes
-Uses REAL dataclass fields from engine_structure_v2.py.
 """
-
 import io
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
-from reportlab.lib.colors import HexColor, white
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
-)
-from reportlab.platypus.flowables import HRFlowable
+from reportlab.platypus import SimpleDocTemplate, Table, Spacer, PageBreak
+from tijan_theme import *
 
-TIJAN_BLACK=HexColor("#111111"); TIJAN_GREY=HexColor("#555555"); TIJAN_GREEN=HexColor("#43A956")
-TIJAN_LIGHT=HexColor("#FAFAFA"); TIJAN_WHITE=HexColor("#FFFFFF"); TIJAN_BORDER=HexColor("#E0E0E0")
-TIJAN_SUB=HexColor("#E8F5E9")
-PAGE_W,PAGE_H=A4; M=20*mm
 
-def _S():
-    s=getSampleStyleSheet()
-    for n,c in {
-        'TT':dict(fontName='Helvetica-Bold',fontSize=18,leading=22,textColor=TIJAN_BLACK,alignment=TA_CENTER,spaceAfter=6*mm),
-        'H1':dict(fontName='Helvetica-Bold',fontSize=13,leading=16,textColor=TIJAN_BLACK,spaceBefore=8*mm,spaceAfter=3*mm),
-        'H2':dict(fontName='Helvetica-Bold',fontSize=11,leading=14,textColor=TIJAN_GREY,spaceBefore=4*mm,spaceAfter=2*mm),
-        'BD':dict(fontName='Helvetica',fontSize=9.5,leading=13,textColor=TIJAN_BLACK,alignment=TA_JUSTIFY,spaceAfter=2*mm),
-        'SM':dict(fontName='Helvetica',fontSize=8,leading=10,textColor=TIJAN_GREY,alignment=TA_CENTER),
-        'TH':dict(fontName='Helvetica-Bold',fontSize=8.5,leading=11,textColor=TIJAN_WHITE,alignment=TA_CENTER),
-        'TC':dict(fontName='Helvetica',fontSize=8.5,leading=11,textColor=TIJAN_BLACK,alignment=TA_CENTER),
-        'TL':dict(fontName='Helvetica',fontSize=8.5,leading=11,textColor=TIJAN_BLACK,alignment=TA_LEFT),
-        'TR':dict(fontName='Helvetica',fontSize=8.5,leading=11,textColor=TIJAN_BLACK,alignment=TA_RIGHT),
-        'TB':dict(fontName='Helvetica-Bold',fontSize=8.5,leading=11,textColor=TIJAN_BLACK,alignment=TA_RIGHT),
-        'TBW':dict(fontName='Helvetica-Bold',fontSize=8.5,leading=11,textColor=TIJAN_WHITE,alignment=TA_RIGHT),
-    }.items():
-        s.add(ParagraphStyle(name=n,**c))
-    return s
+def generer_boq_structure(rs, params: dict) -> bytes:
+    buf = io.BytesIO()
+    hf = HeaderFooter(rs.params.nom, 'Structural Bill of Quantities', lang='en')
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+        leftMargin=ML, rightMargin=MR, topMargin=26*mm, bottomMargin=18*mm)
+    story = _build(rs)
+    doc.build(story, onFirstPage=hf, onLaterPages=hf)
+    return buf.getvalue()
 
-def _hf(canvas, doc):
-    canvas.saveState()
-    canvas.setStrokeColor(TIJAN_GREEN); canvas.setLineWidth(1.5)
-    canvas.line(M,PAGE_H-15*mm,PAGE_W-M,PAGE_H-15*mm)
-    canvas.setFont("Helvetica-Bold",8); canvas.setFillColor(TIJAN_BLACK)
-    canvas.drawString(M,PAGE_H-13*mm,"TIJAN AI")
-    canvas.setFont("Helvetica",8); canvas.setFillColor(TIJAN_GREY)
-    canvas.drawRightString(PAGE_W-M,PAGE_H-13*mm,"Structural Bill of Quantities")
-    canvas.setStrokeColor(TIJAN_BORDER); canvas.setLineWidth(0.5)
-    canvas.line(M,12*mm,PAGE_W-M,12*mm)
-    canvas.setFont("Helvetica",7); canvas.setFillColor(TIJAN_GREY)
-    canvas.drawString(M,8*mm,"Tijan AI — BIM & Structural Engineering Automation")
-    canvas.drawRightString(PAGE_W-M,8*mm,f"Page {doc.page}")
-    canvas.restoreState()
 
-def _fmt(v):
-    if isinstance(v,(int,float)):
-        if v>=1_000_000: return f"{v/1_000_000:.1f} M"
-        return f"{v:,.0f}"
-    return str(v)
+def _build(rs):
+    story = []
+    d = rs.params
+    boq = rs.boq
 
-CW = PAGE_W - 2*M
+    story.append(Spacer(1, 3*mm))
+    story.append(p(d.nom, 'titre'))
+    story.append(p(f'Structural Bill of Quantities — {d.ville}', 'sous_titre'))
+    story.append(p('Indicative quantities ±15% — Must be confirmed by the contractor.', 'disc'))
+    story.append(Spacer(1, 3*mm))
 
-def generer_boq_structure(rs, params_dict: dict) -> bytes:
-    buf=io.BytesIO()
-    doc=SimpleDocTemplate(buf,pagesize=A4,topMargin=22*mm,bottomMargin=18*mm,leftMargin=M,rightMargin=M)
-    S=_S(); story=[]; p_=params_dict or {}
-    boq=rs.boq
+    # ── BOQ TABLE ─────────────────────────────────────────────
+    story += section_title('1', 'BILL OF QUANTITIES AND PRICES — STRUCTURE')
+    story.append(p(f'Unit prices based on {d.ville} 2026 market (supply and install). Margin ±15%.', 'small'))
+    story.append(Spacer(1, 2*mm))
 
-    def p(text,style='BD'): return Paragraph(str(text),S[style])
+    cw_b = [CW*w for w in [0.05, 0.37, 0.09, 0.07, 0.13, 0.14, 0.15]]
+    boq_rows = [[p(h,'th') for h in ['Lot','Description','Qty','Unit','U.P. (FCFA)','Low est.','High est.']]]
 
-    # COVER
-    story += [Spacer(1,25*mm), p("STRUCTURAL BILL OF QUANTITIES",'TT'),
-              p(f"{p_.get('nom','Project')} — {p_.get('ville','Dakar')}, {p_.get('pays','Senegal')}", 'SM'),
-              Spacer(1,4*mm), HRFlowable(width="60%",thickness=2,color=TIJAN_GREEN,spaceAfter=8*mm)]
-
-    cover = [
-        [p('PARAMETER','TH'), p('VALUE','TH')],
-        [p('Project'), p(p_.get('nom','Project'))],
-        [p('Location'), p(f"{p_.get('ville','Dakar')}, {p_.get('pays','Senegal')}")],
-        [p('Concrete'), p(rs.classe_beton)],
-        [p('Steel'), p(rs.classe_acier)],
-        [p('Currency'), p('FCFA (XOF)')],
-        [p('Built area'), p(f'{boq.surface_batie_m2:,.0f} m²')],
+    lots_data = [
+        ('1', 'Earthworks — clearing + mechanical excavation',
+         fmt_n(boq.terrassement_m3), 'm³', fmt_n(8500),
+         fmt_fcfa(boq.cout_terr_fcfa), fmt_fcfa(int(boq.cout_terr_fcfa*1.10))),
+        ('2', 'Foundations — piles/footings/raft RC',
+         '—', 'lump sum', '—',
+         fmt_fcfa(boq.cout_fond_fcfa), fmt_fcfa(int(boq.cout_fond_fcfa*1.20))),
+        ('3a', f'Concrete {rs.classe_beton} RMC — structure ({fmt_n(boq.beton_structure_m3,0)} m³)',
+         fmt_n(boq.beton_structure_m3,0), 'm³', '185 000',
+         fmt_fcfa(boq.cout_beton_fcfa), fmt_fcfa(int(boq.cout_beton_fcfa*1.10))),
+        ('3b', f'Steel {rs.classe_acier} supply+fix ({fmt_n(boq.acier_kg,0)} kg)',
+         fmt_n(boq.acier_kg,0), 'kg', '810',
+         fmt_fcfa(boq.cout_acier_fcfa), fmt_fcfa(int(boq.cout_acier_fcfa*1.10))),
+        ('3c', f'Formwork all faces ({fmt_n(boq.coffrage_m2,0)} m²)',
+         fmt_n(boq.coffrage_m2,0), 'm²', '18 000',
+         fmt_fcfa(boq.cout_coffrage_fcfa), fmt_fcfa(int(boq.cout_coffrage_fcfa*1.10))),
+        ('4', 'Masonry — 15cm blocks plastered both sides',
+         fmt_n(boq.maconnerie_m2,0), 'm²', '24 000',
+         fmt_fcfa(boq.cout_maco_fcfa), fmt_fcfa(int(boq.cout_maco_fcfa*1.15))),
+        ('5', f'Roof waterproofing ({fmt_n(boq.etancheite_m2,0)} m²)',
+         fmt_n(boq.etancheite_m2,0), 'm²', '18 500',
+         fmt_fcfa(boq.cout_etanch_fcfa), fmt_fcfa(int(boq.cout_etanch_fcfa*1.10))),
+        ('6', 'Miscellaneous — joints, parapets, openings',
+         '—', 'lump sum', '—',
+         fmt_fcfa(boq.cout_divers_fcfa), fmt_fcfa(int(boq.cout_divers_fcfa*1.10))),
     ]
-    ct=Table(cover,colWidths=[CW*0.35,CW*0.65],repeatRows=1); ct.setStyle(TableStyle([
-        ('BACKGROUND',(0,0),(-1,0),TIJAN_GREEN),('TEXTCOLOR',(0,0),(-1,0),white),
-        ('ROWBACKGROUNDS',(0,1),(-1,-1),[TIJAN_WHITE,TIJAN_LIGHT]),
-        ('GRID',(0,0),(-1,-1),0.5,TIJAN_BORDER),('VALIGN',(0,0),(-1,-1),'MIDDLE'),
-        ('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),('LEFTPADDING',(0,0),(-1,-1),8),
-    ]))
-    story += [ct, Spacer(1,8*mm),
-              p("Quantities from Tijan AI structural engine. Prices from validated local market data.",'SM'),
-              PageBreak()]
+    for lot in lots_data:
+        boq_rows.append([p(lot[0]), p(lot[1]), p(lot[2],'td_r'), p(lot[3]),
+                          p(lot[4],'td_r'), p(lot[5],'td_r'), p(lot[6],'td_r')])
+    boq_rows.append([
+        p('','td_b'), p('TOTAL STRUCTURE','td_b'), p('','td_r'), p(''), p('','td_r'),
+        p(fmt_fcfa(boq.total_bas_fcfa),'td_g_r'), p(fmt_fcfa(boq.total_haut_fcfa),'td_g_r'),
+    ])
+    tboq = Table(boq_rows, colWidths=cw_b, repeatRows=1)
+    ts_boq = table_style()
+    total_row_style(ts_boq)
+    tboq.setStyle(ts_boq)
+    story.append(tboq)
 
-    # BOQ TABLE
-    story.append(p("DETAILED BILL OF QUANTITIES",'H1'))
-
-    rows = [
-        [p('LOT','TH'), p('DESCRIPTION','TH'), p('QUANTITY','TH'), p('LOW EST. (FCFA)','TH'), p('HIGH EST. (FCFA)','TH')],
-        [p('1'), p('Earthworks'), p(f'{boq.terrassement_m3:,.0f} m³'), p(_fmt(boq.cout_terr_fcfa),'TR'), p('','TR')],
-        [p('2'), p('Foundations'), p(f'{boq.beton_fondation_m3:,.1f} m³ concrete'), p(_fmt(boq.cout_fond_fcfa),'TR'), p('','TR')],
-        [p('3'), p('Concrete — Superstructure'), p(f'{boq.beton_structure_m3:,.1f} m³'), p(_fmt(boq.cout_beton_fcfa),'TR'), p('','TR')],
-        [p('4'), p('Reinforcement steel'), p(f'{boq.acier_kg:,.0f} kg'), p(_fmt(boq.cout_acier_fcfa),'TR'), p('','TR')],
-        [p('5'), p('Formwork'), p(f'{boq.coffrage_m2:,.0f} m²'), p(_fmt(boq.cout_coffrage_fcfa),'TR'), p('','TR')],
-        [p('6'), p('Masonry / Partitions'), p(f'{boq.maconnerie_m2:,.0f} m²'), p(_fmt(boq.cout_maco_fcfa),'TR'), p('','TR')],
-        [p('7'), p('Waterproofing + Misc.'), p(f'{boq.etancheite_m2:,.0f} m² + misc'), p(_fmt(boq.cout_etanch_fcfa + boq.cout_divers_fcfa),'TR'), p('','TR')],
+    # ── RATIOS ────────────────────────────────────────────────
+    story.append(Spacer(1, 3*mm))
+    story += section_title('2', 'COST RATIOS')
+    rat_data = [
+        [p(h,'th') for h in ['INDICATOR','LOW VALUE','HIGH VALUE','NOTE']],
+        [p('Total built area','td_b'), p(fmt_n(boq.surface_batie_m2,'','m²')), p('—'),
+         p(f'Footprint {int(d.surface_emprise_m2)} m² × {d.nb_niveaux} levels', 'small')],
+        [p('Cost / m² built','td_b'), p(f'{boq.ratio_fcfa_m2_bati:,} FCFA/m²'.replace(',', ' '),'td_r'),
+         p(f'{int(boq.ratio_fcfa_m2_bati*1.15):,} FCFA/m²'.replace(',', ' '),'td_r'),
+         p('Structure only — excl. MEP, finishes, ext. works', 'small')],
+        [p('Cost / m² habitable','td_b'), p(f'{boq.ratio_fcfa_m2_habitable:,} FCFA/m²'.replace(',', ' '),'td_r'),
+         p(f'{int(boq.ratio_fcfa_m2_habitable*1.15):,} FCFA/m²'.replace(',', ' '),'td_r'),
+         p('Habitable area ≈ 78% of built area', 'small')],
+        [p('TOTAL STRUCTURAL COST','td_b'),
+         p(fmt_fcfa(boq.total_bas_fcfa),'td_g_r'), p(fmt_fcfa(boq.total_haut_fcfa),'td_g_r'),
+         p('Estimate ±15%', 'small')],
     ]
-    # Total rows
-    rows.append([p(''), p('<b>TOTAL EXCL. TAX</b>'), p(''), p(f'<b>{_fmt(boq.total_bas_fcfa)}</b>','TBW'), p(f'<b>{_fmt(boq.total_haut_fcfa)}</b>','TBW')])
-    tva_b = int(boq.total_bas_fcfa*0.18); tva_h = int(boq.total_haut_fcfa*0.18)
-    rows.append([p(''), p('<b>VAT (18%)</b>'), p(''), p(f'<b>{_fmt(tva_b)}</b>','TBW'), p(f'<b>{_fmt(tva_h)}</b>','TBW')])
-    rows.append([p(''), p('<b>TOTAL INCL. TAX</b>'), p(''), p(f'<b>{_fmt(boq.total_bas_fcfa+tva_b)}</b>','TBW'), p(f'<b>{_fmt(boq.total_haut_fcfa+tva_h)}</b>','TBW')])
+    tr = Table(rat_data, colWidths=[CW*0.32, CW*0.20, CW*0.20, CW*0.28], repeatRows=1)
+    ts_r = table_style()
+    total_row_style(ts_r)
+    tr.setStyle(ts_r)
+    story.append(tr)
 
-    tb=Table(rows,colWidths=[CW*0.06,CW*0.30,CW*0.24,CW*0.20,CW*0.20],repeatRows=1)
-    tb.setStyle(TableStyle([
-        ('BACKGROUND',(0,0),(-1,0),TIJAN_GREEN),('TEXTCOLOR',(0,0),(-1,0),white),
-        ('ROWBACKGROUNDS',(0,1),(-1,-4),[TIJAN_WHITE,TIJAN_LIGHT]),
-        ('BACKGROUND',(0,-3),(-1,-1),TIJAN_GREEN),('TEXTCOLOR',(0,-3),(-1,-1),white),
-        ('GRID',(0,0),(-1,-1),0.5,TIJAN_BORDER),('VALIGN',(0,0),(-1,-1),'MIDDLE'),
-        ('TOPPADDING',(0,0),(-1,-1),4),('BOTTOMPADDING',(0,0),(-1,-1),4),
-        ('LEFTPADDING',(0,0),(-1,-1),5),('RIGHTPADDING',(0,0),(-1,-1),5),
-    ]))
-    story.append(tb)
+    # Notes
+    story.append(Spacer(1, 4*mm))
+    story.append(p('1. Steel: Fabrimetal Sénégal (Sébikotane), 480–600 FCFA/kg.', 'small'))
+    story.append(p('2. Concrete: ready-mix C30/37, CIMAF/SOCOCIM, 185,000 FCFA/m³ delivered.', 'small'))
+    story.append(p('3. Low/High estimates reflect market price range.', 'small'))
+    story.append(p('4. Prices valid at date of generation — subject to market fluctuation.', 'small'))
 
-    # RATIOS
-    story += [Spacer(1,6*mm), p("COST RATIOS",'H2'),
-              p(f'Cost per m² built: {boq.ratio_fcfa_m2_bati:,.0f} FCFA/m²<br/>'
-                f'Built area: {boq.surface_batie_m2:,.0f} m² — Habitable: {boq.surface_habitable_m2:,.0f} m²')]
-
-    # NOTES
-    story += [Spacer(1,6*mm), p("NOTES",'H2'), p(
-        "1. Steel: Fabrimetal Sénégal (Sébikotane), 480–600 FCFA/kg.<br/>"
-        "2. Concrete: ready-mix C30/37, CIMAF/SOCOCIM, 185,000 FCFA/m³ delivered.<br/>"
-        "3. Low/High estimates reflect market price range.<br/>"
-        "4. Quantities from structural engine — may vary ±10% during detailed design.<br/>"
-        "5. Prices valid at date of generation — subject to market fluctuation.")]
-
-    story += [Spacer(1,8*mm), HRFlowable(width="100%",thickness=0.5,color=TIJAN_BORDER,spaceAfter=3*mm),
-              p("<b>Disclaimer:</b> This BOQ has been generated automatically. "
-                "Final quantities and prices must be confirmed with the contractor.",'SM')]
-
-    doc.build(story,onFirstPage=_hf,onLaterPages=_hf)
-    buf.seek(0); return buf.read()
+    return story
