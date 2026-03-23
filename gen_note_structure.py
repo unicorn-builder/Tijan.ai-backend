@@ -5,7 +5,7 @@ Tijan AI — données 100% issues du moteur engine_structure_v2
 import io
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, Spacer, PageBreak, KeepTogether
+from reportlab.platypus import SimpleDocTemplate, Table, Spacer, PageBreak, KeepTogether
 from tijan_theme import *
 
 def generer(rs, params: dict) -> bytes:
@@ -32,8 +32,8 @@ def _build(rs):
 
     # ── PAGE 1 — FICHE PROJET ──────────────────────────────────
     story.append(Spacer(1, 3*mm))
-    story.append(Paragraph(d.nom, S['titre']))
-    story.append(Paragraph(f'{d.ville} — {d.usage.value.capitalize()} R+{d.nb_niveaux-1} ({d.nb_niveaux} niveaux)', S['sous_titre']))
+    story.append(p(d.nom, 'titre'))
+    story.append(p(f'{d.ville} — {d.usage.value.capitalize()} R+{d.nb_niveaux-1} ({d.nb_niveaux} niveaux)', 'sous_titre'))
     story.append(Paragraph(
         'Calculs indicatifs ±15% — À vérifier par un ingénieur structure habilité.',
         S['disc']))
@@ -57,11 +57,11 @@ def _build(rs):
     t.setStyle(table_style())
     story.append(t)
     if surf_batie_estimee:
-        story.append(Paragraph('* Surface bâtie estimée (emprise × niveaux) — à confirmer avec plans définitifs.', S['small']))
+        story.append(p('* Surface bâtie estimée (emprise × niveaux) — à confirmer avec plans définitifs.', 'small'))
 
     # Justification matériaux
     story.append(Spacer(1, 2*mm))
-    story.append(Paragraph(f'ℹ {ana.justification_materiaux}', S['note']))
+    story.append(p(f'ℹ {ana.justification_materiaux}', 'note'))
 
     # ── PAGE 2 — HYPOTHÈSES ───────────────────────────────────
     story += section_title('2', 'HYPOTHÈSES ET NORMES DE CALCUL')
@@ -112,14 +112,14 @@ def _build(rs):
             ts3.add('BACKGROUND', (0,i+1), (-1,i+1), ORANGE_LT)
     t3.setStyle(ts3)
     story.append(t3)
-    story.append(Paragraph('ρ = taux armature (EC2 : 0.1% ≤ ρ ≤ 4%) | NEd/NRd < 1 requis', S['small']))
+    story.append(p('ρ = taux armature (EC2 : 0.1% ≤ ρ ≤ 4%) | NEd/NRd < 1 requis', 'small'))
 
     # ── PAGE 4 — POUTRES + DALLE ─────────────────────────────
     story.append(PageBreak())
     story += section_title('4', 'DIMENSIONNEMENT POUTRES (EC2)')
     for pout in [rs.poutre_principale, rs.poutre_secondaire]:
         if pout is None: continue
-        story.append(Paragraph(f'Poutre {pout.type} — portée {pout.portee_m} m', S['h2']))
+        story.append(p(f'Poutre {pout.type} — portée {pout.portee_m} m', 'h2'))
         cw_po = [CW*0.13]*7
         rows_po = [[p(h,'th') for h in ['b (mm)','h (mm)','As inf (cm²)','As sup (cm²)','Étrierss','Esp. étr.','Portée (m)']]]
         rows_po.append([
@@ -133,7 +133,7 @@ def _build(rs):
         story.append(tpo)
         vf = '✓ OK' if pout.verif_fleche else '⚠ À vérifier'
         vt = '✓ OK' if pout.verif_effort_t else '⚠ À vérifier'
-        story.append(Paragraph(f'Vérif. flèche : {vf} | Effort tranchant : {vt}', S['small']))
+        story.append(p(f'Vérif. flèche : {vf} | Effort tranchant : {vt}', 'small'))
         story.append(Spacer(1, 2*mm))
 
     story += section_title('5', 'DIMENSIONNEMENT DALLE (EC2)')
@@ -158,7 +158,7 @@ def _build(rs):
         f'Surface totale cloisons estimée : {int(cl.surface_totale_m2)} m² '
         f'(séparatives {int(cl.surface_separative_m2)} m² | légères {int(cl.surface_legere_m2)} m² | gaines {int(cl.surface_gaines_m2)} m²)',
         S['body']))
-    story.append(Paragraph(f'Option recommandée : {cl.option_recommandee.value} — charge retenue : {cl.charge_dalle_kn_m2} kN/m²', S['body']))
+    story.append(p(f'Option recommandée : {cl.option_recommandee.value} — charge retenue : {cl.charge_dalle_kn_m2} kN/m²', 'body'))
     story.append(Spacer(1, 2*mm))
 
     # Tableau options
@@ -190,7 +190,7 @@ def _build(rs):
     story.append(PageBreak())
     story += section_title('7', 'ÉTUDE DES FONDATIONS (EC7 + DTU 13.2)')
     fond = rs.fondation
-    story.append(Paragraph(f'Justification : {fond.justification}', S['body_j']))
+    story.append(p(f'Justification : {fond.justification}', 'body_j'))
     story.append(Spacer(1, 2*mm))
 
     fond_data = [
@@ -258,22 +258,22 @@ def _build(rs):
     story += section_title('9', 'ANALYSE ET RECOMMANDATIONS')
 
     # Note ingénieur
-    story.append(Paragraph('Note de synthèse :', S['h2']))
-    story.append(Paragraph(ana.note_ingenieur, S['bleu']))
+    story.append(p('Note de synthèse :', 'h2'))
+    story.append(p(ana.note_ingenieur, 'bleu'))
     story.append(Spacer(1, 3*mm))
 
     # Points forts / alertes
     if ana.points_forts or ana.alertes:
         col1, col2 = [], []
         if ana.points_forts:
-            col1.append(Paragraph('✅ Points forts', S['h2']))
+            col1.append(p('✅ Points forts', 'h2'))
             for f in ana.points_forts:
-                col1.append(Paragraph(f'• {f}', S['body']))
+                col1.append(p(f'• {f}', 'body'))
                 col1.append(Spacer(1,1*mm))
         if ana.alertes:
-            col2.append(Paragraph('⚠ Points d\'attention', S['h2']))
+            col2.append(p('⚠ Points d\'attention', 'h2'))
             for a in ana.alertes:
-                col2.append(Paragraph(f'• {a}', S['note']))
+                col2.append(p(f'• {a}', 'note'))
                 col2.append(Spacer(1,1*mm))
         tfa = Table([[col1, col2]], colWidths=[CW*0.50, CW*0.50])
         tfa.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),0)]))
@@ -282,7 +282,7 @@ def _build(rs):
 
     # Recommandations
     if ana.recommandations:
-        story.append(Paragraph('Recommandations :', S['h2']))
+        story.append(p('Recommandations :', 'h2'))
         rec_data = [[p('N°','th'), p('RECOMMANDATION','th_l')]]
         for i, r in enumerate(ana.recommandations):
             rec_data.append([p(str(i+1),'td_r'), p(r)])
