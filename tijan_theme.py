@@ -16,9 +16,9 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT, TA_JUSTIFY
 
 _current_lang = 'fr'
-_current_devise = None  # {'devise': 'NGN', 'symbole': '₦', 'taux_depuis_fcfa': 2.083333}
+current_devise = None  # {'devise': 'NGN', 'symbole': '₦', 'taux_depuis_fcfa': 2.083333}
 def set_pdf_lang(lang): global _current_lang; _current_lang = lang
-def set_pdf_devise(devise_info): global _current_devise; _current_devise = devise_info
+def set_pdf_devise(devise_info): global current_devise; current_devise = devise_info
 from reportlab.platypus import Table, TableStyle, Paragraph, HRFlowable, Spacer
 
 # ── Couleurs ──────────────────────────────────────────────────
@@ -96,9 +96,9 @@ def fmt_fcfa(v):
     try:
         v = float(v)
         if v == 0: return '—'
-        if _current_devise and _current_devise.get('devise') != 'XOF':
-            taux = _current_devise.get('taux_depuis_fcfa', 1.0)
-            sym = _current_devise.get('devise', 'FCFA')  # Use ISO code for PDF (Helvetica has no ₦/₵)
+        if current_devise and current_devise.get('devise') != 'XOF':
+            taux = current_devise.get('taux_depuis_fcfa', 1.0)
+            sym = current_devise.get('devise', 'FCFA')  # Use ISO code for PDF (Helvetica has no ₦/₵)
             local = v * taux
             if local >= 1e9: return f'{local/1e9:.2f} B {sym}'
             if local >= 1e6: return f'{local/1e6:.1f} M {sym}'
