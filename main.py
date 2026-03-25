@@ -753,7 +753,7 @@ PAYDUNYA_HEADERS = {
 async def create_payment(request: Request):
     body = await request.json()
     credits = body.get("credits", 1)
-    prix = body.get("prix", 150000)
+    prix = body.get("prix", 200000)
     user_id = body.get("user_id", "")
 
     payload = {
