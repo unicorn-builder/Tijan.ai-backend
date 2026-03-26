@@ -57,7 +57,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://tijan-frontend.vercel.app", "https://tijan-admin.vercel.app", "http://localhost:5173", "http://localhost:5174"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -816,9 +816,9 @@ import httpx
 PAYDUNYA_URL = "https://app.paydunya.com/api/v1/checkout-invoice/create"
 PAYDUNYA_HEADERS = {
     "Content-Type": "application/json",
-    "PAYDUNYA-MASTER-KEY": "BQepwkZk-8QAT-Gn2L-Jaio-Chtp8s41cX3U",
-    "PAYDUNYA-PRIVATE-KEY": "live_private_Ei0b9wQzTbBqKBcIVRDCun1FwPA",
-    "PAYDUNYA-TOKEN": "wi0lPshMeBp4iaiEQ7Lw",
+    "PAYDUNYA-MASTER-KEY": os.environ.get("PAYDUNYA_MASTER_KEY", ""),
+    "PAYDUNYA-PRIVATE-KEY": os.environ.get("PAYDUNYA_PRIVATE_KEY", ""),
+    "PAYDUNYA-TOKEN": os.environ.get("PAYDUNYA_TOKEN", ""),
 }
 
 @app.post("/create-payment")
