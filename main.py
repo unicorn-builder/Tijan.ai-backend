@@ -131,6 +131,14 @@ def get_gen_fiches_structure():
     from generate_fiches_structure_v3 import generer_fiches_structure
     return generer_fiches_structure
 
+def get_gen_fiches_structure_en():
+    from generate_fiches_structure_en import generer_fiches_structure
+    return generer_fiches_structure
+
+def get_gen_fiches_mep_en():
+    from generate_fiches_mep_en import generer_fiches_mep
+    return generer_fiches_mep
+
 def get_gen_fiches_mep():
     from generate_fiches_mep_v3 import generer_fiches_mep
     return generer_fiches_mep
