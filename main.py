@@ -144,7 +144,7 @@ def get_gen_fiches_mep():
     return generer_fiches_mep
 
 def get_gen_planches():
-    from generate_plans_v3 import generer_dossier_ba
+    from generate_plans_v4 import generer_dossier_ba
     return generer_dossier_ba
 
 
