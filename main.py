@@ -970,4 +970,28 @@ Texts to translate:
         return {"ok": True, "translations": translations}
     except Exception as e:
         return {"ok": False, "error": str(e), "translations": texts}
+
+@app.get("/parse/download-f2d")
+async def download_f2d(urn: str, f2d_path: str):
+    """Telecharge un fichier F2D depuis APS et retourne sa taille et premiers bytes."""
+    try:
+        from aps_parser_v2 import get_token
+        import urllib.request as ur
+        import json as _j
+        import base64
+        token = get_token()
+        # URL APS pour telecharger un fichier derivatif
+        encoded_urn = urn
+        url = f"https://developer.api.autodesk.com/modelderivative/v2/designdata/{encoded_urn}/manifest/{f2d_path}"
+        req = ur.Request(url, headers={"Authorization": f"Bearer {token}"})
+        with ur.urlopen(req) as resp:
+            data = resp.read()
+        return {
+            "size": len(data),
+            "first_bytes_hex": data[:64].hex(),
+            "first_bytes_b64": base64.b64encode(data[:256]).decode()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # manifest fix Sun Mar 29 01:38:44 GMT 2026
