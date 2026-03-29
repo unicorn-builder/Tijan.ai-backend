@@ -690,6 +690,23 @@ async def generate_plu(params: ParamsProjet):
         logger.error(f"/generate-plu error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/parse/layer")
+async def parse_layer(urn: str, layer: str = "SANITAIRE", guid: str = None):
+    """Extrait les objets d un layer DWG depuis APS (coordonnees XY reelles)."""
+    try:
+        from aps_parser_v2 import get_token, get_viewable_guids, get_properties, extract_layer_objects
+        token = get_token()
+        if not guid:
+            guids = get_viewable_guids(urn, token)
+            guid = next((g["guid"] for g in guids if g.get("role") == "2d"), guids[0]["guid"])
+        properties = get_properties(urn, guid, token)
+        objects = extract_layer_objects(properties, layer)
+        return {"ok": True, "layer": layer, "count": len(objects), "objects": objects[:200]}
+    except Exception as e:
+        logger.error(f"/parse/layer error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/chat")
 async def chat_projet(request: Request):
     """Chat LLM avec contexte projet — fine-tuning outputs."""

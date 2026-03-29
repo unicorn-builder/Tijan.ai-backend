@@ -428,6 +428,73 @@ def extract_geometry(properties: List[Dict]) -> Dict[str, Any]:
 # MAIN PIPELINE
 # ════════════════════════════════════════════════════════════
 
+
+
+def extract_layer_objects(properties: list, layer_name: str) -> list:
+    """
+    Extract all objects from a specific DWG layer with their coordinates.
+    Returns list of {type, layer, x, y, x2, y2, width, height, text, ...}
+    """
+    objects = []
+    for item in properties:
+        p = item.get("properties", {})
+        gen = p.get("General", {})
+        geom = p.get("Geometry", {})
+        text_props = p.get("Text", {})
+
+        layer = gen.get("Layer", "")
+        if layer.upper() != layer_name.upper():
+            continue
+
+        obj_type = gen.get("Name ", "") or gen.get("Name", "")
+
+        # Extract coordinates
+        obj = {
+            "id": item.get("objectid", ""),
+            "name": item.get("name", ""),
+            "type": obj_type,
+            "layer": layer,
+        }
+
+        # Position
+        for key in ("Position X", "Start X", "Center X", "Insertion Point X"):
+            if key in geom:
+                try: obj["x"] = float(str(geom[key]).replace(",","."))
+                except: pass
+                break
+
+        for key in ("Position Y", "Start Y", "Center Y", "Insertion Point Y"):
+            if key in geom:
+                try: obj["y"] = float(str(geom[key]).replace(",","."))
+                except: pass
+                break
+
+        for key in ("End X", "Position X 2"):
+            if key in geom:
+                try: obj["x2"] = float(str(geom[key]).replace(",","."))
+                except: pass
+                break
+
+        for key in ("End Y", "Position Y 2"):
+            if key in geom:
+                try: obj["y2"] = float(str(geom[key]).replace(",","."))
+                except: pass
+                break
+
+        # Dimensions
+        for key in ("Width", "Length", "Radius"):
+            if key in geom:
+                try: obj[key.lower()] = float(str(geom[key]).replace(",","."))
+                except: pass
+
+        # Text content
+        if text_props.get("Contents"):
+            obj["text"] = text_props["Contents"]
+
+        objects.append(obj)
+
+    return objects
+
 def parser_dwg_aps(filepath: str, nb_niveaux: int = None, ville: str = "Dakar") -> Dict[str, Any]:
     """
     Full pipeline: DWG file → APS → structured geometry for Eurocodes engine.
