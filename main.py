@@ -970,3 +970,4 @@ Texts to translate:
         return {"ok": True, "translations": translations}
     except Exception as e:
         return {"ok": False, "error": str(e), "translations": texts}
+# manifest fix Sun Mar 29 01:38:44 GMT 2026
