@@ -171,25 +171,93 @@ ERP_DENSITY = {
 def _cluster_rooms_into_apartments(paired_rooms):
     """
     Regroupe les pièces en logements par proximité spatiale.
-    Utilise les salons/séjours comme ancres, attribue les chambres
-    au salon le plus proche.
+
+    Étape 1: Fusionner SAM (salle à manger) avec le salon le plus proche
+             — un SAM n'est pas un logement séparé.
+    Étape 2: Utiliser les salons restants comme ancres de logement.
+    Étape 3: Attribuer chaque chambre au salon le plus proche,
+             avec un seuil de distance max (12m ≈ 12000 unités DXF)
+             pour éviter les rattachements aberrants.
     """
-    salons = [r for r in paired_rooms if r['room_type'] in ('salon', 'sejour', 'sam')]
+    salons_raw = [r for r in paired_rooms if r['room_type'] in ('salon', 'sejour')]
+    sams = [r for r in paired_rooms if r['room_type'] == 'sam']
+    cuisines = [r for r in paired_rooms if r['room_type'] == 'cuisine']
     chambres = [r for r in paired_rooms if r['room_type'] in ('chambre', 'chambre_parents')]
-    if not salons:
+
+    if not salons_raw and not sams and not cuisines:
         return []
-    apartments = [{'anchor': s, 'chambres': []} for s in salons]
+
+    # Étape 1 : les ancres principales sont les salons/séjours
+    anchors = list(salons_raw)
+
+    # Étape 2 : fusionner SAM avec le salon le plus proche (< 10m)
+    for sam in sams:
+        if anchors:
+            nearest = min(anchors, key=lambda s: math.hypot(s['x']-sam['x'], s['y']-sam['y']))
+            if math.hypot(nearest['x']-sam['x'], nearest['y']-sam['y']) < 10000:
+                continue  # même logement
+        anchors.append(sam)  # SAM isolé = logement autonome
+
+    # Étape 3 : les cuisines qui ne sont pas proches d'un salon (> 10m)
+    # représentent des logements sans salon identifié (studio, kitchenette)
+    for cui in cuisines:
+        if anchors:
+            nearest = min(anchors, key=lambda s: math.hypot(s['x']-cui['x'], s['y']-cui['y']))
+            if math.hypot(nearest['x']-cui['x'], nearest['y']-cui['y']) < 10000:
+                continue  # cuisine rattachée à un salon proche
+        anchors.append(cui)  # cuisine isolée = logement autonome
+
+    if not anchors:
+        return []
+
+    # Étape 4 : créer les logements et rattacher les chambres
+    apartments = [{'anchor': s, 'chambres': []} for s in anchors]
+
+    MAX_DIST = 10000  # 10m — seuil réaliste pour un appartement
     for ch in chambres:
-        best = min(apartments, key=lambda a: math.hypot(a['anchor']['x']-ch['x'], a['anchor']['y']-ch['y']))
-        best['chambres'].append(ch)
-    return apartments
+        dists = [(i, math.hypot(a['anchor']['x']-ch['x'], a['anchor']['y']-ch['y']))
+                 for i, a in enumerate(apartments)]
+        dists.sort(key=lambda x: x[1])
+        if dists and dists[0][1] < MAX_DIST:
+            apartments[dists[0][0]]['chambres'].append(ch)
+
+    # Étape 5 : post-traitement
+    filtered = []
+    for apt in apartments:
+        area = apt['anchor'].get('area_m2') or 0
+        nb_ch = len(apt['chambres'])
+        # Grand salon (> 40m²) sans chambre = espace commun, pas un studio
+        if nb_ch == 0 and area > 40:
+            continue
+        # Si > 3 chambres, c'est probablement 2 logements fusionnés à tort
+        # Split : garder les 2 plus proches, les autres deviennent orphelines
+        # qui seront comptées comme chambres dans un logement implicite
+        if nb_ch > 3:
+            chs_sorted = sorted(apt['chambres'],
+                                key=lambda c: math.hypot(c['x']-apt['anchor']['x'],
+                                                         c['y']-apt['anchor']['y']))
+            apt['chambres'] = chs_sorted[:3]  # garder les 3 plus proches → T4
+            # Les chambres restantes forment un logement implicite
+            remaining = chs_sorted[3:]
+            if remaining:
+                # Créer un logement implicite centré sur la première chambre restante
+                filtered.append({'anchor': remaining[0], 'chambres': remaining[1:]})
+        filtered.append(apt)
+
+    return filtered
 
 
 def calculate_occupancy_for_level(paired_rooms, level_repeat=1):
     """
     Calcule le nombre d'occupants pour un niveau.
     Regroupe les pièces en logements réels par clustering spatial,
-    puis applique les ratios DTU (Arrêté 31 janv. 1986).
+    puis applique les ratios DTU (Arrêté 31 janv. 1986) :
+      T1 (studio)  : 1.5 pers
+      T2 (1 ch.)   : 2 pers
+      T3 (2 ch.)   : 4 pers  (couple + 2 enfants)
+      T4 (3 ch.)   : 5 pers
+      T5 (4 ch.)   : 6 pers
+      T6+ (5+ ch.) : nb_ch + 1
     """
     chambres_service = [r for r in paired_rooms if r['room_type'] == 'chambre_service']
     occupants_residential = 0
@@ -200,8 +268,8 @@ def calculate_occupancy_for_level(paired_rooms, level_repeat=1):
     apartments = _cluster_rooms_into_apartments(paired_rooms)
     nb_logements = len(apartments)
 
-    # DTU occupancy: T1=1.5, T2=2, T3=3, T4=4, T5+=nb_ch+1
-    t_type_map = {0: 1.5, 1: 2.0, 2: 3.0, 3: 4.0}
+    # DTU 60.11 / Arrêté 31 janv. 1986
+    t_type_map = {0: 1.5, 1: 2.0, 2: 4.0, 3: 5.0, 4: 6.0}
     for apt in apartments:
         nb_ch = len(apt['chambres'])
         pers = t_type_map.get(nb_ch, nb_ch + 1)
