@@ -28,6 +28,8 @@ Endpoints :
   POST /generate-fiches-structure → fiches techniques structure PDF
   POST /generate-fiches-mep       → fiches techniques MEP PDF
   POST /generate-planches         → planches BA PDF
+  POST /generate-plans-structure  → plans structure PDF (coffrage, ferraillage, voiles) — géo DXF + EC2
+  POST /generate-plans-mep        → plans MEP PDF (7 lots × niveaux) — géo DXF + moteur MEP
 """
 
 import gc
@@ -689,6 +691,95 @@ async def generate_plu(params: ParamsProjet):
     except Exception as e:
         logger.error(f"/generate-plu error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-plans-structure")
+async def generate_plans_structure(params: ParamsProjet):
+    """Plans structure PDF (coffrage, ferraillage, voiles) — géométrie réelle + calculs EC2."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        from generate_plans_structure_mep import generer_plans_structure
+        donnees = params_to_donnees(params)
+        donnees = _enrich_donnees_from_geometry(donnees)
+        rs = calculer_structure(donnees)
+        # Load geometry if available
+        geom_data = _load_geom_data()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            out_path = tmp.name
+        generer_plans_structure(out_path, resultats_structure=rs,
+                                geom_data=geom_data, params=params.dict())
+        with open(out_path, "rb") as f:
+            pdf_bytes = f.read()
+        os.unlink(out_path)
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, "plans_structure"))
+    except Exception as e:
+        logger.error(f"/generate-plans-structure error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-plans-mep")
+async def generate_plans_mep(params: ParamsProjet):
+    """Plans MEP PDF (7 lots × tous niveaux) — géométrie réelle + calculs MEP."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        from generate_plans_structure_mep import generer_plans_mep
+        donnees = params_to_donnees(params)
+        donnees = _enrich_donnees_from_geometry(donnees)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+        geom_data = _load_geom_data()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            out_path = tmp.name
+        generer_plans_mep(out_path, resultats_mep=rm,
+                          geom_data=geom_data, params=params.dict())
+        with open(out_path, "rb") as f:
+            pdf_bytes = f.read()
+        os.unlink(out_path)
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, "plans_mep"))
+    except Exception as e:
+        logger.error(f"/generate-plans-mep error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _load_geom_data():
+    """Load pre-extracted DXF geometry if available."""
+    geom_data = {}
+    here = os.path.dirname(os.path.abspath(__file__))
+    level_files = {
+        'SOUS_SOL': 'sakho_sous_sol_geom.json',
+        'RDC': 'sakho_rdc_geom.json',
+        'ETAGES_1_7': 'sakho_etages_1_7_geom.json',
+        'ETAGE_8': 'sakho_etage_8_geom.json',
+        'TERRASSE': 'sakho_terrasse_geom.json',
+    }
+    for key, filename in level_files.items():
+        path = os.path.join(here, filename)
+        if os.path.exists(path):
+            try:
+                with open(path) as f:
+                    geom_data[key] = _json.load(f)
+            except Exception:
+                pass
+    return geom_data if geom_data else None
+
+
+def _enrich_donnees_from_geometry(donnees):
+    """Inject real occupants/levels count from DXF geometry into DonneesProjet."""
+    try:
+        from extract_project_data import extract_project_data
+        proj = extract_project_data()
+        if proj.get('total_occupants'):
+            donnees.nb_personnes = proj['total_occupants']
+        if proj.get('nb_niveaux'):
+            donnees.nb_niveaux = proj['nb_niveaux']
+        if proj.get('total_logements'):
+            donnees.nb_logements = proj['total_logements']
+    except Exception:
+        pass
+    return donnees
 
 
 @app.get("/parse/layer")
