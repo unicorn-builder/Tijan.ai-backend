@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Outputs
+mep_output/
+*.svg
+sakho_plans_mep.pdf
+sakho_*_geometry.json
+
+# OS
+.DS_Store
+*.swp
+
+# Env
+.env
+.env.*
