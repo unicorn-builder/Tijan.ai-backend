@@ -287,9 +287,11 @@ def _legend(c, w, h, items):
 # PLANS STRUCTURE — même pattern que v4
 # ══════════════════════════════════════════
 
-def generer_plans_structure(output_path, resultats=None, params=None, **kw):
+def generer_plans_structure(output_path, resultats=None, params=None, dwg_geometry=None, **kw):
     """
-    Plans structure étendus. Même grille que generate_plans_v4.py.
+    Plans structure. Deux modes :
+    - Avec dwg_geometry : fond de plan DWG réel + structure superposée
+    - Sans : grille paramétrique depuis ParamsProjet
     Toutes les valeurs viennent de ResultatsStructure.
     """
     if resultats is None:
@@ -319,18 +321,31 @@ def generer_plans_structure(output_path, resultats=None, params=None, **kw):
     beton = r.classe_beton
     acier = r.classe_acier
 
-    # Levels from poteaux
     nb_niv = p.get("nb_niveaux", len(r.poteaux))
     he = p.get("hauteur_etage_m", 3.0)
 
-    # Count pages: coffrage per level (max 3 displayed) + ferraillage dalles + fondations + coupe
+    # Normalize dwg_geometry to level dict
+    LEVEL_LABELS = {
+        'SOUS_SOL': 'Sous-Sol', 'RDC': 'Rez-de-Chaussée',
+        'ETAGES_1_7': 'Étage courant', 'ETAGE_8': 'Étage 8', 'TERRASSE': 'Terrasse',
+    }
+    dwg_levels = {}
+    if dwg_geometry:
+        if 'walls' in dwg_geometry:
+            dwg_levels = {'Étage courant': dwg_geometry}
+        else:
+            for key, geom in dwg_geometry.items():
+                if isinstance(geom, dict) and len(geom.get('walls', [])) >= 5:
+                    dwg_levels[LEVEL_LABELS.get(key, key)] = geom
+
+    # Build level list
     level_names = []
     if p.get("avec_sous_sol"):
         level_names.append("Sous-Sol")
     level_names.append("RDC")
     nb_etages = nb_niv - len(level_names)
     if nb_etages > 0:
-        level_names.append(f"Étages 1-{nb_etages}" if nb_etages > 1 else "Étage 1")
+        level_names.append(f"Étage courant" if nb_etages > 1 else "Étage 1")
     level_names.append("Terrasse")
 
     total_pages = len(level_names) + 3  # +ferraillage dalle + fondations + coupe
@@ -347,6 +362,18 @@ def generer_plans_structure(output_path, resultats=None, params=None, **kw):
         c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 13)
         c.drawString(14*mm, h - 17*mm, f"PLAN DE COFFRAGE — {level_name.upper()}")
 
+        # DWG geometry for this level if available
+        lvl_geom = dwg_levels.get(level_name) or dwg_levels.get('Étage courant')
+        use_dwg = lvl_geom and len(lvl_geom.get('walls', [])) >= 5
+
+        if use_dwg:
+            dtx, dty, dsc, dgw, dgh = _dwg_layout(w, h, lvl_geom)
+            if dtx:
+                _draw_dwg(c, lvl_geom, dtx, dty)
+            else:
+                use_dwg = False
+
+        # Structural grid always drawn on top
         ox, oy, sc, gw, gh = _grid_layout(w, h, nx, ny, px_m, py_m)
         _draw_grid_axes(c, ox, oy, sc, nx, ny, px_m, py_m, gw, gh)
         _draw_dalle_hatch(c, ox, oy, sc, nx, ny, px_m, py_m)
@@ -379,6 +406,13 @@ def generer_plans_structure(output_path, resultats=None, params=None, **kw):
     w, h = A3L; c.setPageSize(A3L); _border(c, w, h)
     c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 13)
     c.drawString(14*mm, h - 17*mm, "FERRAILLAGE DALLE — NIVEAU COURANT")
+
+    # DWG fond de plan
+    lvl_geom = dwg_levels.get('Étage courant') or dwg_levels.get('Rez-de-Chaussée')
+    if lvl_geom and len(lvl_geom.get('walls', [])) >= 5:
+        dtx, dty, dsc, dgw, dgh = _dwg_layout(w, h, lvl_geom)
+        if dtx:
+            _draw_dwg(c, lvl_geom, dtx, dty)
 
     ox, oy, sc, gw, gh = _grid_layout(w, h, nx, ny, px_m, py_m)
     _draw_grid_axes(c, ox, oy, sc, nx, ny, px_m, py_m, gw, gh)
@@ -422,6 +456,13 @@ def generer_plans_structure(output_path, resultats=None, params=None, **kw):
     w, h = A3L; c.setPageSize(A3L); _border(c, w, h)
     c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 13)
     c.drawString(14*mm, h - 17*mm, "PLAN DE FONDATIONS")
+
+    # DWG fond de plan (sous-sol si disponible)
+    lvl_geom = dwg_levels.get('Sous-Sol') or dwg_levels.get('Rez-de-Chaussée')
+    if lvl_geom and len(lvl_geom.get('walls', [])) >= 5:
+        dtx, dty, dsc, dgw, dgh = _dwg_layout(w, h, lvl_geom)
+        if dtx:
+            _draw_dwg(c, lvl_geom, dtx, dty)
 
     ox, oy, sc, gw, gh = _grid_layout(w, h, nx, ny, px_m, py_m)
     _draw_grid_axes(c, ox, oy, sc, nx, ny, px_m, py_m, gw, gh)
