@@ -263,6 +263,90 @@ def _draw_dwg(c, dwg, tx, ty):
             c.drawCentredString(tx(r['x']), ty(r['y']), name[:20])
 
 
+# ══════════════════════════════════════════
+# STRUCTURAL GRID IN DWG COORDINATES
+# Grid inscribed within DWG footprint bounds
+# ══════════════════════════════════════════
+
+def _draw_grid_axes_dwg(c, tx, ty, xn, yn, nx, ny, px_m, py_m, dwg_w, dwg_h):
+    """Draw structural axes inscribed in DWG bounds."""
+    c.setStrokeColor(GRIS4); c.setLineWidth(0.2); c.setDash(4, 2)
+    for i in range(nx + 1):
+        xp = xn + i * px_m * 1000  # m → mm (DWG units)
+        c.line(tx(xp), ty(yn) - 8*mm, tx(xp), ty(yn + dwg_h * 1000) + 8*mm)
+    for j in range(ny + 1):
+        yp = yn + j * py_m * 1000
+        c.line(tx(xn) - 8*mm, ty(yp), tx(xn + dwg_w * 1000) + 8*mm, ty(yp))
+    c.setDash()
+    for i in range(nx + 1):
+        xp = xn + i * px_m * 1000
+        _axis_label(c, tx(xp), ty(yn) - 15*mm, str(i + 1))
+    for j in range(ny + 1):
+        yp = yn + j * py_m * 1000
+        _axis_label(c, tx(xn) - 15*mm, ty(yp), chr(65 + j))
+    # Dimensions
+    c.setFillColor(GRIS3); c.setFont("Helvetica", 5.5)
+    for i in range(nx):
+        mid = xn + (i + 0.5) * px_m * 1000
+        c.drawCentredString(tx(mid), ty(yn) - 9*mm, f"{px_m*1000:.0f}")
+    for j in range(ny):
+        mid_y = yn + (j + 0.5) * py_m * 1000
+        c.saveState(); c.translate(tx(xn) - 9*mm, ty(mid_y)); c.rotate(90)
+        c.drawCentredString(0, 0, f"{py_m*1000:.0f}"); c.restoreState()
+
+
+def _draw_poteaux_dwg(c, tx, ty, xn, yn, nx, ny, px_m, py_m, pot_s, dwg_sc):
+    """Draw columns at DWG-aligned grid intersections."""
+    pt_d = max(pot_s * dwg_sc / 2, 3)  # pot_s in mm, dwg_sc converts mm→pt
+    for i in range(nx + 1):
+        for j in range(ny + 1):
+            xp = xn + i * px_m * 1000
+            yp = yn + j * py_m * 1000
+            px_pt, py_pt = tx(xp), ty(yp)
+            c.setFillColor(NOIR); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
+            c.rect(px_pt - pt_d/2, py_pt - pt_d/2, pt_d, pt_d, fill=1, stroke=1)
+
+
+def _draw_poutres_pp_dwg(c, tx, ty, xn, yn, nx, ny, px_m, py_m, pp_b):
+    """Draw main beams on DWG coordinate system."""
+    for j in range(ny + 1):
+        yp = yn + j * py_m * 1000
+        for i in range(nx):
+            x1 = xn + i * px_m * 1000
+            x2 = xn + (i + 1) * px_m * 1000
+            c.setStrokeColor(NOIR); c.setLineWidth(0.8)
+            c.line(tx(x1), ty(yp), tx(x2), ty(yp))
+
+
+def _draw_poutres_ps_dwg(c, tx, ty, xn, yn, nx, ny, px_m, py_m):
+    """Draw secondary beams on DWG coordinate system."""
+    for i in range(nx + 1):
+        xp = xn + i * px_m * 1000
+        for j in range(ny):
+            y1 = yn + j * py_m * 1000
+            y2 = yn + (j + 1) * py_m * 1000
+            c.setStrokeColor(GRIS3); c.setLineWidth(0.4)
+            c.line(tx(xp), ty(y1), tx(xp), ty(y2))
+
+
+def _draw_dalle_hatch_dwg(c, tx, ty, xn, yn, nx, ny, px_m, py_m):
+    """Draw slab hatch on DWG coordinate system."""
+    c.setStrokeColor(GRIS4); c.setLineWidth(0.1)
+    for i in range(nx):
+        for j in range(ny):
+            x1 = tx(xn + i * px_m * 1000) + 2
+            y1 = ty(yn + j * py_m * 1000) + 2
+            x2 = tx(xn + (i + 1) * px_m * 1000) - 2
+            y2 = ty(yn + (j + 1) * py_m * 1000) - 2
+            sw = x2 - x1; sh = y2 - y1
+            if sw < 3 or sh < 3: continue
+            step = max(6, int(sw / 15))
+            for k in range(0, int(sw + sh), step):
+                lx1 = x1 + min(k, sw); ly1 = y1 + max(0, k - sw)
+                lx2 = x1 + max(0, k - sh); ly2 = y1 + min(k, sh)
+                c.line(lx1, ly1, lx2, ly2)
+
+
 def _legend(c, w, h, items):
     """Draw legend box — top right."""
     lx = w - 58*mm; ly = h - 28*mm
@@ -370,24 +454,77 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
             dtx, dty, dsc, dgw, dgh = _dwg_layout(w, h, lvl_geom)
             if dtx:
                 _draw_dwg(c, lvl_geom, dtx, dty)
+                # Use REAL axes from DWG if available
+                real_ax = lvl_geom.get('axes_x', [])
+                real_ay = lvl_geom.get('axes_y', [])
+                if real_ax and real_ay:
+                    # Draw real structural axes
+                    c.setStrokeColor(GRIS4); c.setLineWidth(0.25); c.setDash(4, 2)
+                    for i, ax in enumerate(real_ax):
+                        c.line(dtx(ax), dty(real_ay[0]) - 8*mm, dtx(ax), dty(real_ay[-1]) + 8*mm)
+                        _axis_label(c, dtx(ax), dty(real_ay[0]) - 14*mm, str(i+1))
+                    for j, ay in enumerate(real_ay):
+                        c.line(dtx(real_ax[0]) - 8*mm, dty(ay), dtx(real_ax[-1]) + 8*mm, dty(ay))
+                        _axis_label(c, dtx(real_ax[0]) - 14*mm, dty(ay), chr(65 + (j % 26)))
+                    c.setDash()
+                    # Poteaux at real axis intersections
+                    pt_d = max(pot_s * dsc / 2, 3)
+                    for ax in real_ax:
+                        for ay in real_ay:
+                            c.setFillColor(NOIR); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
+                            c.rect(dtx(ax)-pt_d/2, dty(ay)-pt_d/2, pt_d, pt_d, fill=1, stroke=1)
+                    # Poutres principales along horizontal axes
+                    c.setStrokeColor(NOIR); c.setLineWidth(0.8)
+                    for ay in real_ay:
+                        for i in range(len(real_ax)-1):
+                            c.line(dtx(real_ax[i]), dty(ay), dtx(real_ax[i+1]), dty(ay))
+                    # Poutres secondaires along vertical axes
+                    c.setStrokeColor(GRIS3); c.setLineWidth(0.4)
+                    for ax in real_ax:
+                        for j in range(len(real_ay)-1):
+                            c.line(dtx(ax), dty(real_ay[j]), dtx(ax), dty(real_ay[j+1]))
+                    # Dalle hatch per panel
+                    c.setStrokeColor(GRIS4); c.setLineWidth(0.1)
+                    for i in range(len(real_ax)-1):
+                        for j in range(len(real_ay)-1):
+                            x1 = dtx(real_ax[i]) + 2; x2 = dtx(real_ax[i+1]) - 2
+                            y1 = dty(real_ay[j]) + 2; y2 = dty(real_ay[j+1]) - 2
+                            sw = x2-x1; sh = y2-y1
+                            if sw > 4 and sh > 4:
+                                step = max(5, int(sw/12))
+                                for k in range(0, int(sw+sh), step):
+                                    lx1 = x1+min(k,sw); ly1 = y1+max(0,k-sw)
+                                    lx2 = x1+max(0,k-sh); ly2 = y1+min(k,sh)
+                                    c.line(lx1,ly1,lx2,ly2)
+                            # Dalle label
+                            if sw > 10 and sh > 10:
+                                c.setFillColor(GRIS3); c.setFont("Helvetica", 3)
+                                c.drawCentredString((x1+x2)/2, (y1+y2)/2, f"D ep.{dalle_ep}")
+                else:
+                    # No axes in DWG — fall back to centred abstract grid
+                    bounds = _dwg_bounds(lvl_geom)
+                    cx_d = (bounds[0]+bounds[2])/2; cy_d = (bounds[1]+bounds[3])/2
+                    gx0 = cx_d - nx*px_m*500; gy0 = cy_d - ny*py_m*500
+                    _draw_grid_axes_dwg(c, dtx, dty, gx0, gy0, nx, ny, px_m, py_m, nx*px_m, ny*py_m)
+                    _draw_poutres_pp_dwg(c, dtx, dty, gx0, gy0, nx, ny, px_m, py_m, pp_b)
+                    _draw_poutres_ps_dwg(c, dtx, dty, gx0, gy0, nx, ny, px_m, py_m)
+                    _draw_poteaux_dwg(c, dtx, dty, gx0, gy0, nx, ny, px_m, py_m, pot_s, dsc)
             else:
                 use_dwg = False
 
-        # Structural grid always drawn on top
-        ox, oy, sc, gw, gh = _grid_layout(w, h, nx, ny, px_m, py_m)
-        _draw_grid_axes(c, ox, oy, sc, nx, ny, px_m, py_m, gw, gh)
-        _draw_dalle_hatch(c, ox, oy, sc, nx, ny, px_m, py_m)
-        _draw_poutres_pp(c, ox, oy, sc, nx, ny, px_m, py_m, pp_b)
-        _draw_poutres_ps(c, ox, oy, sc, nx, ny, px_m, py_m)
-        _draw_poteaux(c, ox, oy, sc, nx, ny, px_m, py_m, pot_s)
-
-        # Dalle label in each panel
-        c.setFillColor(GRIS3); c.setFont("Helvetica", 4.5)
-        for i in range(nx):
-            for j in range(ny):
-                cx_p = ox + (i + 0.5) * px_m * sc
-                cy_p = oy + (j + 0.5) * py_m * sc
-                c.drawCentredString(cx_p, cy_p, f"D ep.{dalle_ep}")
+        if not use_dwg:
+            ox, oy, sc, gw, gh = _grid_layout(w, h, nx, ny, px_m, py_m)
+            _draw_grid_axes(c, ox, oy, sc, nx, ny, px_m, py_m, gw, gh)
+            _draw_dalle_hatch(c, ox, oy, sc, nx, ny, px_m, py_m)
+            _draw_poutres_pp(c, ox, oy, sc, nx, ny, px_m, py_m, pp_b)
+            _draw_poutres_ps(c, ox, oy, sc, nx, ny, px_m, py_m)
+            _draw_poteaux(c, ox, oy, sc, nx, ny, px_m, py_m, pot_s)
+            c.setFillColor(GRIS3); c.setFont("Helvetica", 4.5)
+            for i in range(nx):
+                for j in range(ny):
+                    cx_p = ox + (i + 0.5) * px_m * sc
+                    cy_p = oy + (j + 0.5) * py_m * sc
+                    c.drawCentredString(cx_p, cy_p, f"D ep.{dalle_ep}")
 
         _legend(c, w, h, [
             (NOIR, 'fill', f"Poteau {pot_s}×{pot_s}"),
@@ -407,39 +544,81 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
     c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 13)
     c.drawString(14*mm, h - 17*mm, "FERRAILLAGE DALLE — NIVEAU COURANT")
 
-    # DWG fond de plan
     lvl_geom = dwg_levels.get('Étage courant') or dwg_levels.get('Rez-de-Chaussée')
+    use_dwg_dalle = False
+    real_ax_d = []; real_ay_d = []
     if lvl_geom and len(lvl_geom.get('walls', [])) >= 5:
         dtx, dty, dsc, dgw, dgh = _dwg_layout(w, h, lvl_geom)
         if dtx:
             _draw_dwg(c, lvl_geom, dtx, dty)
+            real_ax_d = lvl_geom.get('axes_x', [])
+            real_ay_d = lvl_geom.get('axes_y', [])
+            if real_ax_d and real_ay_d:
+                # Axes + poteaux aux vraies positions
+                c.setStrokeColor(GRIS4); c.setLineWidth(0.25); c.setDash(4, 2)
+                for ax in real_ax_d:
+                    c.line(dtx(ax), dty(real_ay_d[0])-6*mm, dtx(ax), dty(real_ay_d[-1])+6*mm)
+                for ay in real_ay_d:
+                    c.line(dtx(real_ax_d[0])-6*mm, dty(ay), dtx(real_ax_d[-1])+6*mm, dty(ay))
+                c.setDash()
+                pt_d = max(pot_s * dsc / 2, 3)
+                for ax in real_ax_d:
+                    for ay in real_ay_d:
+                        c.setFillColor(NOIR); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
+                        c.rect(dtx(ax)-pt_d/2, dty(ay)-pt_d/2, pt_d, pt_d, fill=1, stroke=1)
+                use_dwg_dalle = True
+            else:
+                ox, oy, sc, gw, gh = _grid_layout(w, h, nx, ny, px_m, py_m)
+                _draw_grid_axes(c, ox, oy, sc, nx, ny, px_m, py_m, gw, gh)
+                _draw_poteaux(c, ox, oy, sc, nx, ny, px_m, py_m, pot_s)
 
-    ox, oy, sc, gw, gh = _grid_layout(w, h, nx, ny, px_m, py_m)
-    _draw_grid_axes(c, ox, oy, sc, nx, ny, px_m, py_m, gw, gh)
-    _draw_poteaux(c, ox, oy, sc, nx, ny, px_m, py_m, pot_s)
+    if not use_dwg_dalle and not (real_ax_d and real_ay_d):
+        ox, oy, sc, gw, gh = _grid_layout(w, h, nx, ny, px_m, py_m)
+        _draw_grid_axes(c, ox, oy, sc, nx, ny, px_m, py_m, gw, gh)
+        _draw_poteaux(c, ox, oy, sc, nx, ny, px_m, py_m, pot_s)
 
     # Rebar direction arrows in each panel
-    for i in range(nx):
-        for j in range(ny):
-            sx = ox + i * px_m * sc; sy = oy + j * py_m * sc
-            sw = px_m * sc; sh = py_m * sc
-            cx_p = sx + sw/2; cy_p = sy + sh/2
-            # Direction X bars (red)
-            c.setStrokeColor(ROUGE); c.setLineWidth(0.5)
-            nb_x = max(2, int(sh / 8))
-            for k in range(nb_x):
-                yb = sy + 4 + k * (sh - 8) / max(nb_x - 1, 1)
-                c.line(sx + 3, yb, sx + sw - 3, yb)
-            # Direction Y bars (blue)
-            c.setStrokeColor(BLEU); c.setLineWidth(0.4)
-            nb_y = max(2, int(sw / 8))
-            for k in range(nb_y):
-                xb = sx + 4 + k * (sw - 8) / max(nb_y - 1, 1)
-                c.line(xb, sy + 3, xb, sy + sh - 3)
-            # Label
-            c.setFillColor(NOIR); c.setFont("Helvetica", 3.5)
-            c.drawCentredString(cx_p, cy_p + 3, f"As x={dalle.As_x_cm2_ml:.2f}")
-            c.drawCentredString(cx_p, cy_p - 3, f"As y={dalle.As_y_cm2_ml:.2f}")
+    if use_dwg_dalle and real_ax_d and real_ay_d:
+        n_rx = len(real_ax_d); n_ry = len(real_ay_d)
+        for i in range(n_rx - 1):
+            for j in range(n_ry - 1):
+                sx = dtx(real_ax_d[i]) + 2; sy = dty(real_ay_d[j]) + 2
+                sw = dtx(real_ax_d[i+1]) - sx - 2; sh = dty(real_ay_d[j+1]) - sy - 2
+                if sw < 5 or sh < 5: continue
+                cx_p = sx + sw/2; cy_p = sy + sh/2
+                c.setStrokeColor(ROUGE); c.setLineWidth(0.4)
+                nb_x = max(2, int(sh / 8))
+                for k in range(nb_x):
+                    yb = sy + 3 + k * (sh - 6) / max(nb_x - 1, 1)
+                    c.line(sx + 2, yb, sx + sw - 2, yb)
+                c.setStrokeColor(BLEU); c.setLineWidth(0.3)
+                nb_y = max(2, int(sw / 8))
+                for k in range(nb_y):
+                    xb = sx + 3 + k * (sw - 6) / max(nb_y - 1, 1)
+                    c.line(xb, sy + 2, xb, sy + sh - 2)
+                if sw > 10 and sh > 10:
+                    c.setFillColor(NOIR); c.setFont("Helvetica", 2.5)
+                    c.drawCentredString(cx_p, cy_p + 2, f"As x={dalle.As_x_cm2_ml:.2f}")
+                    c.drawCentredString(cx_p, cy_p - 3, f"As y={dalle.As_y_cm2_ml:.2f}")
+    else:
+        for i in range(nx):
+            for j in range(ny):
+                sx = ox + i * px_m * sc; sy = oy + j * py_m * sc
+                sw = px_m * sc; sh = py_m * sc
+                cx_p = sx + sw/2; cy_p = sy + sh/2
+                c.setStrokeColor(ROUGE); c.setLineWidth(0.5)
+                nb_x = max(2, int(sh / 8))
+                for k in range(nb_x):
+                    yb = sy + 4 + k * (sh - 8) / max(nb_x - 1, 1)
+                    c.line(sx + 3, yb, sx + sw - 3, yb)
+                c.setStrokeColor(BLEU); c.setLineWidth(0.4)
+                nb_y = max(2, int(sw / 8))
+                for k in range(nb_y):
+                    xb = sx + 4 + k * (sw - 8) / max(nb_y - 1, 1)
+                    c.line(xb, sy + 3, xb, sy + sh - 3)
+                c.setFillColor(NOIR); c.setFont("Helvetica", 3.5)
+                c.drawCentredString(cx_p, cy_p + 3, f"As x={dalle.As_x_cm2_ml:.2f}")
+                c.drawCentredString(cx_p, cy_p - 3, f"As y={dalle.As_y_cm2_ml:.2f}")
 
     _legend(c, w, h, [
         (ROUGE, 0.5, f"Nappe inf X — As={dalle.As_x_cm2_ml:.2f} cm²/ml"),
@@ -457,40 +636,69 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
     c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 13)
     c.drawString(14*mm, h - 17*mm, "PLAN DE FONDATIONS")
 
-    # DWG fond de plan (sous-sol si disponible)
     lvl_geom = dwg_levels.get('Sous-Sol') or dwg_levels.get('Rez-de-Chaussée')
+    use_dwg_fond = False
+    real_ax_f = []; real_ay_f = []
     if lvl_geom and len(lvl_geom.get('walls', [])) >= 5:
         dtx, dty, dsc, dgw, dgh = _dwg_layout(w, h, lvl_geom)
         if dtx:
             _draw_dwg(c, lvl_geom, dtx, dty)
+            real_ax_f = lvl_geom.get('axes_x', [])
+            real_ay_f = lvl_geom.get('axes_y', [])
+            if real_ax_f and real_ay_f:
+                c.setStrokeColor(GRIS4); c.setLineWidth(0.25); c.setDash(4, 2)
+                for ax in real_ax_f:
+                    c.line(dtx(ax), dty(real_ay_f[0])-6*mm, dtx(ax), dty(real_ay_f[-1])+6*mm)
+                for ay in real_ay_f:
+                    c.line(dtx(real_ax_f[0])-6*mm, dty(ay), dtx(real_ax_f[-1])+6*mm, dty(ay))
+                c.setDash()
+                use_dwg_fond = True
 
-    ox, oy, sc, gw, gh = _grid_layout(w, h, nx, ny, px_m, py_m)
-    _draw_grid_axes(c, ox, oy, sc, nx, ny, px_m, py_m, gw, gh)
+    if not use_dwg_fond:
+        ox, oy, sc, gw, gh = _grid_layout(w, h, nx, ny, px_m, py_m)
+        _draw_grid_axes(c, ox, oy, sc, nx, ny, px_m, py_m, gw, gh)
 
     nb_pieux = getattr(fd, 'nb_pieux', 0)
     diam_p = getattr(fd, 'diam_pieu_mm', 600)
     larg_sem = getattr(fd, 'largeur_semelle_m', 1.5)
-    pr = max(min(diam_p * sc / 2000, 8), 3) if nb_pieux else max(larg_sem * sc / 2, 5)
 
-    for i in range(nx + 1):
+    if use_dwg_fond and real_ax_f and real_ay_f:
+        pr = 5
+        for ax in real_ax_f:
+            for ay in real_ay_f:
+                px_pt, py_pt = dtx(ax), dty(ay)
+                c.setFillColor(VERT_P); c.setStrokeColor(VERT); c.setLineWidth(0.4)
+                if nb_pieux > 0:
+                    c.circle(px_pt, py_pt, pr, fill=1, stroke=1)
+                else:
+                    c.rect(px_pt - pr, py_pt - pr, 2*pr, 2*pr, fill=1, stroke=1)
+        # Longrines between semelles
+        c.setStrokeColor(NOIR); c.setLineWidth(0.8)
+        for ay in real_ay_f:
+            for i in range(len(real_ax_f)-1):
+                c.line(dtx(real_ax_f[i])+pr, dty(ay), dtx(real_ax_f[i+1])-pr, dty(ay))
+        for ax in real_ax_f:
+            for j in range(len(real_ay_f)-1):
+                c.line(dtx(ax), dty(real_ay_f[j])+pr, dtx(ax), dty(real_ay_f[j+1])-pr)
+    else:
+        pr = max(min(diam_p * sc / 2000, 8), 3) if nb_pieux else max(larg_sem * sc / 2, 5)
+        for i in range(nx + 1):
+            for j in range(ny + 1):
+                xp = ox + i * px_m * sc; yp = oy + j * py_m * sc
+                c.setFillColor(VERT_P); c.setStrokeColor(VERT); c.setLineWidth(0.4)
+                if nb_pieux > 0:
+                    c.circle(xp, yp, pr, fill=1, stroke=1)
+                else:
+                    c.rect(xp - pr, yp - pr, 2*pr, 2*pr, fill=1, stroke=1)
+        c.setStrokeColor(NOIR); c.setLineWidth(0.8)
         for j in range(ny + 1):
-            xp = ox + i * px_m * sc; yp = oy + j * py_m * sc
-            c.setFillColor(VERT_P); c.setStrokeColor(VERT); c.setLineWidth(0.4)
-            if nb_pieux > 0:
-                c.circle(xp, yp, pr, fill=1, stroke=1)
-            else:
-                c.rect(xp - pr, yp - pr, 2*pr, 2*pr, fill=1, stroke=1)
-
-    # Longrines
-    c.setStrokeColor(NOIR); c.setLineWidth(0.8)
-    for j in range(ny + 1):
-        for i in range(nx):
-            x1 = ox + i * px_m * sc + pr; x2 = ox + (i+1) * px_m * sc - pr
-            c.line(x1, oy + j * py_m * sc, x2, oy + j * py_m * sc)
-    for i in range(nx + 1):
-        for j in range(ny):
-            y1 = oy + j * py_m * sc + pr; y2 = oy + (j+1) * py_m * sc - pr
-            c.line(ox + i * px_m * sc, y1, ox + i * px_m * sc, y2)
+            for i in range(nx):
+                x1 = ox + i * px_m * sc + pr; x2 = ox + (i+1) * px_m * sc - pr
+                c.line(x1, oy + j * py_m * sc, x2, oy + j * py_m * sc)
+        for i in range(nx + 1):
+            for j in range(ny):
+                y1 = oy + j * py_m * sc + pr; y2 = oy + (j+1) * py_m * sc - pr
+                c.line(ox + i * px_m * sc, y1, ox + i * px_m * sc, y2)
 
     type_f = fd.type.value.replace('_', ' ').title()
     c.setFont("Helvetica", 5.5); c.setFillColor(GRIS2)
