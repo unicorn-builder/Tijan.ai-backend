@@ -351,118 +351,165 @@ async def parse_fichier(
         except: pass
 
 
+# ══════════════════════════════════════════════════════════════
+# ASYNC MULTI-DWG PARSING
+# ══════════════════════════════════════════════════════════════
+
+import threading
+import uuid
+
+_parse_jobs = {}  # job_id → {status, progress, result, files, error}
+
+
 @app.post("/parse-multi")
-async def parse_multi_fichiers(
+async def parse_multi_start(
     files: List[UploadFile] = File(...),
     nb_niveaux: Optional[int] = Form(None),
     ville: Optional[str] = Form(None),
     beton: Optional[str] = Form(None),
 ):
-    """Parse multiple DWG files — one per level. Extracts geometry per level and deduces nb_niveaux from filenames."""
+    """Upload N DWG files → returns job_id immediately. Parse happens in background."""
+    saved = []
+    for f in files:
+        saved.append((f.filename, await save_upload(f)))
+
+    job_id = str(uuid.uuid4())[:12]
+    _parse_jobs[job_id] = {
+        "status": "processing",
+        "progress": f"0/{len(saved)}",
+        "total": len(saved),
+        "done": 0,
+        "result": None,
+        "error": None,
+    }
+    logger.info(f"/parse-multi: job {job_id} started with {len(saved)} files")
+
+    # Launch background thread
+    t = threading.Thread(target=_parse_multi_worker,
+                         args=(job_id, saved, nb_niveaux, ville or "Dakar", beton),
+                         daemon=True)
+    t.start()
+
+    return JSONResponse(content={"ok": True, "job_id": job_id, "files_count": len(saved)})
+
+
+@app.get("/parse-status/{job_id}")
+async def parse_multi_status(job_id: str):
+    """Poll for multi-DWG parse job status."""
+    job = _parse_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return JSONResponse(content={
+        "status": job["status"],
+        "progress": job["progress"],
+        "done": job["done"],
+        "total": job["total"],
+        "result": job["result"],
+        "error": job["error"],
+    })
+
+
+def _parse_multi_worker(job_id, saved_files, nb_niveaux, ville, beton):
+    """Background worker: parse each DWG file via APS."""
     import re as _re
-    saved_paths = []
+    job = _parse_jobs[job_id]
     try:
-        # Save all files
-        for f in files:
-            saved_paths.append((f.filename, await save_upload(f)))
-        logger.info(f"/parse-multi: {len(saved_paths)} files: {[n for n,_ in saved_paths]}")
-
-        # Classify files by level from filenames
-        level_map = {}  # level_key → (filename, path)
-        max_etage = 0
-        has_ss = False
-        has_terrasse = False
-
-        for filename, path in saved_paths:
-            upper = filename.upper()
-            # Detect level from filename
-            if 'SOUS-SOL' in upper or 'SOUS SOL' in upper or 'PARKING' in upper:
-                level_map['SOUS_SOL'] = (filename, path)
-                has_ss = True
-            elif 'REZ' in upper or 'RDC' in upper:
-                level_map['RDC'] = (filename, path)
-            elif 'TERRASSE' in upper:
-                level_map['TERRASSE'] = (filename, path)
-                has_terrasse = True
-            else:
-                # Extract etage numbers: "ETAGE 1 ,2 et 3" → [1,2,3]
-                nums = _re.findall(r'(\d+)', upper.split('ETAGE')[-1]) if 'ETAGE' in upper else []
-                if nums:
-                    etage_nums = [int(n) for n in nums if 0 < int(n) < 50]
-                    for n in etage_nums:
-                        max_etage = max(max_etage, n)
-                    # Key: ETAGE_1_3 or ETAGE_4 etc
-                    if len(etage_nums) > 1:
-                        key = f"ETAGE_{min(etage_nums)}_{max(etage_nums)}"
-                    else:
-                        key = f"ETAGE_{etage_nums[0]}"
-                    level_map[key] = (filename, path)
-                else:
-                    # Unknown — add as generic
-                    level_map[f'LEVEL_{len(level_map)}'] = (filename, path)
-
-        # Deduce nb_niveaux
-        computed_niveaux = max_etage + 1 + (1 if has_ss else 0) + (1 if has_terrasse else 0)
-        if nb_niveaux:
-            final_niveaux = nb_niveaux
-        elif computed_niveaux > 2:
-            final_niveaux = computed_niveaux
-        else:
-            final_niveaux = len(saved_paths) + 1
-
-        logger.info(f"/parse-multi: levels detected: {list(level_map.keys())}, nb_niveaux={final_niveaux}")
-
-        # Parse first/largest file via APS for params extraction
-        main_file = saved_paths[0]
-        for fn, fp in saved_paths:
-            if 'RDC' in fn.upper() or 'REZ' in fn.upper() or 'ETAGE 1' in fn.upper():
-                main_file = (fn, fp)
-                break
-
         from aps_parser_v2 import parser_dwg_aps
-        result = parser_dwg_aps(main_file[1], nb_niveaux=final_niveaux, ville=ville or "Dakar")
 
-        if result.get("ok"):
-            result["nb_niveaux"] = final_niveaux
-            result["donnees_moteur"]["nb_niveaux"] = final_niveaux
-            result["levels_detected"] = list(level_map.keys())
-            result["files_count"] = len(saved_paths)
-            if ville:
-                result["ville"] = ville
-                result["donnees_moteur"]["ville"] = ville
+        # Sort by size descending — largest file first (most geometry)
+        sorted_files = sorted(saved_files, key=lambda x: os.path.getsize(x[1]), reverse=True)
 
-            # Extract geometry from each DWG via APS
-            dwg_geometry = {}
-            for level_key, (filename, filepath) in level_map.items():
-                try:
-                    level_result = parser_dwg_aps(filepath, nb_niveaux=final_niveaux, ville=ville or "Dakar")
-                    if level_result.get("ok") and level_result.get("urn"):
-                        geom = _load_project_geometry(level_result["urn"])
-                        if geom:
-                            # Normalize key for generator
-                            norm_key = level_key
-                            if 'ETAGE' in level_key and level_key not in ('ETAGE_8',):
-                                # Group regular etages as ETAGES
-                                norm_key = 'ETAGES_COURANT'
-                            geom['label'] = filename.replace('.dwg','').replace('.DWG','')
-                            dwg_geometry[norm_key] = geom
-                            logger.info(f"  {level_key} ({filename}): {len(geom.get('walls',[]))} walls")
-                except Exception as e:
-                    logger.warning(f"  {level_key} parse failed: {e}")
+        # Parse main file first (largest) for params
+        main_name, main_path = sorted_files[0]
+        logger.info(f"  Job {job_id}: parsing main file {main_name}")
+        main_result = parser_dwg_aps(main_path, nb_niveaux=nb_niveaux or len(saved_files),
+                                      ville=ville)
+        job["done"] = 1
+        job["progress"] = f"1/{len(saved_files)}"
 
-            if dwg_geometry:
-                result["dwg_geometry"] = dwg_geometry
-                logger.info(f"/parse-multi: geometry extracted for {len(dwg_geometry)} levels")
+        if not main_result.get("ok"):
+            job["status"] = "error"
+            job["error"] = main_result.get("message", "Main file parse failed")
+            return
 
-        return JSONResponse(content=result)
+        result = main_result
+        nb_niv = nb_niveaux or len(saved_files)
+        result["nb_niveaux"] = nb_niv
+        result["donnees_moteur"]["nb_niveaux"] = nb_niv
+        result["files_count"] = len(saved_files)
+
+        # Extract geometry from main file
+        main_geom = None
+        if result.get("urn"):
+            try:
+                main_geom = _load_project_geometry(result["urn"])
+            except Exception as e:
+                logger.warning(f"  Main geometry extraction failed: {e}")
+
+        # Parse remaining files for their geometry
+        dwg_geometry = {}
+        if main_geom:
+            # Classify main file
+            level_key = _classify_level_from_name(main_name, len(dwg_geometry))
+            main_geom['label'] = main_name.replace('.dwg', '').replace('.DWG', '')
+            dwg_geometry[level_key] = main_geom
+
+        for i, (filename, filepath) in enumerate(sorted_files[1:], start=2):
+            try:
+                logger.info(f"  Job {job_id}: parsing {filename} ({i}/{len(sorted_files)})")
+                level_result = parser_dwg_aps(filepath, nb_niveaux=nb_niv, ville=ville)
+                job["done"] = i
+                job["progress"] = f"{i}/{len(sorted_files)}"
+
+                if level_result.get("ok") and level_result.get("urn"):
+                    geom = _load_project_geometry(level_result["urn"])
+                    if geom:
+                        level_key = _classify_level_from_name(filename, len(dwg_geometry))
+                        geom['label'] = filename.replace('.dwg', '').replace('.DWG', '')
+                        dwg_geometry[level_key] = geom
+                        logger.info(f"    {level_key}: {len(geom.get('walls', []))} walls")
+            except Exception as e:
+                logger.warning(f"    {filename} parse failed: {e}")
+
+        if dwg_geometry:
+            result["dwg_geometry"] = dwg_geometry
+            result["levels_detected"] = list(dwg_geometry.keys())
+
+        job["result"] = result
+        job["status"] = "done"
+        job["progress"] = f"{len(sorted_files)}/{len(sorted_files)}"
+        logger.info(f"  Job {job_id}: DONE — {len(dwg_geometry)} levels parsed")
 
     except Exception as e:
-        logger.error(f"/parse-multi error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"  Job {job_id} error: {e}")
+        job["status"] = "error"
+        job["error"] = str(e)
     finally:
-        for _, p in saved_paths:
+        # Cleanup temp files
+        for _, p in saved_files:
             try: os.unlink(p)
             except: pass
+
+
+def _classify_level_from_name(filename, fallback_index):
+    """Classify a DWG file as a building level from its filename."""
+    import re as _re
+    upper = filename.upper()
+    if any(k in upper for k in ['SOUS-SOL', 'SOUS SOL', 'PARKING', 'BASEMENT']):
+        return 'SOUS_SOL'
+    if any(k in upper for k in ['REZ', 'RDC', 'GROUND']):
+        return 'RDC'
+    if any(k in upper for k in ['TERRASSE', 'ROOFTOP', 'TOITURE']):
+        return 'TERRASSE'
+    # Extract etage numbers
+    if 'ETAGE' in upper or 'FLOOR' in upper or 'LEVEL' in upper:
+        nums = _re.findall(r'(\d+)', upper.split('ETAGE')[-1] if 'ETAGE' in upper else upper)
+        etage_nums = [int(n) for n in nums if 0 < int(n) < 50]
+        if etage_nums:
+            if len(etage_nums) > 1:
+                return f"ETAGE_{min(etage_nums)}_{max(etage_nums)}"
+            return f"ETAGE_{etage_nums[0]}"
+    return f"LEVEL_{fallback_index}"
 
 
 def _extract_dxf_geometry(filepath: str) -> dict:
