@@ -179,6 +179,7 @@ class ParamsProjet(BaseModel):
     sol_context:        Optional[str] = None
     avec_sous_sol:      bool  = False
     urn:                Optional[str] = None
+    dwg_geometry:       Optional[dict] = None
 
 
 # ════════════════════════════════════════════════════════════
@@ -307,6 +308,18 @@ async def parse_fichier(
         if ext == "dwg":
             from aps_parser_v2 import parser_dwg_aps
             result = parser_dwg_aps(tmp_path, nb_niveaux=nb_niveaux, ville=ville or "Dakar")
+        elif ext == "dxf":
+            from parse_plans import extraire_params
+            result = extraire_params(tmp_path)
+            # DXF: extract full geometry via ezdxf for plan generation
+            try:
+                dxf_geom = _extract_dxf_geometry(tmp_path)
+                if dxf_geom:
+                    result["dwg_geometry"] = dxf_geom
+                    logger.info("DXF geometry extracted: %d walls, %d rooms",
+                                len(dxf_geom.get('walls',[])), len(dxf_geom.get('rooms',[])))
+            except Exception as e:
+                logger.warning("DXF geometry extraction failed: %s", e)
         else:
             from parse_plans import extraire_params
             result = extraire_params(tmp_path)
@@ -319,6 +332,16 @@ async def parse_fichier(
             if nb_niveaux: result["nb_niveaux"] = nb_niveaux
             if ville:      result["ville"] = ville
             if beton:      result["classe_beton"] = beton
+            # For DWG: extract geometry from APS properties (already translated)
+            if result.get("urn") and not result.get("dwg_geometry"):
+                try:
+                    geom = _load_project_geometry(result["urn"])
+                    if geom:
+                        result["dwg_geometry"] = geom
+                        logger.info("APS geometry extracted: %d walls, %d rooms",
+                                    len(geom.get('walls',[])), len(geom.get('rooms',[])))
+                except Exception as e:
+                    logger.warning("APS geometry extraction in /parse failed: %s", e)
         return JSONResponse(content=result)
     except Exception as e:
         logger.error(f"/parse error: {e}")
@@ -326,6 +349,60 @@ async def parse_fichier(
     finally:
         try: os.unlink(tmp_path)
         except: pass
+
+
+def _extract_dxf_geometry(filepath: str) -> dict:
+    """Extract full geometry from a DXF file using ezdxf — same format as sakho_*_geom.json."""
+    import ezdxf, re
+    doc = ezdxf.readfile(filepath)
+    msp = doc.modelspace()
+
+    wall_layers = {'MUR', 'MURS', 'A-MUR', '0_MURS', 'WALL', 'WALLS'}
+    window_layers = {'A-ALUMINIUM', 'ALUMINIUM', 'A-GLAZ', 'A-VERRE', 'A-HACH VERRE'}
+    door_layers = {'DOOR', 'S_Doors', 'BOIS', 'PORTE'}
+    sanitary_layers = {'SANITAIRE', 'A-SANITAIRES', 'AM FITTING-SANITARY', 'STR_SANITARY'}
+
+    geometry = {'walls': [], 'windows': [], 'doors': [], 'sanitary': [], 'rooms': []}
+
+    def _add_entity(entity, target):
+        if entity.dxftype() == 'LINE':
+            target.append({'type': 'line',
+                           'start': [round(entity.dxf.start.x, 1), round(entity.dxf.start.y, 1)],
+                           'end': [round(entity.dxf.end.x, 1), round(entity.dxf.end.y, 1)]})
+        elif entity.dxftype() == 'LWPOLYLINE':
+            pts = [[round(p[0], 1), round(p[1], 1)] for p in entity.get_points()]
+            target.append({'type': 'polyline', 'points': pts, 'closed': entity.closed})
+        elif entity.dxftype() == 'CIRCLE':
+            target.append({'type': 'circle',
+                           'center': [round(entity.dxf.center.x, 1), round(entity.dxf.center.y, 1)],
+                           'radius': round(entity.dxf.radius, 1)})
+        elif entity.dxftype() == 'ARC':
+            target.append({'type': 'arc',
+                           'center': [round(entity.dxf.center.x, 1), round(entity.dxf.center.y, 1)],
+                           'radius': round(entity.dxf.radius, 1),
+                           'start_angle': round(entity.dxf.start_angle, 1),
+                           'end_angle': round(entity.dxf.end_angle, 1)})
+
+    for e in msp:
+        layer = e.dxf.layer
+        if layer in wall_layers:
+            _add_entity(e, geometry['walls'])
+        elif layer in window_layers:
+            _add_entity(e, geometry['windows'])
+        elif layer in door_layers:
+            _add_entity(e, geometry['doors'])
+        elif layer in sanitary_layers:
+            _add_entity(e, geometry['sanitary'])
+        elif layer == 'Etiquettes de pièces' and e.dxftype() in ('TEXT', 'MTEXT'):
+            try:
+                txt = e.text if e.dxftype() == 'MTEXT' else e.dxf.text
+                txt = re.sub(r'\\[^;]*;', '', txt).strip()
+                pos = e.dxf.insert
+                geometry['rooms'].append({'name': txt, 'x': round(pos.x, 1), 'y': round(pos.y, 1)})
+            except:
+                pass
+
+    return geometry if len(geometry['walls']) > 5 else None
 
 
 @app.post("/parse-sol")
@@ -696,14 +773,16 @@ async def generate_plu(params: ParamsProjet):
 
 @app.post("/generate-plans-structure")
 async def generate_plans_structure(params: ParamsProjet):
-    """Plans structure PDF — paramétrique depuis ResultatsStructure + géométrie APS du projet."""
+    """Plans structure PDF — géométrie DWG du projet si disponible, sinon grille paramétrique."""
     try:
         _, _, calculer_structure = get_moteur_structure()
         from generate_plans_structure_mep import generer_plans_structure
         donnees = params_to_donnees(params)
         rs = calculer_structure(donnees)
-        # Load THIS project's geometry from APS if URN available
-        dwg_geometry = _load_project_geometry(params.urn) if params.urn else None
+        # Geometry priority: body > APS URN > None (grid fallback)
+        dwg_geometry = params.dwg_geometry
+        if not dwg_geometry and params.urn:
+            dwg_geometry = _load_project_geometry(params.urn)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             out_path = tmp.name
         generer_plans_structure(out_path, resultats=rs, params=params.dict(),
@@ -720,7 +799,7 @@ async def generate_plans_structure(params: ParamsProjet):
 
 @app.post("/generate-plans-mep")
 async def generate_plans_mep(params: ParamsProjet):
-    """Plans MEP PDF — paramétrique depuis ResultatsMEP + géométrie APS du projet."""
+    """Plans MEP PDF — géométrie DWG du projet si disponible, sinon grille paramétrique."""
     try:
         _, _, calculer_structure = get_moteur_structure()
         calculer_mep = get_moteur_mep()
@@ -728,7 +807,9 @@ async def generate_plans_mep(params: ParamsProjet):
         donnees = params_to_donnees(params)
         rs = calculer_structure(donnees)
         rm = calculer_mep(donnees, rs)
-        dwg_geometry = _load_project_geometry(params.urn) if params.urn else None
+        dwg_geometry = params.dwg_geometry
+        if not dwg_geometry and params.urn:
+            dwg_geometry = _load_project_geometry(params.urn)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             out_path = tmp.name
         generer_plans_mep(out_path, resultats_mep=rm, resultats_structure=rs,
