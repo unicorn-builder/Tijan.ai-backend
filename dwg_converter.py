@@ -281,20 +281,36 @@ def pdf_to_geometry(pdf_path: str) -> dict:
 
         geometry = {'walls': [], 'windows': [], 'doors': [], 'rooms': []}
 
-        # Process each page (typically 1 page per level)
-        for page_idx in range(min(len(doc), 5)):  # max 5 pages
+        # Find the BEST page — the one with most long lines (= floor plan, not schematic)
+        import math as _math
+        best_page = 0
+        best_score = 0
+        for pi in range(len(doc)):
+            page = doc[pi]
+            score = 0
+            for d in page.get_drawings():
+                for item in d.get("items", []):
+                    if item[0] == "l":
+                        p1, p2 = item[1], item[2]
+                        l = _math.hypot(p2.x-p1.x, p2.y-p1.y)
+                        if l >= 30:
+                            score += 1
+            if score > best_score:
+                best_score = score
+                best_page = pi
+
+        # Process ONLY the best page
+        for page_idx in [best_page]:
             page = doc[page_idx]
             drawings = page.get_drawings()
 
             # Extract lines, filter out hatch/patterns (very short lines)
             # and keep only structural lines (walls, openings)
             import math as _math
-            # PDF scale: 1pt = 0.35mm at 72dpi
-            # Walls are typically > 20pt (7mm on page = ~1m at 1:150 scale)
-            # Details/symbols are 5-20pt
-            # Hatch patterns are < 5pt
-            MIN_WALL_LENGTH = 20
-            MIN_WINDOW_LENGTH = 10
+            # PDF scale: at 1:100, 1m = ~2.8pt. At 1:150, 1m = ~1.9pt
+            # Structural walls are long lines (> 30pt ≈ 1m+ at typical scale)
+            # Skip shorter lines — details, symbols, annotations, hatch
+            MIN_WALL_LENGTH = 30
 
             for drawing in drawings:
                 width = drawing.get("width") or 0
@@ -304,8 +320,8 @@ def pdf_to_geometry(pdf_path: str) -> dict:
                         p1, p2 = item[1], item[2]
                         length = _math.hypot(p2.x - p1.x, p2.y - p1.y)
 
-                        # Skip very short lines — hatch patterns, symbols
-                        if length < MIN_WINDOW_LENGTH:
+                        # Skip short lines — hatch patterns, symbols, details
+                        if length < MIN_WALL_LENGTH:
                             continue
 
                         line = {
@@ -316,16 +332,26 @@ def pdf_to_geometry(pdf_path: str) -> dict:
 
                         if length >= MIN_WALL_LENGTH:
                             geometry['walls'].append(line)
-                        else:
-                            geometry['windows'].append(line)
 
-            # Extract text annotations (room labels)
+            # Extract room labels — only keep names that look like rooms
+            import re as _re
+            ROOM_KEYWORDS = {'chambre','salon','sejour','cuisine','sdb','wc','hall',
+                             'balcon','terrasse','bureau','dgt','palier','asc','sas',
+                             'parking','local','salle','restaurant','bar','magasin',
+                             'buanderie','dressing','vestibule','vest','entrée','entry',
+                             'room','kitchen','bathroom','bedroom','living','lobby',
+                             'service','patio','mezzanine','vide','gaine','shaft',
+                             'laundry','empty','stay','plan','floor','lift'}
             blocks = page.get_text("dict")["blocks"]
             for block in blocks:
-                for line in block.get("lines", []):
-                    for span in line.get("spans", []):
+                for line_b in block.get("lines", []):
+                    for span in line_b.get("spans", []):
                         text = span.get("text", "").strip()
-                        if text and 3 <= len(text) <= 30:
+                        if not text or len(text) < 2 or len(text) > 30:
+                            continue
+                        # Keep only room-like labels
+                        lower = text.lower()
+                        if any(kw in lower for kw in ROOM_KEYWORDS):
                             bbox = span.get("bbox", (0, 0, 0, 0))
                             geometry['rooms'].append({
                                 'name': text,
