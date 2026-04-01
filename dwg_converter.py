@@ -24,8 +24,12 @@ def _find_dwg2dxf():
     path = shutil.which('dwg2dxf')
     if path:
         return path
-    for p in ['/usr/bin/dwg2dxf', '/usr/local/bin/dwg2dxf']:
-        if os.path.isfile(p):
+    # Check app-local bin (Render installs here)
+    here = os.path.dirname(os.path.abspath(__file__))
+    for p in [os.path.join(here, 'bin', 'dwg2dxf'),
+              '/opt/render/project/src/bin/dwg2dxf',
+              '/usr/local/bin/dwg2dxf', '/usr/bin/dwg2dxf']:
+        if os.path.isfile(p) and os.access(p, os.X_OK):
             return p
     return None
 
