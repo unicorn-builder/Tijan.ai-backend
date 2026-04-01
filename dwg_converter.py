@@ -480,9 +480,6 @@ def convert_to_dxf(input_path: str, ville: str = "Dakar") -> str:
         return input_path  # already DXF
 
     if ext == '.dwg':
-        # Ensure dwg2dxf is available (compiles on first use if needed)
-        _ensure_dwg2dxf()
-
         # Try LibreDWG first (fastest, open source)
         if DWG2DXF_PATH:
             dxf = dwg_to_dxf_libredwg(input_path)

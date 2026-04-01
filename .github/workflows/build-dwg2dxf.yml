@@ -1,6 +1,8 @@
 name: Build dwg2dxf
 on:
   workflow_dispatch:
+  repository_dispatch:
+    types: [build-dwg2dxf]
 
 jobs:
   build:
