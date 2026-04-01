@@ -311,10 +311,10 @@ async def parse_fichier(
     beton: Optional[str] = Form(None),
 ):
     """
-    Parse a single plan file.
-    DWG → convert to DXF (ODA local or APS fallback) → ezdxf geometry extraction
-    DXF → ezdxf directly
-    PDF → text extraction + Claude AI
+    Parse a single plan file. Extracts params + geometry.
+    DWG → try local DWG→DXF (LibreDWG/ODA) then ezdxf, else APS cloud
+    DXF → ezdxf directly (instant, full geometry)
+    PDF → text extraction + Claude AI (params only)
     """
     tmp_path = await save_upload(file)
     dxf_path = None
@@ -322,40 +322,52 @@ async def parse_fichier(
         filename = file.filename or ""
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
-        if ext in ("dwg", "dxf"):
-            # Convert to DXF if needed (DWG → DXF via ODA or APS)
-            from dwg_converter import convert_to_dxf
-            if ext == "dwg":
-                dxf_path = convert_to_dxf(tmp_path, ville=ville or "Dakar")
-            else:
-                dxf_path = tmp_path  # already DXF
+        if ext == "dxf":
+            # DXF: ezdxf reads directly — instant, full geometry
+            from parse_plans import extraire_params
+            result = extraire_params(tmp_path)
+            try:
+                dxf_geom = _extract_dxf_geometry(tmp_path)
+                if dxf_geom:
+                    result["dwg_geometry"] = dxf_geom
+                    logger.info("DXF geometry: %d walls, %d rooms",
+                                len(dxf_geom.get('walls',[])), len(dxf_geom.get('rooms',[])))
+            except Exception as e:
+                logger.warning("DXF geometry extraction failed: %s", e)
 
-            if dxf_path and os.path.isfile(dxf_path):
-                # Extract params via ezdxf + Claude
-                from parse_plans import extraire_params
-                result = extraire_params(dxf_path)
-                # Extract full geometry via ezdxf
-                try:
-                    dxf_geom = _extract_dxf_geometry(dxf_path)
-                    if dxf_geom:
-                        result["dwg_geometry"] = dxf_geom
-                        logger.info("Geometry extracted: %d walls, %d rooms",
-                                    len(dxf_geom.get('walls',[])), len(dxf_geom.get('rooms',[])))
-                except Exception as e:
-                    logger.warning("DXF geometry extraction failed: %s", e)
-            else:
-                # DXF conversion failed — fall back to APS for params only
-                logger.warning("DXF conversion failed, falling back to APS params-only")
+        elif ext == "dwg":
+            # DWG: try local converter first, then APS
+            converted = False
+            try:
+                from dwg_converter import convert_to_dxf, DWG2DXF_PATH, ODA_PATH
+                if DWG2DXF_PATH or ODA_PATH:
+                    dxf_path = convert_to_dxf(tmp_path, ville=ville or "Dakar")
+                    if dxf_path and os.path.isfile(dxf_path):
+                        from parse_plans import extraire_params
+                        result = extraire_params(dxf_path)
+                        dxf_geom = _extract_dxf_geometry(dxf_path)
+                        if dxf_geom:
+                            result["dwg_geometry"] = dxf_geom
+                            logger.info("DWG→DXF local: %d walls, %d rooms",
+                                        len(dxf_geom.get('walls',[])), len(dxf_geom.get('rooms',[])))
+                        converted = True
+            except Exception as e:
+                logger.warning("Local DWG→DXF failed: %s", e)
+
+            if not converted:
+                # APS cloud fallback (works, ~2min)
                 from aps_parser_v2 import parser_dwg_aps
                 result = parser_dwg_aps(tmp_path, nb_niveaux=nb_niveaux, ville=ville or "Dakar")
-                # Try APS geometry extraction
+                # Extract geometry from APS properties
                 if result.get("ok") and result.get("urn"):
                     try:
                         geom = _load_project_geometry(result["urn"])
                         if geom:
                             result["dwg_geometry"] = geom
-                    except Exception:
-                        pass
+                            logger.info("APS geometry: %d walls, %d rooms",
+                                        len(geom.get('walls',[])), len(geom.get('rooms',[])))
+                    except Exception as e:
+                        logger.warning("APS geometry extraction failed: %s", e)
         else:
             # PDF or other
             from parse_plans import extraire_params
