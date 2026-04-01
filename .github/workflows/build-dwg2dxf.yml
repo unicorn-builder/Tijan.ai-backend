@@ -1,0 +1,33 @@
+name: Build dwg2dxf
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Compile LibreDWG
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential automake libtool texinfo
+          cd /tmp
+          curl -sL https://github.com/LibreDWG/libredwg/releases/download/0.13.4/libredwg-0.13.4.tar.xz | tar xJ
+          cd libredwg-0.13.4
+          ./configure --prefix=/tmp/libredwg_install --disable-write --disable-shared -q
+          make -j$(nproc) -s
+          make install -s
+          
+      - name: Commit binary
+        run: |
+          mkdir -p bin
+          cp /tmp/libredwg_install/bin/dwg2dxf bin/dwg2dxf
+          chmod +x bin/dwg2dxf
+          file bin/dwg2dxf
+          ls -la bin/dwg2dxf
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add bin/dwg2dxf
+          git commit -m "feat: add pre-compiled dwg2dxf binary (Linux x86_64)" || echo "No changes"
+          git push
