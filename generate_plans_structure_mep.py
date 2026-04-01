@@ -432,7 +432,7 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
         level_names.append(f"Étage courant" if nb_etages > 1 else "Étage 1")
     level_names.append("Terrasse")
 
-    total_pages = len(level_names) + 3  # +ferraillage dalle + fondations + coupe
+    total_pages = len(level_names) + 5  # +ferraillage dalle + fondations + coupe + ferraillage poutre + ferraillage poteau
     page = 0
 
     c = pdfcanvas.Canvas(output_path, pagesize=A3L)
@@ -453,53 +453,104 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
         if use_dwg:
             dtx, dty, dsc, dgw, dgh = _dwg_layout(w, h, lvl_geom)
             if dtx:
+                # 1. Architecture en fond gris clair
                 _draw_dwg(c, lvl_geom, dtx, dty)
-                # Use REAL axes from DWG if available
+
                 real_ax = lvl_geom.get('axes_x', [])
                 real_ay = lvl_geom.get('axes_y', [])
                 if real_ax and real_ay:
-                    # Draw real structural axes
-                    c.setStrokeColor(GRIS4); c.setLineWidth(0.25); c.setDash(4, 2)
-                    for i, ax in enumerate(real_ax):
-                        c.line(dtx(ax), dty(real_ay[0]) - 8*mm, dtx(ax), dty(real_ay[-1]) + 8*mm)
-                        _axis_label(c, dtx(ax), dty(real_ay[0]) - 14*mm, str(i+1))
-                    for j, ay in enumerate(real_ay):
-                        c.line(dtx(real_ax[0]) - 8*mm, dty(ay), dtx(real_ax[-1]) + 8*mm, dty(ay))
-                        _axis_label(c, dtx(real_ax[0]) - 14*mm, dty(ay), chr(65 + (j % 26)))
-                    c.setDash()
-                    # Poteaux at real axis intersections
-                    pt_d = max(pot_s * dsc / 2, 3)
+                    # 2. Axes structurels — tirets fins gris
+                    c.setStrokeColor(GRIS4); c.setLineWidth(0.3); c.setDash(6, 3)
+                    y_ext_lo = dty(real_ay[0]) - 12*mm
+                    y_ext_hi = dty(real_ay[-1]) + 12*mm
+                    x_ext_lo = dtx(real_ax[0]) - 12*mm
+                    x_ext_hi = dtx(real_ax[-1]) + 12*mm
                     for ax in real_ax:
-                        for ay in real_ay:
-                            c.setFillColor(NOIR); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
-                            c.rect(dtx(ax)-pt_d/2, dty(ay)-pt_d/2, pt_d, pt_d, fill=1, stroke=1)
-                    # Poutres principales along horizontal axes
-                    c.setStrokeColor(NOIR); c.setLineWidth(0.8)
+                        c.line(dtx(ax), y_ext_lo, dtx(ax), y_ext_hi)
                     for ay in real_ay:
-                        for i in range(len(real_ax)-1):
-                            c.line(dtx(real_ax[i]), dty(ay), dtx(real_ax[i+1]), dty(ay))
-                    # Poutres secondaires along vertical axes
-                    c.setStrokeColor(GRIS3); c.setLineWidth(0.4)
-                    for ax in real_ax:
-                        for j in range(len(real_ay)-1):
-                            c.line(dtx(ax), dty(real_ay[j]), dtx(ax), dty(real_ay[j+1]))
-                    # Dalle hatch per panel
-                    c.setStrokeColor(GRIS4); c.setLineWidth(0.1)
+                        c.line(x_ext_lo, dty(ay), x_ext_hi, dty(ay))
+                    c.setDash()
+
+                    # 3. Axis labels — cercles numérotés
+                    for i, ax in enumerate(real_ax):
+                        _axis_label(c, dtx(ax), y_ext_lo - 6*mm, str(i+1))
+                        _axis_label(c, dtx(ax), y_ext_hi + 6*mm, str(i+1))
+                    for j, ay in enumerate(real_ay):
+                        _axis_label(c, x_ext_lo - 6*mm, dty(ay), chr(65 + (j % 26)))
+                        _axis_label(c, x_ext_hi + 6*mm, dty(ay), chr(65 + (j % 26)))
+
+                    # 4. Cotations portées entre axes (en bas)
+                    c.setFillColor(GRIS2); c.setFont("Helvetica", 4)
+                    for i in range(len(real_ax)-1):
+                        span = (real_ax[i+1] - real_ax[i]) / 1000
+                        if span > 0.5:
+                            mid_x = dtx((real_ax[i] + real_ax[i+1]) / 2)
+                            c.drawCentredString(mid_x, y_ext_lo - 13*mm, f"{span:.2f}m")
+                    for j in range(len(real_ay)-1):
+                        span = (real_ay[j+1] - real_ay[j]) / 1000
+                        if span > 0.5:
+                            mid_y = dty((real_ay[j] + real_ay[j+1]) / 2)
+                            c.saveState()
+                            c.translate(x_ext_lo - 13*mm, mid_y); c.rotate(90)
+                            c.drawCentredString(0, 0, f"{span:.2f}m")
+                            c.restoreState()
+
+                    # 5. Dalle hatch — léger, seulement les grands panneaux
+                    c.setStrokeColor(GRIS4); c.setLineWidth(0.08)
                     for i in range(len(real_ax)-1):
                         for j in range(len(real_ay)-1):
-                            x1 = dtx(real_ax[i]) + 2; x2 = dtx(real_ax[i+1]) - 2
-                            y1 = dty(real_ay[j]) + 2; y2 = dty(real_ay[j+1]) - 2
-                            sw = x2-x1; sh = y2-y1
-                            if sw > 4 and sh > 4:
-                                step = max(5, int(sw/12))
+                            x1p = dtx(real_ax[i]) + 3; x2p = dtx(real_ax[i+1]) - 3
+                            y1p = dty(real_ay[j]) + 3; y2p = dty(real_ay[j+1]) - 3
+                            sw = x2p-x1p; sh = y2p-y1p
+                            if sw > 8 and sh > 8:
+                                step = max(8, int(sw/8))
                                 for k in range(0, int(sw+sh), step):
-                                    lx1 = x1+min(k,sw); ly1 = y1+max(0,k-sw)
-                                    lx2 = x1+max(0,k-sh); ly2 = y1+min(k,sh)
+                                    lx1 = x1p+min(k,sw); ly1 = y1p+max(0,k-sw)
+                                    lx2 = x1p+max(0,k-sh); ly2 = y1p+min(k,sh)
                                     c.line(lx1,ly1,lx2,ly2)
-                            # Dalle label
-                            if sw > 10 and sh > 10:
-                                c.setFillColor(GRIS3); c.setFont("Helvetica", 3)
-                                c.drawCentredString((x1+x2)/2, (y1+y2)/2, f"D ep.{dalle_ep}")
+
+                    # 6. Poutres principales — trait épais noir + label section
+                    pp_w = max(pp_b * dsc / 1000, 1)  # beam width on page
+                    c.setStrokeColor(NOIR); c.setLineWidth(max(pp_w, 1.2))
+                    for ay in real_ay:
+                        py = dty(ay)
+                        for i in range(len(real_ax)-1):
+                            px1 = dtx(real_ax[i]); px2 = dtx(real_ax[i+1])
+                            c.line(px1, py, px2, py)
+                            # Label PP section au milieu du premier span de chaque axe
+                            if i == 0:
+                                c.setFillColor(ROUGE); c.setFont("Helvetica-Bold", 3)
+                                c.drawCentredString((px1+px2)/2, py + 3, f"PP {pp_b}×{pp_h}")
+
+                    # 7. Poutres secondaires — trait moyen gris
+                    c.setStrokeColor(GRIS3); c.setLineWidth(0.6)
+                    for ax in real_ax:
+                        px = dtx(ax)
+                        for j in range(len(real_ay)-1):
+                            c.line(px, dty(real_ay[j]), px, dty(real_ay[j+1]))
+
+                    # 8. Poteaux — carrés noirs aux intersections, taille visible
+                    pt_d = max(pot_s * dsc, 4)  # pot_s en mm × scale
+                    for ax in real_ax:
+                        for ay in real_ay:
+                            px, py = dtx(ax), dty(ay)
+                            c.setFillColor(NOIR); c.setStrokeColor(NOIR); c.setLineWidth(0.4)
+                            c.rect(px - pt_d/2, py - pt_d/2, pt_d, pt_d, fill=1, stroke=1)
+
+                    # 9. Dalle labels — section + épaisseur dans les grands panneaux
+                    c.setFillColor(GRIS2); c.setFont("Helvetica", 3.5)
+                    for i in range(len(real_ax)-1):
+                        for j in range(len(real_ay)-1):
+                            x1p = dtx(real_ax[i]); x2p = dtx(real_ax[i+1])
+                            y1p = dty(real_ay[j]); y2p = dty(real_ay[j+1])
+                            sw = x2p-x1p; sh = y2p-y1p
+                            if sw > 15 and sh > 15:
+                                cx_d = (x1p+x2p)/2; cy_d = (y1p+y2p)/2
+                                c.drawCentredString(cx_d, cy_d + 2, f"Dalle ep.{dalle_ep}")
+                                span_x = (real_ax[i+1]-real_ax[i])/1000
+                                span_y = (real_ay[j+1]-real_ay[j])/1000
+                                c.setFont("Helvetica", 2.5)
+                                c.drawCentredString(cx_d, cy_d - 3, f"{span_x:.1f}×{span_y:.1f}m")
                 else:
                     # No axes in DWG — fall back to centred abstract grid
                     bounds = _dwg_bounds(lvl_geom)
@@ -757,6 +808,17 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
 
     _cartouche(c, w, h, p, "COUPE GÉNÉRALE", page, total_pages, ech="1/200")
     c.showPage()
+
+    # ── PLANCHES FERRAILLAGE depuis generate_plans_v4.py (validées) ──
+    # Ces fonctions dessinent sur le canvas et appellent c.showPage()
+    try:
+        from generate_plans_v4 import pl_poutre, pl_poteau
+        # Update page count in cartouche
+        pl_poutre(c, r, p)   # Ferraillage poutre principale (A4)
+        pl_poteau(c, r, p)   # Ferraillage poteaux par niveau (A4)
+    except Exception as e:
+        import logging
+        logging.getLogger("tijan").warning(f"Ferraillage planches skipped: {e}")
 
     c.save()
     return output_path
