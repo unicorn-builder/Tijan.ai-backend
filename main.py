@@ -1510,18 +1510,71 @@ async def parse_manifest(urn: str):
 
 @app.post("/chat")
 async def chat_projet(request: Request):
-    """Chat LLM avec contexte projet — fine-tuning outputs."""
+    """Chat LLM avec contexte projet — fine-tuning outputs.
+    When Claude returns <MODIF>{...}</MODIF>, auto-recalculate and return updated results."""
     try:
         from chat_engine import chat
+        import re as _re
         body = await request.json()
         message = body.get("message", "")
         historique = body.get("historique", [])
-        params = body.get("params", {})
+        chat_params = body.get("params", {})
         resultats_structure = body.get("resultats_structure", {})
         resultats_mep = body.get("resultats_mep", None)
         if not message:
             raise HTTPException(status_code=400, detail="Message manquant")
-        reponse = chat(message, historique, params, resultats_structure, resultats_mep)
+        reponse = chat(message, historique, chat_params, resultats_structure, resultats_mep)
+
+        # Detect <MODIF>{...}</MODIF> in Claude's response
+        modif_match = _re.search(r'<MODIF>(.*?)</MODIF>', reponse, _re.DOTALL)
+        if modif_match:
+            try:
+                modif = _json.loads(modif_match.group(1))
+                # Merge modifications into current params
+                updated_params = {**chat_params, **modif}
+                # Strip MODIF tag from displayed response
+                clean_reponse = _re.sub(r'<MODIF>.*?</MODIF>\s*', '', reponse, flags=_re.DOTALL).strip()
+
+                # Recalculate with updated params
+                _, _, calculer_structure = get_moteur_structure()
+                calculer_mep_fn = get_moteur_mep()
+                pp = ParamsProjet(**{k: v for k, v in updated_params.items() if k in ParamsProjet.model_fields})
+                donnees = params_to_donnees(pp)
+                rs = calculer_structure(donnees)
+                rm = calculer_mep_fn(donnees, rs)
+
+                # Serialize results
+                import dataclasses
+                def _ser(obj):
+                    if dataclasses.is_dataclass(obj):
+                        return dataclasses.asdict(obj)
+                    if hasattr(obj, '__dict__'):
+                        return {k: _ser(v) for k, v in obj.__dict__.items() if not k.startswith('_')}
+                    if isinstance(obj, list):
+                        return [_ser(i) for i in obj]
+                    if isinstance(obj, dict):
+                        return {k: _ser(v) for k, v in obj.items()}
+                    return obj
+
+                rs_dict = _ser(rs)
+                rs_dict['ok'] = True
+                rm_dict = _ser(rm)
+
+                gc.collect()
+                return {
+                    "ok": True,
+                    "reponse": clean_reponse,
+                    "recalcul": True,
+                    "modif": modif,
+                    "updated_params": updated_params,
+                    "updated_resultats": rs_dict,
+                    "updated_mep": rm_dict,
+                }
+            except Exception as e:
+                logger.warning(f"/chat MODIF recalcul failed: {e}")
+                # Fall through to normal response with MODIF tags stripped
+                reponse = _re.sub(r'<MODIF>.*?</MODIF>\s*', '', reponse, flags=_re.DOTALL).strip()
+
         gc.collect()
         return {"ok": True, "reponse": reponse}
     except HTTPException:
