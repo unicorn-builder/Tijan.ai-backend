@@ -1133,6 +1133,68 @@ async def generate_plans_mep(params: ParamsProjet):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/generate-plans-structure-dwg")
+async def generate_plans_structure_dwg(params: ParamsProjet):
+    """Plans structure as DXF file — architecture + poteaux/poutres/dalles on layers."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        from generate_plans_structure_mep import generer_plans_structure_dxf
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        dwg_geometry = params.dwg_geometry
+        if not dwg_geometry and params.urn:
+            dwg_geometry = _load_project_geometry(params.urn)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".dxf") as tmp:
+            out_path = tmp.name
+        generer_plans_structure_dxf(out_path, resultats=rs, params=params.dict(),
+                                    dwg_geometry=dwg_geometry)
+        with open(out_path, "rb") as f:
+            dxf_bytes = f.read()
+        os.unlink(out_path)
+        gc.collect()
+        dxf_name = f"tijan_plans_structure_{params.nom.replace(' ','_')[:20]}.dxf"
+        return StreamingResponse(
+            io.BytesIO(dxf_bytes),
+            media_type="application/dxf",
+            headers={"Content-Disposition": f"attachment; filename={dxf_name}"},
+        )
+    except Exception as e:
+        logger.error(f"/generate-plans-structure-dwg error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-plans-mep-dwg")
+async def generate_plans_mep_dwg(params: ParamsProjet):
+    """Plans MEP as DXF file — architecture + MEP equipment on layers per lot."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        from generate_plans_structure_mep import generer_plans_mep_dxf
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+        dwg_geometry = params.dwg_geometry
+        if not dwg_geometry and params.urn:
+            dwg_geometry = _load_project_geometry(params.urn)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".dxf") as tmp:
+            out_path = tmp.name
+        generer_plans_mep_dxf(out_path, resultats_mep=rm, resultats_structure=rs,
+                              params=params.dict(), dwg_geometry=dwg_geometry)
+        with open(out_path, "rb") as f:
+            dxf_bytes = f.read()
+        os.unlink(out_path)
+        gc.collect()
+        dxf_name = f"tijan_plans_mep_{params.nom.replace(' ','_')[:20]}.dxf"
+        return StreamingResponse(
+            io.BytesIO(dxf_bytes),
+            media_type="application/dxf",
+            headers={"Content-Disposition": f"attachment; filename={dxf_name}"},
+        )
+    except Exception as e:
+        logger.error(f"/generate-plans-mep-dwg error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def _load_project_geometry(urn: str) -> dict:
     """
     Load real DWG geometry for THIS specific project from APS.

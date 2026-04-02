@@ -1440,3 +1440,418 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
 
     c.save()
     return output_path
+
+
+# ══════════════════════════════════════════
+# DXF OUTPUT — Structure & MEP plans as DXF
+# ══════════════════════════════════════════
+
+def _dxf_add_geometry(msp, dwg, layer_walls, layer_win, layer_doors, layer_rooms, oy=0):
+    """Add DWG geometry entities to ezdxf modelspace."""
+    for item in dwg.get('walls', []):
+        if item['type'] == 'line':
+            msp.add_line(
+                (item['start'][0], item['start'][1] + oy),
+                (item['end'][0], item['end'][1] + oy),
+                dxfattribs={'layer': layer_walls},
+            )
+        elif item['type'] == 'polyline':
+            pts = [(p[0], p[1] + oy) for p in item['points']]
+            pl = msp.add_lwpolyline(pts, dxfattribs={'layer': layer_walls})
+            if item.get('closed'):
+                pl.close()
+    for item in dwg.get('windows', []):
+        if item['type'] == 'line':
+            msp.add_line(
+                (item['start'][0], item['start'][1] + oy),
+                (item['end'][0], item['end'][1] + oy),
+                dxfattribs={'layer': layer_win},
+            )
+    for item in dwg.get('doors', []):
+        if item['type'] == 'line':
+            msp.add_line(
+                (item['start'][0], item['start'][1] + oy),
+                (item['end'][0], item['end'][1] + oy),
+                dxfattribs={'layer': layer_doors},
+            )
+    for room in dwg.get('rooms', []):
+        msp.add_text(
+            room.get('name', ''),
+            height=200,
+            dxfattribs={
+                'layer': layer_rooms,
+                'insert': (room['x'], room['y'] + oy),
+            },
+        )
+
+
+def generer_plans_structure_dxf(output_path, resultats=None, params=None, dwg_geometry=None, **kw):
+    """
+    Plans structure as DXF — architecture + structural grid (poteaux, poutres, dalles).
+    Same data as generer_plans_structure() but outputs DXF instead of PDF.
+    """
+    import ezdxf
+
+    if resultats is None:
+        raise ValueError("ResultatsStructure requis")
+    if params is None:
+        params = {}
+    if hasattr(params, "__dict__"):
+        params = {k: v for k, v in vars(params).items() if not k.startswith("_")}
+
+    r = resultats
+    p = params
+    nx, ny, px_m, py_m = _build_grid(p)
+    pot0 = r.poteaux[0] if r.poteaux else None
+    pp = r.poutre_principale
+    ps = r.poutre_secondaire
+    dalle = r.dalle
+
+    if pot0 is None or pp is None:
+        raise ValueError("Résultats structure incomplets")
+
+    pot_s = pot0.section_mm
+    pp_b, pp_h = pp.b_mm, pp.h_mm
+    dalle_ep = dalle.epaisseur_mm
+
+    # Normalize DWG geometry to levels
+    LEVEL_LABELS = {
+        'SOUS_SOL': 'Sous-Sol', 'RDC': 'Rez-de-Chaussée',
+        'ETAGES_1_7': 'Étage courant', 'ETAGE_8': 'Étage 8', 'TERRASSE': 'Terrasse',
+    }
+    dwg_levels = {}
+    if dwg_geometry:
+        if 'walls' in dwg_geometry:
+            dwg_levels = {'Étage courant': dwg_geometry}
+        else:
+            for key, geom in dwg_geometry.items():
+                if isinstance(geom, dict) and len(geom.get('walls', [])) >= 5:
+                    dwg_levels[LEVEL_LABELS.get(key, key)] = geom
+
+    level_names = []
+    if p.get("avec_sous_sol"):
+        level_names.append("Sous-Sol")
+    level_names.append("RDC")
+    nb_niv = p.get("nb_niveaux", len(r.poteaux))
+    nb_etages = nb_niv - len(level_names)
+    if nb_etages > 0:
+        level_names.append("Étage courant")
+    level_names.append("Terrasse")
+
+    # Create DXF document
+    doc = ezdxf.new('R2010')
+    msp = doc.modelspace()
+
+    # Layers
+    doc.layers.new('ARCH_MURS', dxfattribs={'color': 8})
+    doc.layers.new('ARCH_FENETRES', dxfattribs={'color': 4})
+    doc.layers.new('ARCH_PORTES', dxfattribs={'color': 30})
+    doc.layers.new('ARCH_PIECES', dxfattribs={'color': 9})
+    doc.layers.new('STR_AXES', dxfattribs={'color': 8})
+    doc.layers.new('STR_POTEAUX', dxfattribs={'color': 7})
+    doc.layers.new('STR_POUTRES_PP', dxfattribs={'color': 1})
+    doc.layers.new('STR_POUTRES_PS', dxfattribs={'color': 8})
+    doc.layers.new('STR_DALLES', dxfattribs={'color': 9})
+    doc.layers.new('STR_LABELS', dxfattribs={'color': 2})
+    doc.layers.new('LEVEL_LABELS', dxfattribs={'color': 3})
+
+    y_offset = 0
+
+    for level_name in level_names:
+        lvl_geom = dwg_levels.get(level_name) or dwg_levels.get('Étage courant')
+        has_dwg = lvl_geom and len(lvl_geom.get('walls', [])) >= 5
+
+        if has_dwg:
+            bounds = _dwg_bounds(lvl_geom)
+            if not bounds:
+                continue
+            xn, yn, xx, yx = bounds
+            dh_r = yx - yn
+
+            # Level label
+            msp.add_text(
+                level_name.upper(), height=500,
+                dxfattribs={'layer': 'LEVEL_LABELS', 'insert': (xn, yn - 2000 + y_offset)},
+            )
+
+            # Architecture
+            _dxf_add_geometry(msp, lvl_geom, 'ARCH_MURS', 'ARCH_FENETRES', 'ARCH_PORTES', 'ARCH_PIECES', oy=y_offset)
+
+            # Structural grid from real axes if available
+            real_ax = lvl_geom.get('axes_x', [])
+            real_ay = lvl_geom.get('axes_y', [])
+            if real_ax and real_ay:
+                for ax in real_ax:
+                    msp.add_line(
+                        (ax, real_ay[0] - 1500 + y_offset),
+                        (ax, real_ay[-1] + 1500 + y_offset),
+                        dxfattribs={'layer': 'STR_AXES', 'linetype': 'DASHED'},
+                    )
+                for ay in real_ay:
+                    msp.add_line(
+                        (real_ax[0] - 1500, ay + y_offset),
+                        (real_ax[-1] + 1500, ay + y_offset),
+                        dxfattribs={'layer': 'STR_AXES', 'linetype': 'DASHED'},
+                    )
+                for i, ax in enumerate(real_ax):
+                    msp.add_text(
+                        str(i + 1), height=300,
+                        dxfattribs={'layer': 'STR_LABELS', 'insert': (ax, real_ay[0] - 3000 + y_offset)},
+                    )
+                for j, ay in enumerate(real_ay):
+                    msp.add_text(
+                        chr(65 + (j % 26)), height=300,
+                        dxfattribs={'layer': 'STR_LABELS', 'insert': (real_ax[0] - 3000, ay + y_offset)},
+                    )
+                for ay in real_ay:
+                    for i in range(len(real_ax) - 1):
+                        msp.add_line(
+                            (real_ax[i], ay + y_offset),
+                            (real_ax[i + 1], ay + y_offset),
+                            dxfattribs={'layer': 'STR_POUTRES_PP'},
+                        )
+                for ax in real_ax:
+                    for j in range(len(real_ay) - 1):
+                        msp.add_line(
+                            (ax, real_ay[j] + y_offset),
+                            (ax, real_ay[j + 1] + y_offset),
+                            dxfattribs={'layer': 'STR_POUTRES_PS'},
+                        )
+                half = pot_s / 2
+                for ax in real_ax:
+                    for ay in real_ay:
+                        pts = [
+                            (ax - half, ay - half + y_offset),
+                            (ax + half, ay - half + y_offset),
+                            (ax + half, ay + half + y_offset),
+                            (ax - half, ay + half + y_offset),
+                        ]
+                        pl = msp.add_lwpolyline(pts, dxfattribs={'layer': 'STR_POTEAUX'})
+                        pl.close()
+                for i in range(len(real_ax) - 1):
+                    for j in range(len(real_ay) - 1):
+                        cx = (real_ax[i] + real_ax[i + 1]) / 2
+                        cy = (real_ay[j] + real_ay[j + 1]) / 2
+                        span_x = (real_ax[i + 1] - real_ax[i]) / 1000
+                        span_y = (real_ay[j + 1] - real_ay[j]) / 1000
+                        msp.add_text(
+                            f"Dalle ep.{dalle_ep} — {span_x:.1f}x{span_y:.1f}m",
+                            height=150,
+                            dxfattribs={'layer': 'STR_DALLES', 'insert': (cx, cy + y_offset)},
+                        )
+            else:
+                cx_d = (xn + xx) / 2
+                cy_d = (yn + yx) / 2
+                gx0 = cx_d - nx * px_m * 500
+                gy0 = cy_d - ny * py_m * 500
+                for i in range(nx + 1):
+                    ax = gx0 + i * px_m * 1000
+                    msp.add_line(
+                        (ax, gy0 + y_offset), (ax, gy0 + ny * py_m * 1000 + y_offset),
+                        dxfattribs={'layer': 'STR_AXES'},
+                    )
+                for j in range(ny + 1):
+                    ay = gy0 + j * py_m * 1000
+                    msp.add_line(
+                        (gx0, ay + y_offset), (gx0 + nx * px_m * 1000, ay + y_offset),
+                        dxfattribs={'layer': 'STR_AXES'},
+                    )
+                half = pot_s / 2
+                for i in range(nx + 1):
+                    for j in range(ny + 1):
+                        px = gx0 + i * px_m * 1000
+                        py_ = gy0 + j * py_m * 1000 + y_offset
+                        pts = [(px - half, py_ - half), (px + half, py_ - half),
+                               (px + half, py_ + half), (px - half, py_ + half)]
+                        pl = msp.add_lwpolyline(pts, dxfattribs={'layer': 'STR_POTEAUX'})
+                        pl.close()
+
+            y_offset += dh_r + 15000
+
+        else:
+            gx0, gy0 = 0, y_offset
+            msp.add_text(
+                level_name.upper(), height=500,
+                dxfattribs={'layer': 'LEVEL_LABELS', 'insert': (gx0, gy0 - 2000)},
+            )
+            for i in range(nx + 1):
+                ax = gx0 + i * px_m * 1000
+                msp.add_line(
+                    (ax, gy0), (ax, gy0 + ny * py_m * 1000),
+                    dxfattribs={'layer': 'STR_AXES'},
+                )
+                msp.add_text(str(i + 1), height=300, dxfattribs={'layer': 'STR_LABELS', 'insert': (ax, gy0 - 1500)})
+            for j in range(ny + 1):
+                ay = gy0 + j * py_m * 1000
+                msp.add_line(
+                    (gx0, ay), (gx0 + nx * px_m * 1000, ay),
+                    dxfattribs={'layer': 'STR_AXES'},
+                )
+                msp.add_text(chr(65 + j), height=300, dxfattribs={'layer': 'STR_LABELS', 'insert': (gx0 - 1500, ay)})
+            half = pot_s / 2
+            for i in range(nx + 1):
+                for j in range(ny + 1):
+                    px = gx0 + i * px_m * 1000
+                    py_ = gy0 + j * py_m * 1000
+                    pts = [(px - half, py_ - half), (px + half, py_ - half),
+                           (px + half, py_ + half), (px - half, py_ + half)]
+                    pl = msp.add_lwpolyline(pts, dxfattribs={'layer': 'STR_POTEAUX'})
+                    pl.close()
+            y_offset += ny * py_m * 1000 + 15000
+
+    doc.saveas(output_path)
+    return output_path
+
+
+def generer_plans_mep_dxf(output_path, resultats_mep=None, resultats_structure=None,
+                          params=None, dwg_geometry=None, **kw):
+    """
+    Plans MEP as DXF — architecture + MEP equipment on layers per lot.
+    Same data as generer_plans_mep() but outputs DXF instead of PDF.
+    """
+    import ezdxf
+    import re as _re
+
+    if resultats_mep is None:
+        raise ValueError("ResultatsMEP requis")
+    if params is None:
+        params = {}
+    if hasattr(params, "__dict__"):
+        params = {k: v for k, v in vars(params).items() if not k.startswith("_")}
+
+    rm = resultats_mep
+    p = params
+    nx, ny, px_m, py_m = _build_grid(p)
+
+    # Normalize DWG geometry
+    dwg_levels = {}
+    if dwg_geometry:
+        if 'walls' in dwg_geometry:
+            dwg_levels = {'Étage courant': dwg_geometry}
+        else:
+            LEVEL_LABELS = {
+                'SOUS_SOL': 'Sous-Sol', 'RDC': 'Rez-de-Chaussée',
+                'ETAGES_1_7': 'Étages 1 à 7', 'ETAGE_8': 'Étage 8', 'TERRASSE': 'Terrasse',
+            }
+            for key, geom in dwg_geometry.items():
+                if isinstance(geom, dict) and len(geom.get('walls', [])) >= 5:
+                    dwg_levels[LEVEL_LABELS.get(key, key)] = geom
+
+    level_names = []
+    if p.get('avec_sous_sol'):
+        level_names.append("Sous-Sol")
+    level_names.append("RDC")
+    nb_niv = p.get("nb_niveaux", 5)
+    nb_et = nb_niv - len(level_names) - 1
+    if nb_et > 0:
+        level_names.append("Étage courant")
+    level_names.append("Terrasse")
+
+    if dwg_levels and len(dwg_levels) > 1:
+        level_list = list(dwg_levels.items())
+    else:
+        single_geom = list(dwg_levels.values())[0] if dwg_levels else None
+        level_list = [(name, single_geom) for name in level_names]
+
+    def _classify_rooms(rooms):
+        wet, living, service = [], [], []
+        for r in rooms:
+            n = r.get('name', '').lower().strip()
+            if _re.match(r'^\d', n):
+                continue
+            if any(k in n for k in ['sdb', 'wc', 'toil', 'douche']):
+                wet.append(r)
+            elif any(k in n for k in ['cuisine', 'kitch', 'buanderie']):
+                wet.append(r)
+            elif any(k in n for k in ['salon', 'chambre', 'sejour', 'bureau', 'salle']):
+                living.append(r)
+            else:
+                service.append(r)
+        return wet, living, service
+
+    # Create DXF document
+    doc = ezdxf.new('R2010')
+    msp = doc.modelspace()
+
+    # Architecture layers
+    doc.layers.new('ARCH_MURS', dxfattribs={'color': 8})
+    doc.layers.new('ARCH_FENETRES', dxfattribs={'color': 4})
+    doc.layers.new('ARCH_PORTES', dxfattribs={'color': 30})
+    doc.layers.new('ARCH_PIECES', dxfattribs={'color': 9})
+    doc.layers.new('LEVEL_LABELS', dxfattribs={'color': 3})
+
+    # MEP layers
+    mep_layers = {
+        'MEP_PLOMBERIE_EF': 4, 'MEP_PLOMBERIE_EC': 1, 'MEP_PLOMBERIE_EU': 8,
+        'MEP_ELEC_ECLAIRAGE': 2, 'MEP_ELEC_PRISES': 6,
+        'MEP_CVC_CLIM': 5, 'MEP_CVC_VMC': 140,
+        'MEP_SSI_DETECTION': 1, 'MEP_SSI_EXTINCTION': 30,
+        'MEP_COURANTS_FAIBLES': 3, 'MEP_ASCENSEURS': 4, 'MEP_GTB': 6,
+    }
+    for lname, cidx in mep_layers.items():
+        doc.layers.new(lname, dxfattribs={'color': cidx})
+
+    y_offset = 0
+
+    for level_label, level_geom in level_list:
+        has_dwg = level_geom and len(level_geom.get('walls', [])) >= 5
+
+        if has_dwg:
+            bounds = _dwg_bounds(level_geom)
+            if not bounds:
+                continue
+            xn, yn, xx, yx = bounds
+            dh_r = yx - yn
+
+            msp.add_text(
+                level_label.upper(), height=500,
+                dxfattribs={'layer': 'LEVEL_LABELS', 'insert': (xn, yn - 2000 + y_offset)},
+            )
+            _dxf_add_geometry(msp, level_geom, 'ARCH_MURS', 'ARCH_FENETRES', 'ARCH_PORTES', 'ARCH_PIECES', oy=y_offset)
+
+            rooms = level_geom.get('rooms', [])
+            wet, living, service = _classify_rooms(rooms)
+            all_rooms = wet + living + service
+
+            for r in wet:
+                msp.add_circle((r['x'], r['y'] + y_offset), radius=200, dxfattribs={'layer': 'MEP_PLOMBERIE_EF'})
+                msp.add_circle((r['x'] + 400, r['y'] + y_offset), radius=200, dxfattribs={'layer': 'MEP_PLOMBERIE_EC'})
+                msp.add_circle((r['x'] - 400, r['y'] + y_offset), radius=200, dxfattribs={'layer': 'MEP_PLOMBERIE_EU'})
+            for r in all_rooms:
+                msp.add_circle((r['x'], r['y'] + 300 + y_offset), radius=150, dxfattribs={'layer': 'MEP_ELEC_ECLAIRAGE'})
+            for r in living + wet:
+                msp.add_circle((r['x'] + 500, r['y'] + y_offset), radius=100, dxfattribs={'layer': 'MEP_ELEC_PRISES'})
+            for r in living:
+                msp.add_circle((r['x'], r['y'] - 300 + y_offset), radius=250, dxfattribs={'layer': 'MEP_CVC_CLIM'})
+            for r in wet:
+                msp.add_circle((r['x'], r['y'] + 600 + y_offset), radius=150, dxfattribs={'layer': 'MEP_CVC_VMC'})
+            for r in all_rooms:
+                msp.add_circle((r['x'] - 300, r['y'] + 300 + y_offset), radius=100, dxfattribs={'layer': 'MEP_SSI_DETECTION'})
+            for r in living:
+                msp.add_circle((r['x'] - 500, r['y'] + y_offset), radius=100, dxfattribs={'layer': 'MEP_COURANTS_FAIBLES'})
+
+            y_offset += dh_r + 15000
+        else:
+            gx0, gy0 = 0, y_offset
+            msp.add_text(
+                level_label.upper(), height=500,
+                dxfattribs={'layer': 'LEVEL_LABELS', 'insert': (gx0, gy0 - 2000)},
+            )
+            for i in range(nx + 1):
+                ax = gx0 + i * px_m * 1000
+                msp.add_line((ax, gy0), (ax, gy0 + ny * py_m * 1000), dxfattribs={'layer': 'ARCH_MURS'})
+            for j in range(ny + 1):
+                ay = gy0 + j * py_m * 1000
+                msp.add_line((gx0, ay), (gx0 + nx * px_m * 1000, ay), dxfattribs={'layer': 'ARCH_MURS'})
+            for i in range(nx):
+                for j in range(ny):
+                    cx = gx0 + (i + 0.5) * px_m * 1000
+                    cy = gy0 + (j + 0.5) * py_m * 1000
+                    msp.add_circle((cx, cy), radius=150, dxfattribs={'layer': 'MEP_ELEC_ECLAIRAGE'})
+                    msp.add_circle((cx + 300, cy), radius=100, dxfattribs={'layer': 'MEP_ELEC_PRISES'})
+                    if j == 0:
+                        msp.add_circle((cx, cy - 300), radius=200, dxfattribs={'layer': 'MEP_PLOMBERIE_EF'})
+            y_offset += ny * py_m * 1000 + 15000
+
+    doc.saveas(output_path)
+    return output_path

@@ -91,6 +91,28 @@ class TestPDFEndpoints:
 # 4. Chat endpoint
 # ────────────────────────────────────────────
 
+# ────────────────────────────────────────────
+# 5. DXF generation endpoints
+# ────────────────────────────────────────────
+
+DXF_ENDPOINTS = [
+    "/generate-plans-structure-dwg",
+    "/generate-plans-mep-dwg",
+]
+
+
+class TestDXFEndpoints:
+    @pytest.mark.parametrize("endpoint", DXF_ENDPOINTS)
+    def test_dxf_endpoint(self, endpoint):
+        r = requests.post(f"{BASE_URL}{endpoint}", json=DEFAULT_PARAMS, timeout=TIMEOUT)
+        assert r.status_code == 200, f"{endpoint} returned {r.status_code}: {r.text[:200]}"
+        assert len(r.content) > 100, f"{endpoint} response too small: {len(r.content)} bytes"
+
+
+# ────────────────────────────────────────────
+# 6. Chat endpoint
+# ────────────────────────────────────────────
+
 class TestChatEndpoint:
     def test_chat(self):
         payload = {"message": "Quel béton pour un R+4 à Dakar?", "context": {}}
