@@ -258,12 +258,13 @@ def _draw_dwg(c, dwg, tx, ty, light=False):
             for i in range(len(pts)-1):
                 c.line(tx(pts[i][0]), ty(pts[i][1]),
                        tx(pts[i+1][0]), ty(pts[i+1][1]))
-    # Labels pièces
-    c.setFillColor(GRIS3); c.setFont("Helvetica", 3.5)
-    for r in dwg.get('rooms', []):
-        name = r.get('name', '')
-        if name and not re.match(r'^\d', name):
-            c.drawCentredString(tx(r['x']), ty(r['y']), name[:20])
+    # Labels pièces — uniquement sur les plans structure (pas MEP)
+    if not light:
+        c.setFillColor(GRIS3); c.setFont("Helvetica", 3.5)
+        for r in dwg.get('rooms', []):
+            name = r.get('name', '')
+            if name and not re.match(r'^\d', name):
+                c.drawCentredString(tx(r['x']), ty(r['y']), name[:20])
 
 
 # ══════════════════════════════════════════
