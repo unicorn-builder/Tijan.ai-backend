@@ -411,6 +411,16 @@ async def parse_fichier(
             if ville:      result["ville"] = ville
             if beton:      result["classe_beton"] = beton
 
+            # Estimate occupants from room labels if geometry available
+            geom = result.get("dwg_geometry")
+            if geom and isinstance(geom, dict):
+                rooms = geom.get('rooms', [])
+                nb_occ = _estimate_occupants_from_rooms(rooms)
+                if nb_occ > 0:
+                    result["nb_occupants"] = nb_occ
+                    if dm:
+                        dm["nb_occupants"] = nb_occ
+
         return JSONResponse(content=result)
     except Exception as e:
         logger.error(f"/parse error: {e}")
@@ -526,14 +536,35 @@ async def _parse_multi_fast(saved_files, nb_niveaux, ville, beton):
     if not main_result or not main_result.get("ok"):
         main_result = {"ok": True, "source": "multi_dwg"}
 
+    # Auto-detect nb_niveaux from DXF level keys if user didn't specify
+    detected_levels = _count_levels_from_geometry(dwg_geometry)
+    if detected_levels > 0 and not nb_niveaux:
+        niv = detected_levels
+        logger.info(f"Auto-detected {niv} levels from DXF filenames")
+
+    # Estimate occupants from room labels across all levels
+    all_rooms = []
+    for geom in dwg_geometry.values():
+        if isinstance(geom, dict):
+            all_rooms.extend(geom.get('rooms', []))
+    nb_occupants = _estimate_occupants_from_rooms(all_rooms)
+    if nb_occupants > 0:
+        logger.info(f"Estimated {nb_occupants} occupants from {len(all_rooms)} room labels")
+
     main_result["nb_niveaux"] = niv
+    main_result["nb_occupants"] = nb_occupants
     main_result["files_count"] = len(saved_files)
     main_result["levels_detected"] = list(dwg_geometry.keys())
     main_result["parse_time_s"] = round(elapsed, 1)
     if main_result.get("donnees_moteur"):
         main_result["donnees_moteur"]["nb_niveaux"] = niv
+        if nb_occupants > 0:
+            main_result["donnees_moteur"]["nb_occupants"] = nb_occupants
     else:
-        main_result["donnees_moteur"] = {"nb_niveaux": niv, "ville": ville}
+        dm = {"nb_niveaux": niv, "ville": ville}
+        if nb_occupants > 0:
+            dm["nb_occupants"] = nb_occupants
+        main_result["donnees_moteur"] = dm
 
     if dwg_geometry:
         main_result["dwg_geometry"] = dwg_geometry
@@ -637,6 +668,74 @@ def _parse_multi_worker(job_id, saved_files, nb_niveaux, ville, beton):
         for _, p in saved_files:
             try: os.unlink(p)
             except: pass
+
+
+def _count_levels_from_geometry(dwg_geometry: dict) -> int:
+    """
+    Count real building levels from DWG geometry keys.
+    Keys like SOUS_SOL, RDC, ETAGE_1, ETAGE_1_7, TERRASSE → count distinct levels.
+    Returns 0 if level count cannot be determined.
+    """
+    import re as _re
+    if not dwg_geometry or 'walls' in dwg_geometry:
+        return 0  # single geometry, can't count levels
+
+    count = 0
+    for key in dwg_geometry.keys():
+        upper = str(key).upper()
+        if 'SOUS' in upper or 'BASEMENT' in upper or 'PARKING' in upper:
+            count += 1
+        elif 'RDC' in upper or 'REZ' in upper or 'GROUND' in upper:
+            count += 1
+        elif 'TERRASSE' in upper or 'ROOFTOP' in upper or 'TOITURE' in upper:
+            count += 1
+        else:
+            # ETAGE_1_7 means floors 1 through 7 = 7 levels
+            nums = _re.findall(r'(\d+)', upper)
+            if len(nums) >= 2:
+                lo, hi = int(nums[0]), int(nums[-1])
+                count += max(1, hi - lo + 1)
+            elif len(nums) == 1:
+                count += 1
+            else:
+                count += 1
+    return count
+
+
+def _estimate_occupants_from_rooms(rooms: list) -> int:
+    """
+    Estimate nb_occupants from room labels using DTU ratios:
+    chambre=2, studio=1, salon/séjour=3, bureau=1, salle=4,
+    restaurant=10, magasin=5, hotel room=2.
+    """
+    import re as _re
+    if not rooms:
+        return 0
+
+    total = 0
+    for r in rooms:
+        name = r.get('name', '').lower().strip()
+        if not name:
+            continue
+        if any(k in name for k in ['chambre', 'bedroom', 'ch.']):
+            total += 2
+        elif any(k in name for k in ['studio', 'f1']):
+            total += 1
+        elif any(k in name for k in ['salon', 'séjour', 'sejour', 'living']):
+            total += 3
+        elif any(k in name for k in ['cuisine', 'kitchen']):
+            total += 2
+        elif any(k in name for k in ['bureau', 'office']):
+            total += 1
+        elif any(k in name for k in ['salle', 'room']):
+            total += 4
+        elif any(k in name for k in ['restaurant', 'bar']):
+            total += 10
+        elif any(k in name for k in ['magasin', 'shop', 'boutique']):
+            total += 5
+        elif any(k in name for k in ['gym', 'piscine', 'pool']):
+            total += 8
+    return total
 
 
 def _classify_level_from_name(filename, fallback_index):
