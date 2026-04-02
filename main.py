@@ -947,6 +947,94 @@ async def generate_boq_mep(params: ParamsProjet):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/generate-boq-xlsx")
+async def generate_boq_xlsx(params: ParamsProjet):
+    """BOQ Structure as Excel (.xlsx)."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        from gen_boq_xlsx import generer_boq_structure_xlsx
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        xlsx_bytes = generer_boq_structure_xlsx(rs, params.dict())
+        gc.collect()
+        xlsx_name = f"tijan_boq_structure_{params.nom.replace(' ','_')[:20]}.xlsx"
+        return StreamingResponse(
+            io.BytesIO(xlsx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={xlsx_name}"},
+        )
+    except Exception as e:
+        logger.error(f"/generate-boq-xlsx error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-boq-mep-xlsx")
+async def generate_boq_mep_xlsx(params: ParamsProjet):
+    """BOQ MEP as Excel (.xlsx)."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        from gen_boq_mep_xlsx import generer_boq_mep_xlsx
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+        xlsx_bytes = generer_boq_mep_xlsx(rm, params.dict())
+        gc.collect()
+        xlsx_name = f"tijan_boq_mep_{params.nom.replace(' ','_')[:20]}.xlsx"
+        return StreamingResponse(
+            io.BytesIO(xlsx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={xlsx_name}"},
+        )
+    except Exception as e:
+        logger.error(f"/generate-boq-mep-xlsx error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-note-docx")
+async def generate_note_docx(params: ParamsProjet):
+    """Note de calcul structure as Word (.docx)."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        from gen_note_docx import generer_note_structure_docx
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        docx_bytes = generer_note_structure_docx(rs, params.dict())
+        gc.collect()
+        docx_name = f"tijan_note_structure_{params.nom.replace(' ','_')[:20]}.docx"
+        return StreamingResponse(
+            io.BytesIO(docx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename={docx_name}"},
+        )
+    except Exception as e:
+        logger.error(f"/generate-note-docx error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-rapport-docx")
+async def generate_rapport_docx(params: ParamsProjet):
+    """Rapport exécutif as Word (.docx)."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        from gen_rapport_docx import generer_rapport_executif_docx
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+        docx_bytes = generer_rapport_executif_docx(rs, rm, params.dict())
+        gc.collect()
+        docx_name = f"tijan_rapport_executif_{params.nom.replace(' ','_')[:20]}.docx"
+        return StreamingResponse(
+            io.BytesIO(docx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename={docx_name}"},
+        )
+    except Exception as e:
+        logger.error(f"/generate-rapport-docx error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/generate-edge")
 async def generate_edge(params: ParamsProjet):
     """Rapport EDGE IFC v3 PDF — scores réels + plan d'action (FR/EN)."""

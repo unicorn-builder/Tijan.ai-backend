@@ -101,6 +101,45 @@ DXF_ENDPOINTS = [
 ]
 
 
+# ────────────────────────────────────────────
+# 5. Excel + Word endpoints
+# ────────────────────────────────────────────
+
+XLSX_ENDPOINTS = [
+    "/generate-boq-xlsx",
+    "/generate-boq-mep-xlsx",
+]
+
+DOCX_ENDPOINTS = [
+    "/generate-note-docx",
+    "/generate-rapport-docx",
+]
+
+
+class TestExcelEndpoints:
+    @pytest.mark.parametrize("endpoint", XLSX_ENDPOINTS)
+    def test_xlsx_endpoint(self, endpoint):
+        r = requests.post(f"{BASE_URL}{endpoint}", json=DEFAULT_PARAMS, timeout=TIMEOUT)
+        assert r.status_code == 200, f"{endpoint} returned {r.status_code}: {r.text[:200]}"
+        assert len(r.content) > 1024, f"{endpoint} response too small: {len(r.content)} bytes"
+        # XLSX files start with PK (ZIP format)
+        assert r.content[:2] == b"PK", f"{endpoint} did not return a valid XLSX"
+
+
+class TestDocxEndpoints:
+    @pytest.mark.parametrize("endpoint", DOCX_ENDPOINTS)
+    def test_docx_endpoint(self, endpoint):
+        r = requests.post(f"{BASE_URL}{endpoint}", json=DEFAULT_PARAMS, timeout=TIMEOUT)
+        assert r.status_code == 200, f"{endpoint} returned {r.status_code}: {r.text[:200]}"
+        assert len(r.content) > 1024, f"{endpoint} response too small: {len(r.content)} bytes"
+        # DOCX files start with PK (ZIP format)
+        assert r.content[:2] == b"PK", f"{endpoint} did not return a valid DOCX"
+
+
+# ────────────────────────────────────────────
+# 6. DXF generation endpoints
+# ────────────────────────────────────────────
+
 class TestDXFEndpoints:
     @pytest.mark.parametrize("endpoint", DXF_ENDPOINTS)
     def test_dxf_endpoint(self, endpoint):
