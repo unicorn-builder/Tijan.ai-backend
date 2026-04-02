@@ -88,7 +88,7 @@ def _build_grid(p):
     return nx, ny, px_m, py_m
 
 
-def _grid_layout(w, h, nx, ny, px_m, py_m, ml=42*mm, mb=48*mm, mr=65*mm, mt=28*mm):
+def _grid_layout(w, h, nx, ny, px_m, py_m, ml=50*mm, mb=55*mm, mr=72*mm, mt=30*mm):
     """Calculate grid position and scale — copie de v4."""
     dw = w - ml - mr
     dh = h - mb - mt
@@ -197,8 +197,8 @@ def _dwg_bounds(dwg):
     return min(xs), min(ys), max(xs), max(ys)
 
 
-def _dwg_layout(w, h, dwg, ml=42*mm, mb=48*mm, mr=65*mm, mt=28*mm):
-    """Calculate DWG transform to fit on page — same margin logic as grid."""
+def _dwg_layout(w, h, dwg, ml=50*mm, mb=55*mm, mr=72*mm, mt=30*mm):
+    """Calculate DWG transform to fit on page with generous margins."""
     bounds = _dwg_bounds(dwg)
     if not bounds:
         return None, None, None, None, None
@@ -207,7 +207,7 @@ def _dwg_layout(w, h, dwg, ml=42*mm, mb=48*mm, mr=65*mm, mt=28*mm):
     if dw_r < 1 or dh_r < 1:
         return None, None, None, None, None
     aw = w - ml - mr; ah = h - mb - mt
-    sc = min(aw / dw_r, ah / dh_r)
+    sc = min(aw / dw_r, ah / dh_r) * 0.92  # 8% smaller to breathe
     gw = dw_r * sc; gh = dh_r * sc
     ox = ml + (aw - gw) / 2
     oy = mb + (ah - gh) / 2
@@ -237,7 +237,8 @@ def _draw_dwg(c, dwg, tx, ty, light=False):
                 c.line(tx(pts[-1][0]), ty(pts[-1][1]),
                        tx(pts[0][0]), ty(pts[0][1]))
     # Fenêtres
-    c.setStrokeColor(colors.HexColor("#90CAF9")); c.setLineWidth(0.3)
+    win_color = colors.HexColor("#D6E8F5") if light else colors.HexColor("#90CAF9")
+    c.setStrokeColor(win_color); c.setLineWidth(0.15 if light else 0.3)
     for item in dwg.get('windows', []):
         if item['type'] == 'line':
             c.line(tx(item['start'][0]), ty(item['start'][1]),
@@ -248,7 +249,8 @@ def _draw_dwg(c, dwg, tx, ty, light=False):
                 c.line(tx(pts[i][0]), ty(pts[i][1]),
                        tx(pts[i+1][0]), ty(pts[i+1][1]))
     # Portes
-    c.setStrokeColor(colors.HexColor("#BCAAA4")); c.setLineWidth(0.25)
+    door_color = colors.HexColor("#E0D5CF") if light else colors.HexColor("#BCAAA4")
+    c.setStrokeColor(door_color); c.setLineWidth(0.15 if light else 0.25)
     for item in dwg.get('doors', []):
         if item['type'] == 'line':
             c.line(tx(item['start'][0]), ty(item['start'][1]),
