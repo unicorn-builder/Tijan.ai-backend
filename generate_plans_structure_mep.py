@@ -183,7 +183,7 @@ def _draw_dalle_hatch(c, ox, oy, sc, nx, ny, px_m, py_m):
 # ══════════════════════════════════════════
 
 def _dwg_bounds(dwg):
-    """Bounding box de la géométrie DWG réelle (lines + polylines)."""
+    """Bounding box de la géométrie DWG — recadré sur la zone la plus dense si trop grand."""
     xs, ys = [], []
     for item in dwg.get('walls',[]) + dwg.get('windows',[]) + dwg.get('doors',[]):
         if item['type'] == 'line':
@@ -194,6 +194,72 @@ def _dwg_bounds(dwg):
                 xs.append(p[0]); ys.append(p[1])
     if not xs:
         return None
+
+    full_w = max(xs) - min(xs)
+    full_h = max(ys) - min(ys)
+
+    # If the drawing is very large (> 50m in any direction),
+    # it likely contains multiple plan sheets. Crop to densest zone.
+    if full_w > 50000 or full_h > 50000:  # > 50m
+        # Find the densest cluster of wall endpoints using histogram
+        import math
+        # X histogram
+        nbins = max(20, int(full_w / 5000))
+        x_hist = [0] * nbins
+        for x in xs:
+            b = min(int((x - min(xs)) / full_w * nbins), nbins - 1)
+            x_hist[b] += 1
+        # Find the peak region (contiguous bins with > 30% of max)
+        x_max = max(x_hist)
+        x_thresh = x_max * 0.3
+        best_start = best_end = 0
+        best_score = 0
+        start = None
+        for i in range(nbins):
+            if x_hist[i] >= x_thresh:
+                if start is None: start = i
+            else:
+                if start is not None:
+                    score = sum(x_hist[start:i])
+                    if score > best_score:
+                        best_score = score; best_start = start; best_end = i
+                    start = None
+        if start is not None:
+            score = sum(x_hist[start:nbins])
+            if score > best_score:
+                best_start = start; best_end = nbins
+
+        crop_x_min = min(xs) + best_start * full_w / nbins - 2000  # 2m margin
+        crop_x_max = min(xs) + best_end * full_w / nbins + 2000
+
+        # Same for Y
+        nbins_y = max(20, int(full_h / 5000))
+        y_hist = [0] * nbins_y
+        for y in ys:
+            b = min(int((y - min(ys)) / full_h * nbins_y), nbins_y - 1)
+            y_hist[b] += 1
+        y_max = max(y_hist)
+        y_thresh = y_max * 0.3
+        start = None; best_start_y = best_end_y = 0; best_score_y = 0
+        for i in range(nbins_y):
+            if y_hist[i] >= y_thresh:
+                if start is None: start = i
+            else:
+                if start is not None:
+                    score = sum(y_hist[start:i])
+                    if score > best_score_y:
+                        best_score_y = score; best_start_y = start; best_end_y = i
+                    start = None
+        if start is not None:
+            score = sum(y_hist[start:nbins_y])
+            if score > best_score_y:
+                best_start_y = start; best_end_y = nbins_y
+
+        crop_y_min = min(ys) + best_start_y * full_h / nbins_y - 2000
+        crop_y_max = min(ys) + best_end_y * full_h / nbins_y + 2000
+
+        return crop_x_min, crop_y_min, crop_x_max, crop_y_max
+
     return min(xs), min(ys), max(xs), max(ys)
 
 
@@ -207,7 +273,7 @@ def _dwg_layout(w, h, dwg, ml=50*mm, mb=55*mm, mr=72*mm, mt=30*mm):
     if dw_r < 1 or dh_r < 1:
         return None, None, None, None, None
     aw = w - ml - mr; ah = h - mb - mt
-    sc = min(aw / dw_r, ah / dh_r) * 0.92  # 8% smaller to breathe
+    sc = min(aw / dw_r, ah / dh_r) * 0.95  # slight margin to breathe
     gw = dw_r * sc; gh = dh_r * sc
     ox = ml + (aw - gw) / 2
     oy = mb + (ah - gh) / 2
