@@ -73,7 +73,7 @@ def generer_boq_structure_xlsx(rs, params: dict, lang: str = "fr") -> bytes:
 
     prix_beton = {
         'C25/30': px.beton_c2530_m3, 'C30/37': px.beton_c3037_m3,
-        'C35/45': px.beton_c3545_m3,
+        'C35/45': px.beton_c3545_m3, 'C40/50': px.beton_c3545_m3,
     }.get(rs.classe_beton, px.beton_c3037_m3)
     prix_acier = px.acier_ha400_kg if rs.classe_acier == 'HA400' else px.acier_ha500_kg
 

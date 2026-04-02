@@ -3,10 +3,13 @@ gen_note_structure.py — Note de calcul structure
 Tijan AI — données 100% issues du moteur engine_structure_v2
 """
 import io
+import logging
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Table, Spacer, PageBreak, KeepTogether
 from tijan_theme import *
+
+logger = logging.getLogger(__name__)
 
 def generer(rs, params: dict) -> bytes:
     """
@@ -203,7 +206,8 @@ def _build(rs):
             cout_pieux = fond.nb_pieux * fond.longueur_pieu_m * px.pieu_fore_d800_ml
             story.append(Spacer(1, 2*mm))
             story.append(p(f'ℹ Impact prix fondations : {fmt_fcfa(cout_pieux)} estimés ({cout_pieux/boq.total_bas_fcfa*100:.0f}% du budget structure). Fondations profondes = poste le plus coûteux après gros œuvre.', 'note'))
-        except: pass
+        except Exception as e:
+            logger.warning(f"Foundation cost calculation failed: {e}")
     else:
         fond_data += [
             [p('Largeur semelle','td_b'), p(f'{fond.largeur_semelle_m:.2f} m'), p('Section carrée')],

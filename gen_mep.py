@@ -254,6 +254,10 @@ def generer_edge(rm, params: dict) -> bytes:
 def _build_edge(rm):
     story = []
     d = rm.params
+
+    if not hasattr(rm, 'edge') or rm.edge is None:
+        return [Paragraph("EDGE data not available", S['titre'])]
+
     e = rm.edge
 
     story.append(Spacer(1, 3*mm))
@@ -420,12 +424,19 @@ def _build_executif(rs, rm):
     total_global_haut = boq_s.total_haut_fcfa + boq_m.total_hend_fcfa
     ratio_global_bas  = int(total_global_bas / boq_s.surface_batie_m2) if boq_s.surface_batie_m2 > 0 else 0
 
+    # Calculate cost percentages with zero check
+    pct_structure = 0
+    pct_mep = 0
+    if total_global_bas > 0:
+        pct_structure = boq_s.total_bas_fcfa / total_global_bas * 100
+        pct_mep = boq_m.total_basic_fcfa / total_global_bas * 100
+
     budget_data = [
         [p('CORPS D\'ÉTAT','th'), p('MONTANT BAS','th'), p('MONTANT HAUT','th'), p('% TOTAL','th'), p('NOTE','th')],
         [p('Structure (gros œuvre)','td_b'), p(fmt_fcfa(boq_s.total_bas_fcfa),'td_r'), p(fmt_fcfa(boq_s.total_haut_fcfa),'td_r'),
-         p(f'{boq_s.total_bas_fcfa/total_global_bas*100:.0f}%','td_r'), p('Béton + acier + fondations')],
+         p(f'{pct_structure:.0f}%','td_r'), p('Béton + acier + fondations')],
         [p('MEP — Basic','td_b'), p(fmt_fcfa(boq_m.total_basic_fcfa),'td_r'), p(fmt_fcfa(boq_m.total_hend_fcfa),'td_r'),
-         p(f'{boq_m.total_basic_fcfa/total_global_bas*100:.0f}%','td_r'), p('Élec, plomberie, CVC, ascenseurs, sécurité')],
+         p(f'{pct_mep:.0f}%','td_r'), p('Élec, plomberie, CVC, ascenseurs, sécurité')],
         [p('TOTAL GROS ŒUVRE','td_b'), p(fmt_fcfa(total_global_bas),'td_g_r'), p(fmt_fcfa(total_global_haut),'td_g_r'),
          p('100%','td_r'), p('Hors finitions, VRD, honoraires')],
         [p('Finitions (estimation)','td_b'), p(fmt_fcfa(int(total_global_bas*0.35)),'td_r'), p(fmt_fcfa(int(total_global_haut*0.35)),'td_r'),

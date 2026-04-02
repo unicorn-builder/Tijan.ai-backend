@@ -344,11 +344,11 @@ def extract_project_data(geom_dir=None):
         occ, nb_log, details = calculate_occupancy_for_level(paired, repeat)
         
         # Surface totals
-        surface_hab = sum(r.get('area_m2', 0) or 0 for r in paired 
+        surface_hab = sum((r.get('area_m2') or 0) for r in paired
                          if r['room_type'] in ('chambre','chambre_parents','chambre_service',
                                                'salon','sejour','sam','cuisine','sdb','wc',
                                                'buanderie','dressing','bureau')) * repeat
-        surface_erp = sum(r.get('area_m2', 0) or 0 for r in paired
+        surface_erp = sum((r.get('area_m2') or 0) for r in paired
                          if r['room_type'] in ('restaurant','commerce','bar','salle_sport',
                                                'salle_polyvalente')) * repeat
         

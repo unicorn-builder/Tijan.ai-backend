@@ -78,7 +78,11 @@ def generer_fiches_structure(resultats, buf, params_dict=None):
     date_str = datetime.now().strftime("%d/%m/%Y")
     nom = params.get('nom', 'Projet Tijan')
     beton = params.get('classe_beton', 'C30/37')
-    fck = int(beton.split('/')[0][1:]) if '/' in beton else 30
+    try:
+        fck = float(beton.split('/')[0].replace('C', '')) if '/' in beton else 30.0
+        fck = int(fck)
+    except (ValueError, IndexError, AttributeError):
+        fck = 30
 
     doc = SimpleDocTemplate(buf, pagesize=A4,
         rightMargin=15*mm, leftMargin=15*mm, topMargin=25*mm, bottomMargin=20*mm,

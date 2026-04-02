@@ -177,6 +177,10 @@ def generer_edge(rm, params: dict) -> bytes:
 
 def _build_edge(rm):
     story = []
+
+    if not hasattr(rm, 'edge') or rm.edge is None:
+        return [Paragraph("EDGE data not available", S['titre'])]
+
     e = rm.edge
 
     story.append(Spacer(1, 3*mm))

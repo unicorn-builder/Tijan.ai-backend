@@ -6,10 +6,13 @@ calls pdf_translate when lang='en'.
 Signature: generer(rs, params_dict) → bytes
 """
 import io
+import logging
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Table, Spacer, PageBreak
 from tijan_theme import *
+
+logger = logging.getLogger(__name__)
 
 
 def generer(rs, params: dict) -> bytes:
@@ -199,7 +202,8 @@ def _build(rs):
             cout_pieux = fond.nb_pieux * fond.longueur_pieu_m * px.pieu_fore_d800_ml
             story.append(Spacer(1, 2*mm))
             story.append(p(f'ℹ Foundation cost impact: {fmt_fcfa(cout_pieux)} estimated ({cout_pieux/boq.total_bas_fcfa*100:.0f}% of structural budget). Deep foundations = highest cost item after superstructure.', 'note'))
-        except: pass
+        except Exception as e:
+            logger.warning(f"Foundation cost calculation failed: {e}")
     else:
         fond_data += [
             [p('Footing width','td_b'), p(f'{fond.largeur_semelle_m:.2f} m'), p('Square section')],

@@ -394,8 +394,10 @@ def _calculer_poteaux(d: DonneesProjet, fck: float, fyk: float,
         # NRd = fcd * Ac + fyd * As (avec As = rho * Ac)
         # On cible rho = 1.5% (entre 0.1% et 4%)
         rho_cible = 0.015
-        # NRd = Ac * (fcd + rho * fyd) → Ac = NEd / (fcd + rho * fyd) * 1000
-        Ac_cm2 = (NEd * 1000) / (fcd * 1000 + rho_cible * fyd * 1000) * 10000
+        # EC2: NEd(kN) → N, fcd/fyd in MPa(N/mm²)
+        # Ac_mm2 = NEd*1e6 / (fcd + rho*fyd), then convert to cm²
+        Ac_mm2 = (NEd * 1e6) / (fcd + rho_cible * fyd)
+        Ac_cm2 = Ac_mm2 / 100
         b_mm = max(200, int(math.ceil(math.sqrt(Ac_cm2 * 100) / 25) * 25))
         b_mm = min(b_mm, 600)  # Cap à 600mm
 
@@ -424,8 +426,12 @@ def _calculer_poteaux(d: DonneesProjet, fck: float, fyk: float,
         cad_esp = min(int(b_mm * 0.6 / 25) * 25, 300)
         cad_esp = max(cad_esp, 100)
 
-        # Vérification NRd
-        NRd = (fcd * Ac_reel / 10000 * 1000 + fyd * As_final / 10000 * 1000) * 0.8
+        # Vérification NRd per EC2
+        # Ac_reel in cm², As_final in cm² → convert to mm² (* 100)
+        # NRd = (fcd*Ac_mm2 + fyd*As_mm2) / 1000  [kN]
+        Ac_mm2_reel = Ac_reel * 100
+        As_mm2_final = As_final * 100
+        NRd = (fcd * Ac_mm2_reel + fyd * As_mm2_final) / 1000
         verif = NRd >= NEd
         ratio = NEd / NRd if NRd > 0 else 0
 
@@ -479,10 +485,16 @@ def _calculer_poutre(portee: float, G: float, Q: float,
     mu = Mu / (b_mm * d**2 * fcd)
     if mu > 0.372:
         mu = 0.372  # Section doublement armée nécessaire
-    alpha = (1 - math.sqrt(1 - 2*mu)) / 0.8 if mu < 0.5 else 0.5
+    # BUG3 FIX: Guard against sqrt of negative number
+    alpha = (1 - math.sqrt(max(0, 1 - 2*mu))) / 0.8 if mu < 0.5 else 0.5
     z = d * (1 - 0.4 * alpha)
     As_inf = Mu / (fyd * z) / 100  # cm²
-    As_inf = max(As_inf, 0.26 * 2.9 / fyk * b_mm * d / 10000 * 10000)  # As,min
+    # BUG8 FIX: EC2 min reinforcement per §7.3.2
+    # As,min = max(0.26*fctm/fyk*bw*d, 0.0013*bw*d)
+    # Using fctm ≈ 0.3*fck^(2/3), simplified to direct formula
+    fctm_approx = 0.3 * (fck ** (2/3))
+    As_min_calc = max(0.26 * fctm_approx / fyk * b_mm * d, 0.0013 * b_mm * d)
+    As_inf = max(As_inf, As_min_calc / 100)  # cm²
 
     # Armatures en appui (moment négatif = 0.5 * moment travée)
     As_sup = As_inf * 0.6
@@ -498,8 +510,14 @@ def _calculer_poutre(portee: float, G: float, Q: float,
     fleche_calc = 5 * pu * portee**4 / (384 * 30000 * b_mm * h_mm**3 / 12) * 1e9  # mm approx
     verif_fleche = fleche_calc <= fleche_adm * 1000
 
-    # Vérification effort tranchant
-    VRd_c = 0.18 / 1.5 * (1 + math.sqrt(200/d)) * (100 * As_inf/10000 / (b_mm/1000 * d/1000)) ** (1/3) * b_mm/1000 * d/1000 * 1000
+    # Vérification effort tranchant per EC2 §6.2.2
+    # VRd,c = CRd,c * k * (100*ρl*fck)^(1/3) * bw * d, result in kN
+    # d, bw in mm; ρl = As_inf*100/(bw*d) (As_inf in cm²)
+    CRd_c = 0.18 / 1.5
+    k_val = min(1 + math.sqrt(200 / max(d, 1)), 2.0)  # guard against d=0
+    rho_l = min(max(As_inf * 100 / max(b_mm * d, 1), 0), 0.02)  # clamp to [0, 2%]
+    # Result: MPa * 1 * 1 * mm² / 1e6 = N / 1e6 = kN for compatibility
+    VRd_c = CRd_c * k_val * ((100 * rho_l * fck) ** (1/3)) * b_mm * d / 1e6
     verif_et = Vsd <= VRd_c * 1.5
 
     return ResultatPoutre(
@@ -728,7 +746,8 @@ def _calculer_fondations(d: DonneesProjet, poteaux: List[ResultatPoteau],
     """
     Choix et dimensionnement fondations EC7 + DTU 13.2.
     """
-    NEd_max = poteaux[0].NEd_kN if poteaux else 1000.0
+    # BUG9 FIX: Use max load across all columns, not just first one
+    NEd_max = max((p.NEd_kN for p in poteaux), default=1000.0)
     q_adm = d.pression_sol_MPa * 1000  # kPa
 
     # Critère de choix fondations
@@ -773,6 +792,9 @@ def _calculer_fondations(d: DonneesProjet, poteaux: List[ResultatPoteau],
         L_pieu = max(8.0, d.nb_niveaux * 1.2)
         L_pieu = min(L_pieu, 20.0)
 
+        # BUG5 FIX: qs/qp in kPa, D/L in meters
+        # Q_ult = qs(kPa) * π * D(m) * L(m) + qp(kPa) * π * D²(m²)/4
+        # = kPa*m² directly = kN (since 1 kPa·m² = 1 kN)
         Q_ult = qs * math.pi * D_pieu * L_pieu + qp * math.pi * D_pieu**2 / 4
         Q_adm = Q_ult / 2.5
 
@@ -825,8 +847,9 @@ def _calculer_sismique(d: DonneesProjet, zone: int, shon: float) -> ResultatSism
     else:
         Sd = ag * S * 2.5 / q * TC * TD / T1**2
 
-    # Masse totale estimée (G + 0.3Q)
-    masse_totale = shon * (d.charge_G if hasattr(d, 'charge_G') else 6.5) / 9.81 * 1000  # kg
+    # BUG7 FIX: Use actual charge_G from project data instead of hardcoded 6.5
+    # charge_G_kNm2 is available from donnees; use it for more accurate seismic mass
+    masse_totale = shon * d.charge_G_kNm2 / 9.81 * 1000  # kg (converting from kN/m²)
     # Force sismique de base
     Fb_kN = Sd * masse_totale / 1000 * 0.85
 
@@ -910,7 +933,11 @@ def _calculer_boq(d: DonneesProjet, poteaux: List[ResultatPoteau],
 
     # ── Coffrage ──
     coff_dalles  = shon * 0.85
-    coff_poteaux = V_poteaux / (d.portee_max_m/2 * 0.3) * 4 * 0.3 * d.hauteur_etage_m * 0.5
+    # BUG6 FIX: Guard against division by zero
+    if d.portee_max_m > 0:
+        coff_poteaux = V_poteaux / (d.portee_max_m/2 * 0.3) * 4 * 0.3 * d.hauteur_etage_m * 0.5
+    else:
+        coff_poteaux = 0
     coff_poutres = (L_poutres_x + L_poutres_y) * (b_p + 2*(h_p - ep_dalle)) * 0.6
     V_coffrage   = coff_dalles + abs(coff_poteaux) + abs(coff_poutres)
 

@@ -13,6 +13,7 @@ import json
 import base64
 import logging
 import tempfile
+import threading
 from typing import Optional, Dict, List, Any
 from collections import Counter
 
@@ -37,32 +38,34 @@ APS_MD_URL = "https://developer.api.autodesk.com/modelderivative/v2/designdata"
 # ════════════════════════════════════════════════════════════
 
 _token_cache: Dict[str, Any] = {"token": None, "expires_at": 0}
+_token_lock = threading.Lock()
 
 
 def get_token() -> str:
     """Get or refresh APS access token."""
-    now = time.time()
-    if _token_cache["token"] and now < _token_cache["expires_at"] - 120:
+    with _token_lock:
+        now = time.time()
+        if _token_cache["token"] and now < _token_cache["expires_at"] - 120:
+            return _token_cache["token"]
+
+        if not APS_CLIENT_ID or not APS_CLIENT_SECRET:
+            raise EnvironmentError(
+                "APS_CLIENT_ID et APS_CLIENT_SECRET requis. "
+                "Configurez-les dans les variables d'environnement Render."
+            )
+
+        r = requests.post(APS_AUTH_URL, data={
+            "client_id": APS_CLIENT_ID,
+            "client_secret": APS_CLIENT_SECRET,
+            "grant_type": "client_credentials",
+            "scope": "data:read data:write data:create bucket:create bucket:read viewables:read",
+        }, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+        _token_cache["token"] = data["access_token"]
+        _token_cache["expires_at"] = now + data["expires_in"]
+        logger.info("APS token refreshed, expires in %ds", data["expires_in"])
         return _token_cache["token"]
-
-    if not APS_CLIENT_ID or not APS_CLIENT_SECRET:
-        raise EnvironmentError(
-            "APS_CLIENT_ID et APS_CLIENT_SECRET requis. "
-            "Configurez-les dans les variables d'environnement Render."
-        )
-
-    r = requests.post(APS_AUTH_URL, data={
-        "client_id": APS_CLIENT_ID,
-        "client_secret": APS_CLIENT_SECRET,
-        "grant_type": "client_credentials",
-        "scope": "data:read data:write data:create bucket:create bucket:read viewables:read",
-    }, timeout=15)
-    r.raise_for_status()
-    data = r.json()
-    _token_cache["token"] = data["access_token"]
-    _token_cache["expires_at"] = now + data["expires_in"]
-    logger.info("APS token refreshed, expires in %ds", data["expires_in"])
-    return _token_cache["token"]
 
 
 def auth_headers(token: str) -> dict:
@@ -125,7 +128,10 @@ def upload_file(filepath: str, object_key: str, token: str) -> str:
         timeout=30,
     )
     r.raise_for_status()
-    object_id = r.json().get("objectId", f"urn:adsk.objects:os.object:{APS_BUCKET}/{object_key}")
+    data = r.json()
+    if not data.get("objectId"):
+        logger.warning(f"S3 finalize missing objectId: {data}")
+    object_id = data.get("objectId", f"urn:adsk.objects:os.object:{APS_BUCKET}/{object_key}")
     logger.info("Finalize OK: %s", object_id)
 
     # Encode URN for Model Derivative

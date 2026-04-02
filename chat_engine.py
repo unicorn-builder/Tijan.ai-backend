@@ -114,11 +114,14 @@ def chat(
 ) -> str:
     """
     Envoie un message à Claude avec le contexte projet.
-    
+
     historique : liste de dicts {role: 'user'|'assistant', content: str}
     Retourne la réponse texte.
     """
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise EnvironmentError("ANTHROPIC_API_KEY not set")
+    client = anthropic.Anthropic(api_key=api_key)
 
     contexte = formater_contexte(params, resultats_structure, resultats_mep)
     system = f"{SYSTEM_PROMPT}\n\n=== CONTEXTE DU PROJET ===\n{contexte}"

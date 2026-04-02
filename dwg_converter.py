@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import logging
 import time
+import pathlib
 
 logger = logging.getLogger("dwg_converter")
 
@@ -154,6 +155,9 @@ def dwg_to_dxf_libredwg(dwg_path: str) -> str:
         return None
 
     try:
+        dwg_path = str(pathlib.Path(dwg_path).resolve())
+        if not os.path.exists(dwg_path):
+            raise FileNotFoundError(f"File not found: {dwg_path}")
         output = tempfile.mktemp(suffix='.dxf', prefix='tijan_')
         cmd = [DWG2DXF_PATH, '-o', output, dwg_path]
         logger.info(f"dwg2dxf converting {os.path.basename(dwg_path)}...")
@@ -187,51 +191,59 @@ def dwg_to_dxf_oda(dwg_path: str) -> str:
     if not ODA_PATH:
         return None
 
-    input_dir = tempfile.mkdtemp(prefix="oda_in_")
-    output_dir = tempfile.mkdtemp(prefix="oda_out_")
-
     try:
-        # Copy DWG to input dir (ODA works on directories)
-        base = os.path.basename(dwg_path)
-        safe_name = base.replace(' ', '_')
-        shutil.copy2(dwg_path, os.path.join(input_dir, safe_name))
+        dwg_path = str(pathlib.Path(dwg_path).resolve())
+        if not os.path.exists(dwg_path):
+            raise FileNotFoundError(f"File not found: {dwg_path}")
 
-        # Run ODA: input_dir output_dir version type recursive audit
-        cmd = [ODA_PATH, input_dir, output_dir, "ACAD2018", "DXF", "0", "1"]
-        logger.info(f"ODA converting {base}...")
-        start = time.time()
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        elapsed = time.time() - start
-        logger.info(f"ODA done in {elapsed:.1f}s (returncode={result.returncode})")
+        input_dir = tempfile.mkdtemp(prefix="oda_in_")
+        output_dir = tempfile.mkdtemp(prefix="oda_out_")
 
-        # Find the output DXF
-        dxf_name = safe_name.rsplit('.', 1)[0] + '.dxf'
-        dxf_path = os.path.join(output_dir, dxf_name)
-        if os.path.isfile(dxf_path):
-            # Move to a temp file that won't be cleaned up with dirs
-            final = tempfile.mktemp(suffix='.dxf', prefix='tijan_')
-            shutil.move(dxf_path, final)
-            return final
+        try:
+            # Copy DWG to input dir (ODA works on directories)
+            base = os.path.basename(dwg_path)
+            safe_name = base.replace(' ', '_')
+            shutil.copy2(dwg_path, os.path.join(input_dir, safe_name))
 
-        # Try finding any .dxf in output
-        for f in os.listdir(output_dir):
-            if f.lower().endswith('.dxf'):
+            # Run ODA: input_dir output_dir version type recursive audit
+            cmd = [ODA_PATH, input_dir, output_dir, "ACAD2018", "DXF", "0", "1"]
+            logger.info(f"ODA converting {base}...")
+            start = time.time()
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            elapsed = time.time() - start
+            logger.info(f"ODA done in {elapsed:.1f}s (returncode={result.returncode})")
+
+            # Find the output DXF
+            dxf_name = safe_name.rsplit('.', 1)[0] + '.dxf'
+            dxf_path = os.path.join(output_dir, dxf_name)
+            if os.path.isfile(dxf_path):
+                # Move to a temp file that won't be cleaned up with dirs
                 final = tempfile.mktemp(suffix='.dxf', prefix='tijan_')
-                shutil.move(os.path.join(output_dir, f), final)
+                shutil.move(dxf_path, final)
                 return final
 
-        logger.warning(f"ODA produced no DXF output for {base}")
-        return None
+            # Try finding any .dxf in output
+            for f in os.listdir(output_dir):
+                if f.lower().endswith('.dxf'):
+                    final = tempfile.mktemp(suffix='.dxf', prefix='tijan_')
+                    shutil.move(os.path.join(output_dir, f), final)
+                    return final
 
-    except subprocess.TimeoutExpired:
-        logger.warning("ODA timeout")
-        return None
-    except Exception as e:
+            logger.warning(f"ODA produced no DXF output for {base}")
+            return None
+
+        except subprocess.TimeoutExpired:
+            logger.warning("ODA timeout")
+            return None
+        except Exception as e:
+            logger.warning(f"ODA error: {e}")
+            return None
+        finally:
+            shutil.rmtree(input_dir, ignore_errors=True)
+            shutil.rmtree(output_dir, ignore_errors=True)
+    except FileNotFoundError as e:
         logger.warning(f"ODA error: {e}")
         return None
-    finally:
-        shutil.rmtree(input_dir, ignore_errors=True)
-        shutil.rmtree(output_dir, ignore_errors=True)
 
 
 def dwg_to_dxf_aps(dwg_path: str, ville: str = "Dakar") -> str:
@@ -241,6 +253,10 @@ def dwg_to_dxf_aps(dwg_path: str, ville: str = "Dakar") -> str:
     ~2 min per file. Returns path to downloaded DXF, or None.
     """
     try:
+        dwg_path = str(pathlib.Path(dwg_path).resolve())
+        if not os.path.exists(dwg_path):
+            raise FileNotFoundError(f"File not found: {dwg_path}")
+
         from aps_parser_v2 import (get_token, ensure_bucket, upload_file,
                                     wait_for_translation, auth_headers, APS_MD_URL)
         import requests

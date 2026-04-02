@@ -39,6 +39,7 @@ import json as _json
 import tempfile
 import logging
 import dataclasses
+import httpx
 from datetime import datetime
 from typing import Optional, List
 
@@ -271,7 +272,7 @@ def get_devise_info(ville: str) -> dict:
             "taux_depuis_fcfa": round(1.0 / taux, 6) if taux else 1.0,
             "pays": p.pays,
         }
-    except:
+    except Exception:
         return {"devise": "XOF", "symbole": "FCFA", "taux_vers_fcfa": 1.0, "taux_depuis_fcfa": 1.0, "pays": "Senegal"}
 
 
@@ -279,7 +280,7 @@ def _get_converter_status():
     try:
         from dwg_converter import converter_status
         return converter_status()["strategy"]
-    except:
+    except Exception:
         return "unknown"
 
 
@@ -427,10 +428,10 @@ async def parse_fichier(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         try: os.unlink(tmp_path)
-        except: pass
+        except OSError: pass
         if dxf_path and dxf_path != tmp_path:
             try: os.unlink(dxf_path)
-            except: pass
+            except OSError: pass
 
 
 # ══════════════════════════════════════════════════════════════
@@ -441,6 +442,7 @@ import threading
 import uuid
 
 _parse_jobs = {}  # job_id → {status, progress, result, files, error}
+_parse_jobs_lock = threading.Lock()
 
 
 @app.post("/parse-multi")
@@ -470,10 +472,11 @@ async def parse_multi_start(
     else:
         # SLOW PATH: async APS — launch background thread
         job_id = str(uuid.uuid4())[:12]
-        _parse_jobs[job_id] = {
-            "status": "processing", "progress": f"0/{len(saved)}",
-            "total": len(saved), "done": 0, "result": None, "error": None,
-        }
+        with _parse_jobs_lock:
+            _parse_jobs[job_id] = {
+                "status": "processing", "progress": f"0/{len(saved)}",
+                "total": len(saved), "done": 0, "result": None, "error": None,
+            }
         t = threading.Thread(target=_parse_multi_worker,
                              args=(job_id, saved, nb_niveaux, ville or "Dakar", beton),
                              daemon=True)
@@ -526,9 +529,9 @@ async def _parse_multi_fast(saved_files, nb_niveaux, ville, beton):
         finally:
             if dxf_path and dxf_path != filepath:
                 try: os.unlink(dxf_path)
-                except: pass
+                except OSError: pass
             try: os.unlink(filepath)
-            except: pass
+            except OSError: pass
 
     elapsed = _time.time() - start
     logger.info(f"/parse-multi FAST: {len(dwg_geometry)} levels in {elapsed:.1f}s")
@@ -575,23 +578,31 @@ async def _parse_multi_fast(saved_files, nb_niveaux, ville, beton):
 @app.get("/parse-status/{job_id}")
 async def parse_multi_status(job_id: str):
     """Poll for multi-DWG parse job status."""
-    job = _parse_jobs.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return JSONResponse(content={
-        "status": job["status"],
-        "progress": job["progress"],
-        "done": job["done"],
-        "total": job["total"],
-        "result": job["result"],
-        "error": job["error"],
-    })
+    with _parse_jobs_lock:
+        job = _parse_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        # Make a copy to return outside the lock
+        job_snapshot = {
+            "status": job["status"],
+            "progress": job["progress"],
+            "done": job["done"],
+            "total": job["total"],
+            "result": job["result"],
+            "error": job["error"],
+        }
+    return JSONResponse(content=job_snapshot)
 
+
+def _update_job(job_id: str, **kwargs):
+    """Thread-safe job state update."""
+    with _parse_jobs_lock:
+        if job_id in _parse_jobs:
+            _parse_jobs[job_id].update(kwargs)
 
 def _parse_multi_worker(job_id, saved_files, nb_niveaux, ville, beton):
     """Background worker: parse each DWG file via APS."""
     import re as _re
-    job = _parse_jobs[job_id]
     try:
         from aps_parser_v2 import parser_dwg_aps
 
@@ -603,12 +614,10 @@ def _parse_multi_worker(job_id, saved_files, nb_niveaux, ville, beton):
         logger.info(f"  Job {job_id}: parsing main file {main_name}")
         main_result = parser_dwg_aps(main_path, nb_niveaux=nb_niveaux or len(saved_files),
                                       ville=ville)
-        job["done"] = 1
-        job["progress"] = f"1/{len(saved_files)}"
+        _update_job(job_id, done=1, progress=f"1/{len(saved_files)}")
 
         if not main_result.get("ok"):
-            job["status"] = "error"
-            job["error"] = main_result.get("message", "Main file parse failed")
+            _update_job(job_id, status="error", error=main_result.get("message", "Main file parse failed"))
             return
 
         result = main_result
@@ -637,8 +646,7 @@ def _parse_multi_worker(job_id, saved_files, nb_niveaux, ville, beton):
             try:
                 logger.info(f"  Job {job_id}: parsing {filename} ({i}/{len(sorted_files)})")
                 level_result = parser_dwg_aps(filepath, nb_niveaux=nb_niv, ville=ville)
-                job["done"] = i
-                job["progress"] = f"{i}/{len(sorted_files)}"
+                _update_job(job_id, done=i, progress=f"{i}/{len(sorted_files)}")
 
                 if level_result.get("ok") and level_result.get("urn"):
                     geom = _load_project_geometry(level_result["urn"])
@@ -654,20 +662,18 @@ def _parse_multi_worker(job_id, saved_files, nb_niveaux, ville, beton):
             result["dwg_geometry"] = dwg_geometry
             result["levels_detected"] = list(dwg_geometry.keys())
 
-        job["result"] = result
-        job["status"] = "done"
-        job["progress"] = f"{len(sorted_files)}/{len(sorted_files)}"
+        _update_job(job_id, result=result, status="done",
+                   progress=f"{len(sorted_files)}/{len(sorted_files)}")
         logger.info(f"  Job {job_id}: DONE — {len(dwg_geometry)} levels parsed")
 
     except Exception as e:
         logger.error(f"  Job {job_id} error: {e}")
-        job["status"] = "error"
-        job["error"] = str(e)
+        _update_job(job_id, status="error", error=str(e))
     finally:
         # Cleanup temp files
         for _, p in saved_files:
             try: os.unlink(p)
-            except: pass
+            except OSError: pass
 
 
 def _count_levels_from_geometry(dwg_geometry: dict) -> int:
@@ -770,7 +776,7 @@ def _extract_dxf_geometry(filepath: str) -> dict:
     door_layers = {'DOOR', 'S_Doors', 'BOIS', 'PORTE', 'A-DOOR'}
     sanitary_layers = {'SANITAIRE', 'A-SANITAIRES', 'AM FITTING-SANITARY', 'STR_SANITARY'}
 
-    geometry = {'walls': [], 'windows': [], 'doors': [], 'sanitary': [], 'rooms': []}
+    geometry = {'walls': [], 'windows': [], 'doors': [], 'sanitary': [], 'rooms': [], 'axes_x': [], 'axes_y': []}
 
     def _add_entity(entity, target):
         if entity.dxftype() == 'LINE':
@@ -807,8 +813,39 @@ def _extract_dxf_geometry(filepath: str) -> dict:
                 txt = re.sub(r'\\[^;]*;', '', txt).strip()
                 pos = e.dxf.insert
                 geometry['rooms'].append({'name': txt, 'x': round(pos.x, 1), 'y': round(pos.y, 1)})
-            except:
+            except Exception:
                 pass
+
+    # Extract structural axes from dedicated layers
+    axis_layers = {'AXES', 'A-AXES', 'GRILLE', 'S-GRID', 'GRID', 'AXE', 'STRUCTURE_AXES'}
+    axes_x_set = set()
+    axes_y_set = set()
+    tolerance = 50.0  # 50mm tolerance for deduplication
+
+    for e in msp:
+        if e.dxf.layer in axis_layers and e.dxftype() == 'LINE':
+            x1, y1 = e.dxf.start.x, e.dxf.start.y
+            x2, y2 = e.dxf.end.x, e.dxf.end.y
+            dx = abs(x2 - x1)
+            dy = abs(y2 - y1)
+
+            # Mostly vertical line → extract X coordinate
+            if dx < dy:
+                x_val = round(x1)
+                # Add if not already close to existing value
+                if not any(abs(x_val - existing) < tolerance for existing in axes_x_set):
+                    axes_x_set.add(x_val)
+
+            # Mostly horizontal line → extract Y coordinate
+            elif dy < dx:
+                y_val = round(y1)
+                # Add if not already close to existing value
+                if not any(abs(y_val - existing) < tolerance for existing in axes_y_set):
+                    axes_y_set.add(y_val)
+
+    # Sort and store as lists
+    geometry['axes_x'] = sorted(list(axes_x_set))
+    geometry['axes_y'] = sorted(list(axes_y_set))
 
     return geometry if len(geometry['walls']) > 5 else None
 
@@ -825,7 +862,7 @@ async def parse_sol(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         try: os.unlink(tmp_path)
-        except: pass
+        except OSError: pass
 
 
 @app.post("/calculate")
@@ -1191,17 +1228,22 @@ async def generate_rapport_executif(params: ParamsProjet):
 
 
 # ════════════════════════════════════════════════════════════
-# PDF GENERATION — FR ONLY (pas encore de version EN)
+# PDF GENERATION — FICHES (FR/EN)
 # ════════════════════════════════════════════════════════════
 
 @app.post("/generate-fiches-structure")
 async def generate_fiches_structure(params: ParamsProjet):
-    """Fiches techniques structure PDF."""
+    """Fiches techniques structure PDF (FR/EN)."""
     try:
         _, _, calculer_structure = get_moteur_structure()
-        generer = get_gen_fiches_structure()
         donnees = params_to_donnees(params)
         rs = calculer_structure(donnees)
+
+        if is_en(params):
+            generer = get_gen_fiches_structure_en()
+        else:
+            generer = get_gen_fiches_structure()
+
         buf = io.BytesIO()
         generer(rs, buf, params.dict())
         pdf_bytes = buf.getvalue()
@@ -1214,14 +1256,19 @@ async def generate_fiches_structure(params: ParamsProjet):
 
 @app.post("/generate-fiches-mep")
 async def generate_fiches_mep(params: ParamsProjet):
-    """Fiches techniques MEP PDF."""
+    """Fiches techniques MEP PDF (FR/EN)."""
     try:
         _, _, calculer_structure = get_moteur_structure()
         calculer_mep = get_moteur_mep()
-        generer = get_gen_fiches_mep()
         donnees = params_to_donnees(params)
         rs = calculer_structure(donnees)
         rm = calculer_mep(donnees, rs)
+
+        if is_en(params):
+            generer = get_gen_fiches_mep_en()
+        else:
+            generer = get_gen_fiches_mep()
+
         buf = io.BytesIO()
         generer(rm, buf, params.dict())
         pdf_bytes = buf.getvalue()
@@ -1235,6 +1282,7 @@ async def generate_fiches_mep(params: ParamsProjet):
 @app.post("/generate-planches")
 async def generate_planches(params: ParamsProjet):
     """Planches BA PDF."""
+    out_path = None
     try:
         _, _, calculer_structure = get_moteur_structure()
         generer = get_gen_planches()
@@ -1245,12 +1293,17 @@ async def generate_planches(params: ParamsProjet):
         generer(out_path, resultats=rs, params=params.dict())
         with open(out_path, "rb") as f:
             pdf_bytes = f.read()
-        os.unlink(out_path)
-        gc.collect()
         return pdf_response(pdf_bytes, fname(params, "planches_BA"))
     except Exception as e:
         logger.error(f"/generate-planches error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if out_path:
+            try:
+                os.unlink(out_path)
+            except OSError:
+                pass
+        gc.collect()
 
 
 
@@ -1258,6 +1311,7 @@ async def generate_planches(params: ParamsProjet):
 @app.post("/generate-plu")
 async def generate_plu(params: ParamsProjet):
     """Plans PLU (plomberie/sanitaire) PDF — 11 planches A3."""
+    out_path = None
     try:
         from generate_plans_plu_v1 import generer_plans_plu
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -1265,17 +1319,23 @@ async def generate_plu(params: ParamsProjet):
         generer_plans_plu(out_path, params=params.dict())
         with open(out_path, "rb") as f:
             pdf_bytes = f.read()
-        os.unlink(out_path)
-        gc.collect()
         return pdf_response(pdf_bytes, fname(params, "plans_PLU"))
     except Exception as e:
         logger.error(f"/generate-plu error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if out_path:
+            try:
+                os.unlink(out_path)
+            except OSError:
+                pass
+        gc.collect()
 
 
 @app.post("/generate-plans-structure")
 async def generate_plans_structure(params: ParamsProjet):
     """Plans structure PDF — géométrie DWG du projet si disponible, sinon grille paramétrique."""
+    out_path = None
     try:
         _, _, calculer_structure = get_moteur_structure()
         from generate_plans_structure_mep import generer_plans_structure
@@ -1291,17 +1351,23 @@ async def generate_plans_structure(params: ParamsProjet):
                                 dwg_geometry=dwg_geometry)
         with open(out_path, "rb") as f:
             pdf_bytes = f.read()
-        os.unlink(out_path)
-        gc.collect()
         return pdf_response(pdf_bytes, fname(params, "plans_structure"))
     except Exception as e:
         logger.error(f"/generate-plans-structure error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if out_path:
+            try:
+                os.unlink(out_path)
+            except OSError:
+                pass
+        gc.collect()
 
 
 @app.post("/generate-plans-mep")
 async def generate_plans_mep(params: ParamsProjet):
     """Plans MEP PDF — géométrie DWG du projet si disponible, sinon grille paramétrique."""
+    out_path = None
     try:
         _, _, calculer_structure = get_moteur_structure()
         calculer_mep = get_moteur_mep()
@@ -1318,17 +1384,23 @@ async def generate_plans_mep(params: ParamsProjet):
                           params=params.dict(), dwg_geometry=dwg_geometry)
         with open(out_path, "rb") as f:
             pdf_bytes = f.read()
-        os.unlink(out_path)
-        gc.collect()
         return pdf_response(pdf_bytes, fname(params, "plans_mep"))
     except Exception as e:
         logger.error(f"/generate-plans-mep error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if out_path:
+            try:
+                os.unlink(out_path)
+            except OSError:
+                pass
+        gc.collect()
 
 
 @app.post("/generate-plans-structure-dwg")
 async def generate_plans_structure_dwg(params: ParamsProjet):
     """Plans structure as DXF file — architecture + poteaux/poutres/dalles on layers."""
+    out_path = None
     try:
         _, _, calculer_structure = get_moteur_structure()
         from generate_plans_structure_mep import generer_plans_structure_dxf
@@ -1343,8 +1415,6 @@ async def generate_plans_structure_dwg(params: ParamsProjet):
                                     dwg_geometry=dwg_geometry)
         with open(out_path, "rb") as f:
             dxf_bytes = f.read()
-        os.unlink(out_path)
-        gc.collect()
         dxf_name = f"tijan_plans_structure_{params.nom.replace(' ','_')[:20]}.dxf"
         return StreamingResponse(
             io.BytesIO(dxf_bytes),
@@ -1354,11 +1424,19 @@ async def generate_plans_structure_dwg(params: ParamsProjet):
     except Exception as e:
         logger.error(f"/generate-plans-structure-dwg error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if out_path:
+            try:
+                os.unlink(out_path)
+            except OSError:
+                pass
+        gc.collect()
 
 
 @app.post("/generate-plans-mep-dwg")
 async def generate_plans_mep_dwg(params: ParamsProjet):
     """Plans MEP as DXF file — architecture + MEP equipment on layers per lot."""
+    out_path = None
     try:
         _, _, calculer_structure = get_moteur_structure()
         calculer_mep = get_moteur_mep()
@@ -1375,8 +1453,6 @@ async def generate_plans_mep_dwg(params: ParamsProjet):
                               params=params.dict(), dwg_geometry=dwg_geometry)
         with open(out_path, "rb") as f:
             dxf_bytes = f.read()
-        os.unlink(out_path)
-        gc.collect()
         dxf_name = f"tijan_plans_mep_{params.nom.replace(' ','_')[:20]}.dxf"
         return StreamingResponse(
             io.BytesIO(dxf_bytes),
@@ -1386,6 +1462,13 @@ async def generate_plans_mep_dwg(params: ParamsProjet):
     except Exception as e:
         logger.error(f"/generate-plans-mep-dwg error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if out_path:
+            try:
+                os.unlink(out_path)
+            except OSError:
+                pass
+        gc.collect()
 
 
 def _load_project_geometry(urn: str) -> dict:
@@ -1489,6 +1572,8 @@ async def parse_layer(urn: str, layer: str = "SANITAIRE", guid: str = None):
         token = get_token()
         if not guid:
             guids = get_viewable_guids(urn, token)
+            if not guids:
+                raise HTTPException(status_code=400, detail="No viewables found for this project")
             guid = next((g["guid"] for g in guids if g.get("role") == "2d"), guids[0]["guid"])
         properties = get_properties(urn, guid, token)
         objects = extract_layer_objects(properties, layer)
@@ -1504,12 +1589,11 @@ async def parse_manifest(urn: str):
     try:
         from aps_parser_v2 import get_token
         import urllib.request
-        import json as _json2
         token = get_token()
         url = f"https://developer.api.autodesk.com/modelderivative/v2/designdata/{urn}/manifest"
         req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
         with urllib.request.urlopen(req) as resp:
-            data = _json2.loads(resp.read())
+            data = _json.loads(resp.read())
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1658,78 +1742,123 @@ if __name__ == "__main__":
 
 
 # ── ENGINEER REVIEW ───────────────────────────────────────
-@app.post("/request-review")
-async def request_review(request: Request):
-    """Request an engineer review for a project."""
-    body = await request.json()
-    project_id = body.get("project_id")
-    user_id = body.get("user_id")
-    scope = body.get("scope", "structure")
-    prix = 500000
 
-    if not project_id or not user_id:
+class ReviewRequest(BaseModel):
+    """Validation model for engineer review requests."""
+    project_id: str
+    user_id: str
+    scopes: List[str]  # List of review scopes: structure, mep, edge
+
+
+@app.post("/request-review")
+async def request_review(req: ReviewRequest):
+    """
+    Request an engineer review for a project.
+
+    Stores review metadata (project_id, user_id, scopes, status, cost_credits, created_at, reviewer_notes).
+    Cost is fixed at 2 credits per review (regardless of scope count).
+    """
+    # Input validation
+    if not req.project_id or not req.user_id:
         raise HTTPException(status_code=400, detail="project_id and user_id required")
 
-    # Create review record
-    from datetime import datetime
-    review_id = f"rev_{int(datetime.utcnow().timestamp())}"
+    if not req.scopes or len(req.scopes) == 0:
+        raise HTTPException(status_code=400, detail="scopes list cannot be empty")
 
-    # Create PayDunya payment for review
-    payload = {
-        "invoice": {
-            "total_amount": prix,
-            "description": f"Tijan AI — Engineer Review ({scope})",
-        },
-        "store": {
-            "name": "Tijan AI",
-            "tagline": "Engineering Intelligence for Africa",
-            "website_url": "https://tijan-frontend.vercel.app",
-        },
-        "custom_data": {
-            "user_id": user_id,
-            "project_id": project_id,
-            "review_scope": scope,
-            "type": "engineer_review",
-        },
-        "actions": {
-            "return_url": f"https://tijan-frontend.vercel.app/projects/{project_id}/review/success",
-            "cancel_url": f"https://tijan-frontend.vercel.app/projects/{project_id}/results",
-        },
+    # Validate scopes
+    valid_scopes = {"structure", "mep", "edge"}
+    for scope in req.scopes:
+        if scope not in valid_scopes:
+            raise HTTPException(status_code=400, detail=f"Invalid scope: {scope}. Must be one of {valid_scopes}")
+
+    # Fixed cost: 2 credits always
+    cost_credits = 2
+
+    # We don't need Supabase integration for this endpoint
+    # The frontend will handle the Supabase insert after credit deduction
+    # This endpoint returns the review metadata that will be stored
+
+    from datetime import datetime
+    review_id = f"rev_{int(datetime.utcnow().timestamp() * 1000)}"
+
+    return {
+        "ok": True,
+        "review_id": review_id,
+        "project_id": req.project_id,
+        "user_id": req.user_id,
+        "scopes": req.scopes,
+        "status": "pending",
+        "cost_credits": cost_credits,
+        "created_at": datetime.utcnow().isoformat(),
+        "reviewer_notes": "",
     }
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(PAYDUNYA_URL, json=payload, headers=PAYDUNYA_HEADERS)
-        data = resp.json()
 
-    if data.get("response_code") == "00":
-        return {
-            "ok": True,
-            "payment_url": data.get("response_text"),
-            "token": data.get("token"),
-            "prix_fcfa": prix,
-            "scope": scope,
-        }
-    else:
-        return {"ok": False, "error": data.get("response_text", "Payment error")}
+@app.get("/reviews")
+async def get_user_reviews(user_id: str):
+    """
+    Get all reviews for a specific user.
+
+    Query param: user_id (required)
+    Returns list of reviews with their current status.
+    """
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id query parameter required")
+
+    # Note: This endpoint signature is for frontend compatibility.
+    # Actual Supabase querying will be handled by the frontend via useAuth hook.
+    # This endpoint can be extended later to do server-side filtering if needed.
+
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "message": "Frontend should query Supabase directly via useAuth().supabase.from('engineer_reviews').select(...)",
+    }
 
 
-@app.get("/review/{project_id}")
-async def get_review_status(project_id: str):
-    """Get review status for a project (called by frontend)."""
-    # For now return a simple status — will be enhanced with Supabase queries
+@app.get("/review/{review_id}/status")
+async def get_review_status(review_id: str):
+    """
+    Get the status of a specific review.
+
+    Returns current status: pending, in_review, or delivered.
+    Also includes any reviewer notes if status is delivered.
+    """
+    if not review_id:
+        raise HTTPException(status_code=400, detail="review_id required")
+
+    # Note: This endpoint signature is for frontend compatibility.
+    # Actual status queries will be handled by the frontend via Supabase RLS.
+    # This endpoint can be extended later to do server-side lookups if needed.
+
+    return {
+        "ok": True,
+        "review_id": review_id,
+        "message": "Frontend should query Supabase directly via useAuth().supabase.from('engineer_reviews').select(...).eq('id', review_id)",
+    }
+
+
+@app.get("/review/{project_id}/info")
+async def get_review_info(project_id: str):
+    """Get engineer review availability and pricing info for a project."""
+    if not project_id:
+        raise HTTPException(status_code=400, detail="project_id required")
+
     return {
         "ok": True,
         "project_id": project_id,
-        "status": "available",
-        "prix_fcfa": 500000,
-        "turnaround": "48-72 hours",
-        "scope_options": ["structure", "structure_mep", "full"],
+        "available": True,
+        "cost_credits": 2,
+        "turnaround_hours": "48-72",
+        "scope_options": ["structure", "mep", "edge"],
+        "description": {
+            "en": "Engineer review includes annotated PDF with comments, signed validation letter with professional stamp, and delivery within 48-72 hours",
+            "fr": "Revue ingénieur inclut PDF annoté avec commentaires, lettre de validation signée avec tampon professionnel, et livraison sous 48-72 heures",
+        },
     }
 
 
 # ── PAYDUNYA ──────────────────────────────────────────────
-import httpx
-
 PAYDUNYA_URL = "https://app.paydunya.com/api/v1/checkout-invoice/create"
 PAYDUNYA_HEADERS = {
     "Content-Type": "application/json",
@@ -1737,6 +1866,14 @@ PAYDUNYA_HEADERS = {
     "PAYDUNYA-PRIVATE-KEY": os.environ.get("PAYDUNYA_PRIVATE_KEY", ""),
     "PAYDUNYA-TOKEN": os.environ.get("PAYDUNYA_TOKEN", ""),
 }
+
+# Check for PayDunya configuration at startup
+if not PAYDUNYA_HEADERS.get("PAYDUNYA-MASTER-KEY"):
+    logger.warning("PayDunya PAYDUNYA_MASTER_KEY not set")
+if not PAYDUNYA_HEADERS.get("PAYDUNYA-PRIVATE-KEY"):
+    logger.warning("PayDunya PAYDUNYA_PRIVATE_KEY not set")
+if not PAYDUNYA_HEADERS.get("PAYDUNYA-TOKEN"):
+    logger.warning("PayDunya PAYDUNYA_TOKEN not set")
 
 @app.post("/create-payment")
 async def create_payment(request: Request):
@@ -1765,7 +1902,7 @@ async def create_payment(request: Request):
         },
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(PAYDUNYA_URL, json=payload, headers=PAYDUNYA_HEADERS)
         data = resp.json()
 
@@ -1781,7 +1918,10 @@ async def translate_text(request: Request):
     body = await request.json()
     texts = body.get("texts", [])
     target_lang = body.get("lang", "en")
-    
+
+    if not isinstance(texts, list) or len(texts) > 500:
+        raise HTTPException(status_code=400, detail="texts must be a list with max 500 items")
+
     if not texts:
         return {"ok": True, "translations": []}
     
@@ -1802,14 +1942,17 @@ Texts to translate:
             messages=[{"role": "user", "content": prompt}]
         )
         response_text = message.content[0].text.strip()
-        # Parse JSON array
+        # Parse JSON array with bounds check
         if response_text.startswith("["):
             translations = _json.loads(response_text)
         else:
             # Try to extract JSON from response
             start = response_text.find("[")
-            end = response_text.rfind("]") + 1
-            translations = _json.loads(response_text[start:end])
+            end = response_text.rfind("]")
+            if start >= 0 and end > start:
+                translations = _json.loads(response_text[start:end+1])
+            else:
+                raise ValueError("No JSON array found in translation response")
         return {"ok": True, "translations": translations}
     except Exception as e:
         return {"ok": False, "error": str(e), "translations": texts}
@@ -1820,12 +1963,11 @@ async def download_f2d(urn: str, f2d_path: str):
     try:
         from aps_parser_v2 import get_token
         import urllib.request as ur
-        import json as _j
         import base64
+        import urllib.parse
         token = get_token()
         # URL APS pour telecharger un fichier derivatif
         encoded_urn = urn
-        import urllib.parse
         safe_urn = urllib.parse.quote(urn, safe='')
         safe_path = urllib.parse.quote(f2d_path, safe='')
         url = f"https://developer.api.autodesk.com/modelderivative/v2/designdata/{safe_urn}/manifest/{safe_path}"
