@@ -1033,8 +1033,10 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                 gw = dwg_gw; gh = dwg_gh
                 use_dwg = True
 
+        # Always compute grid layout (needed for fallback bays calculation)
+        ox_g, oy_g, sc_g, gw_g, gh_g = _grid_layout(w, h, nx, ny, px_m, py_m)
         if not use_dwg:
-            ox, oy, sc_g, gw, gh = _grid_layout(w, h, nx, ny, px_m, py_m)
+            ox, oy, gw, gh = ox_g, oy_g, gw_g, gh_g
             _draw_grid_axes(c, ox, oy, sc_g, nx, ny, px_m, py_m, gw, gh)
             _draw_poteaux(c, ox, oy, sc_g, nx, ny, px_m, py_m, pot_s)
 
