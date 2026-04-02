@@ -971,11 +971,24 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                 living.append({**r, 'rt': 'other'})
         return wet, living, service
 
-    # Build level list: if multi-level DWG, iterate each; otherwise single
-    if dwg_levels:
-        level_list = list(dwg_levels.items())  # [(label, geom), ...]
+    # Build level list from project params
+    nb_niv = p.get('nb_niveaux', 5)
+    project_levels = []
+    if p.get('avec_sous_sol'):
+        project_levels.append("Sous-Sol")
+    project_levels.append("RDC")
+    nb_et = nb_niv - len(project_levels) - 1  # -1 for terrasse
+    if nb_et > 0:
+        project_levels.append(f"Étage courant (1-{nb_et})" if nb_et > 1 else "Étage 1")
+    project_levels.append("Terrasse")
+
+    # Map each level to its geometry (multi-DWG or reuse single)
+    if dwg_levels and len(dwg_levels) > 1:
+        level_list = list(dwg_levels.items())
     else:
-        level_list = [("Niveau courant", None)]  # fallback grille
+        # Single geometry: reuse for all levels
+        single_geom = list(dwg_levels.values())[0] if dwg_levels else None
+        level_list = [(name, single_geom) for name in project_levels]
 
     # Sub-lots with grouping: sub-lots sharing lot_label are on SAME page
     # 12 sous-lots × N niveaux = 1 page par sous-lot par niveau (lisible)
@@ -1053,15 +1066,8 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
             c.drawCentredString(gtx, gty-16, "GAINE TECHNIQUE")
 
         def _route_to_gt(c, fx, fy, gtx, gty, color, width=0.9, dash=None):
-            """Route un réseau d'un point vers la GT en L-shape."""
-            if dash:
-                c.setDash(*dash)
-            c.setStrokeColor(color); c.setLineWidth(width)
-            # L-shape : horizontal d'abord, puis vertical
-            c.line(fx, fy, gtx, fy)  # horizontal
-            c.line(gtx, fy, gtx, gty)  # vertical
-            if dash:
-                c.setDash()
+            """Placeholder — routing lines removed for clarity."""
+            pass
 
         if use_dwg and lvl_all:
             # MODE DWG : utilise les positions réelles des pièces
