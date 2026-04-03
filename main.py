@@ -917,10 +917,13 @@ def _extract_dxf_geometry(filepath: str) -> dict:
 
     # If no rooms detected from labels, infer from wall topology
     if not geometry['rooms'] and len(geometry['walls']) >= 10:
-        inferred = _infer_rooms_from_walls(geometry)
-        if inferred:
-            geometry['rooms'] = inferred
-            logger.info(f"Inferred {len(inferred)} rooms from wall topology")
+        try:
+            inferred = _infer_rooms_from_walls(geometry)
+            if inferred:
+                geometry['rooms'] = inferred
+                logger.info(f"Inferred {len(inferred)} rooms from wall topology")
+        except Exception as e:
+            logger.warning(f"Room inference failed (non-fatal): {e}")
 
     return geometry if len(geometry['walls']) > 5 else None
 
