@@ -185,14 +185,30 @@ def _draw_dalle_hatch(c, ox, oy, sc, nx, ny, px_m, py_m):
 def _infer_axes_from_walls(dwg, nx=None, ny=None, px_m=None, py_m=None):
     """Infer structural axes from wall geometry when explicit axes_x/axes_y are absent.
 
-    Strategy: For each wall segment, we look at long horizontal/vertical lines.
+    Works with ANY coordinate system (PDF points ~0-1200, DWG mm ~0-50000+, etc.)
+    by computing thresholds relative to the geometry's bounding box.
+
+    Strategy: For each wall segment, find long horizontal/vertical lines.
     Vertical lines contribute their X coordinate as a potential X-axis.
     Horizontal lines contribute their Y coordinate as a potential Y-axis.
-    We then cluster these and pick the most prominent positions.
+    Cluster these and pick the most prominent positions.
 
-    Returns (axes_x, axes_y) as sorted lists of coordinates in mm (DWG units),
-    or ([], []) if inference fails.
+    Returns (axes_x, axes_y) as sorted coordinate lists, or ([], []) if failed.
     """
+    # First compute bounding box to calibrate thresholds
+    bounds = _dwg_bounds(dwg)
+    if not bounds:
+        return _infer_axes_fallback(dwg, nx, ny, px_m, py_m)
+    xn, yn, xx, yx = bounds
+    span_x = xx - xn
+    span_y = yx - yn
+    if span_x < 1 or span_y < 1:
+        return [], []
+
+    # Scale-relative thresholds (work for both PDF points and DWG mm)
+    min_seg_len = min(span_x, span_y) * 0.05   # min 5% of smallest span
+    min_long_wall = min(span_x, span_y) * 0.15  # 15% of span to be "long"
+
     # Collect axis-aligned wall coordinates weighted by their length
     x_positions = []  # (x_coord, weight) from vertical walls
     y_positions = []  # (y_coord, weight) from horizontal walls
@@ -212,24 +228,27 @@ def _infer_axes_from_walls(dwg, nx=None, ny=None, px_m=None, py_m=None):
             dx = abs(x2 - x1)
             dy = abs(y2 - y1)
             length = (dx**2 + dy**2) ** 0.5
-            if length < 500:  # skip very short segments (<0.5m)
+            if length < min_seg_len:
                 continue
 
             # Vertical wall (dx small relative to dy): contributes X axis
-            if dx < dy * 0.15 and dy > 1000:
+            if dx < dy * 0.15 and dy > min_long_wall:
                 avg_x = (x1 + x2) / 2
-                x_positions.append((avg_x, dy))  # weight by length
+                x_positions.append((avg_x, dy))
 
             # Horizontal wall (dy small relative to dx): contributes Y axis
-            elif dy < dx * 0.15 and dx > 1000:
+            elif dy < dx * 0.15 and dx > min_long_wall:
                 avg_y = (y1 + y2) / 2
-                y_positions.append((avg_y, dx))  # weight by length
+                y_positions.append((avg_y, dx))
 
     if len(x_positions) < 2 or len(y_positions) < 2:
-        # Not enough axis-aligned walls — fall back to endpoint clustering
         return _infer_axes_fallback(dwg, nx, ny, px_m, py_m)
 
-    def _weighted_cluster(positions, min_gap_mm=500):
+    # Clustering gap: ~3% of the geometry span
+    cluster_gap_x = span_x * 0.03
+    cluster_gap_y = span_y * 0.03
+
+    def _weighted_cluster(positions, cluster_gap):
         """Cluster positions with weights. Returns [(avg_pos, total_weight), ...]."""
         if not positions:
             return []
@@ -237,7 +256,7 @@ def _infer_axes_from_walls(dwg, nx=None, ny=None, px_m=None, py_m=None):
         clusters = []
         cur_positions = [s[0]]
         for pos, wt in s[1:]:
-            if pos - cur_positions[-1][0] < min_gap_mm:
+            if pos - cur_positions[-1][0] < cluster_gap:
                 cur_positions.append((pos, wt))
             else:
                 total_w = sum(w for _, w in cur_positions)
@@ -249,7 +268,7 @@ def _infer_axes_from_walls(dwg, nx=None, ny=None, px_m=None, py_m=None):
         clusters.append((avg_p, total_w))
         return clusters
 
-    def _select_top(clusters, min_gap_mm=1500, max_axes=12):
+    def _select_top(clusters, min_gap, max_axes=12):
         """Select top clusters that are well-spaced."""
         if not clusters:
             return []
@@ -258,20 +277,20 @@ def _infer_axes_from_walls(dwg, nx=None, ny=None, px_m=None, py_m=None):
         for pos, wt in by_weight:
             if len(selected) >= max_axes:
                 break
-            if all(abs(pos - s) > min_gap_mm for s in selected):
+            if all(abs(pos - s) > min_gap for s in selected):
                 selected.append(pos)
         selected.sort()
         return selected
 
-    # Gap between axes should be at least 60% of portée
-    min_gap_x = (px_m * 1000 * 0.6) if px_m else 1500
-    min_gap_y = (py_m * 1000 * 0.6) if py_m else 1500
+    x_clusters = _weighted_cluster(x_positions, cluster_gap_x)
+    y_clusters = _weighted_cluster(y_positions, cluster_gap_y)
 
-    x_clusters = _weighted_cluster(x_positions, min_gap_mm=400)
-    y_clusters = _weighted_cluster(y_positions, min_gap_mm=400)
+    # Minimum axis spacing: ~8% of span (a bay should be at least that wide)
+    min_gap_x = span_x * 0.08
+    min_gap_y = span_y * 0.08
 
-    axes_x = _select_top(x_clusters, min_gap_mm=min_gap_x)
-    axes_y = _select_top(y_clusters, min_gap_mm=min_gap_y)
+    axes_x = _select_top(x_clusters, min_gap_x)
+    axes_y = _select_top(y_clusters, min_gap_y)
 
     if len(axes_x) < 2 or len(axes_y) < 2:
         return _infer_axes_fallback(dwg, nx, ny, px_m, py_m)
@@ -280,24 +299,28 @@ def _infer_axes_from_walls(dwg, nx=None, ny=None, px_m=None, py_m=None):
 
 
 def _infer_axes_fallback(dwg, nx=None, ny=None, px_m=None, py_m=None):
-    """Fallback: create a uniform grid from bounding box when wall-based inference fails."""
+    """Fallback: create a uniform grid from bounding box when wall-based inference fails.
+    Works with any coordinate system."""
     bounds = _dwg_bounds(dwg)
     if not bounds:
         return [], []
     xn, yn, xx, yx = bounds
     dw = xx - xn
     dh = yx - yn
-    if dw < 1000 or dh < 1000:  # too small
+    if dw < 1 or dh < 1:
         return [], []
 
-    # Use project grid parameters to divide the bounding box
-    n_ax = (nx + 1) if nx else max(2, round(dw / ((px_m or 5.0) * 1000)))
-    n_ay = (ny + 1) if ny else max(2, round(dh / ((py_m or 4.0) * 1000)))
+    # Determine number of axes from project params
+    n_ax = (nx + 1) if nx else 5
+    n_ay = (ny + 1) if ny else 4
     n_ax = max(2, min(n_ax, 10))
     n_ay = max(2, min(n_ay, 8))
 
-    axes_x = [xn + i * dw / (n_ax - 1) for i in range(n_ax)]
-    axes_y = [yn + j * dh / (n_ay - 1) for j in range(n_ay)]
+    # Inset slightly from edges — axes usually inside outer walls
+    margin_x = dw * 0.02
+    margin_y = dh * 0.02
+    axes_x = [xn + margin_x + i * (dw - 2*margin_x) / (n_ax - 1) for i in range(n_ax)]
+    axes_y = [yn + margin_y + j * (dh - 2*margin_y) / (n_ay - 1) for j in range(n_ay)]
     return axes_x, axes_y
 
 
@@ -810,20 +833,26 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
                         _axis_label(c, x_ext_hi + 6*mm, dty(ay), chr(65 + (j % 26)))
 
                     # 4. Cotations portées entre axes (en bas)
+                    # Detect coordinate scale: mm (>5000 span) vs PDF pts (<5000)
+                    total_span_x = real_ax[-1] - real_ax[0] if len(real_ax) > 1 else 0
+                    total_span_y = abs(real_ay[-1] - real_ay[0]) if len(real_ay) > 1 else 0
+                    is_mm = max(total_span_x, total_span_y) > 5000
+                    coord_to_m = 1000.0 if is_mm else 1.0  # mm→m or use project portée
+
                     c.setFillColor(GRIS2); c.setFont("Helvetica", 4)
                     for i in range(len(real_ax)-1):
-                        span = (real_ax[i+1] - real_ax[i]) / 1000
-                        if span > 0.5:
-                            mid_x = dtx((real_ax[i] + real_ax[i+1]) / 2)
-                            c.drawCentredString(mid_x, y_ext_lo - 13*mm, f"{span:.2f}m")
+                        raw_span = abs(real_ax[i+1] - real_ax[i])
+                        span_m = raw_span / coord_to_m if is_mm else px_m
+                        mid_x = dtx((real_ax[i] + real_ax[i+1]) / 2)
+                        c.drawCentredString(mid_x, y_ext_lo - 13*mm, f"{span_m:.2f}m")
                     for j in range(len(real_ay)-1):
-                        span = (real_ay[j+1] - real_ay[j]) / 1000
-                        if span > 0.5:
-                            mid_y = dty((real_ay[j] + real_ay[j+1]) / 2)
-                            c.saveState()
-                            c.translate(x_ext_lo - 13*mm, mid_y); c.rotate(90)
-                            c.drawCentredString(0, 0, f"{span:.2f}m")
-                            c.restoreState()
+                        raw_span = abs(real_ay[j+1] - real_ay[j])
+                        span_m = raw_span / coord_to_m if is_mm else py_m
+                        mid_y = dty((real_ay[j] + real_ay[j+1]) / 2)
+                        c.saveState()
+                        c.translate(x_ext_lo - 13*mm, mid_y); c.rotate(90)
+                        c.drawCentredString(0, 0, f"{span_m:.2f}m")
+                        c.restoreState()
 
                     # 5. Dalle hatch — léger, seulement les grands panneaux
                     c.setStrokeColor(GRIS4); c.setLineWidth(0.08)
@@ -840,7 +869,7 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
                                     c.line(lx1,ly1,lx2,ly2)
 
                     # 6. Poutres principales — trait épais noir + label section
-                    pp_w = max(pp_b * dsc / 1000, 1)  # beam width on page
+                    pp_w = max(pp_b * dsc / (1000 if is_mm else 3), 1)  # beam width on page
                     c.setStrokeColor(NOIR); c.setLineWidth(max(pp_w, 1.2))
                     for ay in real_ay:
                         py = dty(ay)
@@ -860,7 +889,7 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
                             c.line(px, dty(real_ay[j]), px, dty(real_ay[j+1]))
 
                     # 8. Poteaux — carrés noirs aux intersections, taille visible
-                    pt_d = max(pot_s * dsc, 4)  # pot_s en mm × scale
+                    pt_d = max(pot_s * dsc / (1 if is_mm else 300), 4)  # ensure visible
                     for ax in real_ax:
                         for ay in real_ay:
                             px, py = dtx(ax), dty(ay)
@@ -877,19 +906,23 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
                             if sw > 15 and sh > 15:
                                 cx_d = (x1p+x2p)/2; cy_d = (y1p+y2p)/2
                                 c.drawCentredString(cx_d, cy_d + 2, f"Dalle ep.{dalle_ep}")
-                                span_x = (real_ax[i+1]-real_ax[i])/1000
-                                span_y = (real_ay[j+1]-real_ay[j])/1000
+                                span_x = abs(real_ax[i+1]-real_ax[i]) / coord_to_m if is_mm else px_m
+                                span_y = abs(real_ay[j+1]-real_ay[j]) / coord_to_m if is_mm else py_m
                                 c.setFont("Helvetica", 2.5)
                                 c.drawCentredString(cx_d, cy_d - 3, f"{span_x:.1f}×{span_y:.1f}m")
                 else:
-                    # No axes in DWG — fall back to centred abstract grid
+                    # No axes in DWG — create grid fitted to geometry bounds
                     bounds = _dwg_bounds(lvl_geom)
-                    cx_d = (bounds[0]+bounds[2])/2; cy_d = (bounds[1]+bounds[3])/2
-                    gx0 = cx_d - nx*px_m*500; gy0 = cy_d - ny*py_m*500
-                    _draw_grid_axes_dwg(c, dtx, dty, gx0, gy0, nx, ny, px_m, py_m, nx*px_m, ny*py_m)
-                    _draw_poutres_pp_dwg(c, dtx, dty, gx0, gy0, nx, ny, px_m, py_m, pp_b)
-                    _draw_poutres_ps_dwg(c, dtx, dty, gx0, gy0, nx, ny, px_m, py_m)
-                    _draw_poteaux_dwg(c, dtx, dty, gx0, gy0, nx, ny, px_m, py_m, pot_s, dsc)
+                    bx0, by0, bx1, by1 = bounds
+                    bw = bx1 - bx0; bh = by1 - by0
+                    # Divide bounding box into nx × ny grid (in geometry units)
+                    gx0 = bx0 + bw * 0.02; gy0 = by0 + bh * 0.02
+                    g_px = (bw * 0.96) / max(nx, 1)  # portée in geometry units
+                    g_py = (bh * 0.96) / max(ny, 1)
+                    _draw_grid_axes_dwg(c, dtx, dty, gx0, gy0, nx, ny, g_px/1000, g_py/1000, bw*0.96, bh*0.96)
+                    _draw_poutres_pp_dwg(c, dtx, dty, gx0, gy0, nx, ny, g_px/1000, g_py/1000, pp_b)
+                    _draw_poutres_ps_dwg(c, dtx, dty, gx0, gy0, nx, ny, g_px/1000, g_py/1000)
+                    _draw_poteaux_dwg(c, dtx, dty, gx0, gy0, nx, ny, g_px/1000, g_py/1000, pot_s, dsc)
             else:
                 use_dwg = False
 
@@ -942,6 +975,9 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
             real_ax_d = lvl_geom.get('axes_x', [])
             real_ay_d = lvl_geom.get('axes_y', [])
             if real_ax_d and real_ay_d:
+                # Detect coordinate scale
+                ts_d = max(abs(real_ax_d[-1]-real_ax_d[0]), abs(real_ay_d[-1]-real_ay_d[0])) if len(real_ax_d)>1 and len(real_ay_d)>1 else 0
+                is_mm_d = ts_d > 5000
                 # Axes + poteaux aux vraies positions
                 c.setStrokeColor(GRIS4); c.setLineWidth(0.25); c.setDash(4, 2)
                 for ax in real_ax_d:
@@ -949,7 +985,7 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
                 for ay in real_ay_d:
                     c.line(dtx(real_ax_d[0])-6*mm, dty(ay), dtx(real_ax_d[-1])+6*mm, dty(ay))
                 c.setDash()
-                pt_d = max(pot_s * dsc / 2, 3)
+                pt_d = max(pot_s * dsc / (2 if is_mm_d else 600), 3)
                 for ax in real_ax_d:
                     for ay in real_ay_d:
                         c.setFillColor(NOIR); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
