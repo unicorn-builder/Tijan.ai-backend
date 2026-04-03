@@ -179,6 +179,142 @@ def _draw_dalle_hatch(c, ox, oy, sc, nx, ny, px_m, py_m):
 
 
 # ══════════════════════════════════════════
+# AXIS INFERENCE — detect structural grid from wall geometry
+# ══════════════════════════════════════════
+
+def _infer_axes_from_walls(dwg, nx=None, ny=None, px_m=None, py_m=None):
+    """Infer structural axes from wall geometry when explicit axes_x/axes_y are absent.
+
+    Strategy: For each wall segment, we look at long horizontal/vertical lines.
+    Vertical lines contribute their X coordinate as a potential X-axis.
+    Horizontal lines contribute their Y coordinate as a potential Y-axis.
+    We then cluster these and pick the most prominent positions.
+
+    Returns (axes_x, axes_y) as sorted lists of coordinates in mm (DWG units),
+    or ([], []) if inference fails.
+    """
+    # Collect axis-aligned wall coordinates weighted by their length
+    x_positions = []  # (x_coord, weight) from vertical walls
+    y_positions = []  # (y_coord, weight) from horizontal walls
+
+    for item in dwg.get('walls', []):
+        segments = []
+        if item['type'] == 'line':
+            segments.append((item['start'], item['end']))
+        elif item['type'] == 'polyline':
+            pts = item['points']
+            for i in range(len(pts) - 1):
+                segments.append((pts[i], pts[i + 1]))
+            if item.get('closed') and len(pts) > 2:
+                segments.append((pts[-1], pts[0]))
+
+        for (x1, y1), (x2, y2) in segments:
+            dx = abs(x2 - x1)
+            dy = abs(y2 - y1)
+            length = (dx**2 + dy**2) ** 0.5
+            if length < 500:  # skip very short segments (<0.5m)
+                continue
+
+            # Vertical wall (dx small relative to dy): contributes X axis
+            if dx < dy * 0.15 and dy > 1000:
+                avg_x = (x1 + x2) / 2
+                x_positions.append((avg_x, dy))  # weight by length
+
+            # Horizontal wall (dy small relative to dx): contributes Y axis
+            elif dy < dx * 0.15 and dx > 1000:
+                avg_y = (y1 + y2) / 2
+                y_positions.append((avg_y, dx))  # weight by length
+
+    if len(x_positions) < 2 or len(y_positions) < 2:
+        # Not enough axis-aligned walls — fall back to endpoint clustering
+        return _infer_axes_fallback(dwg, nx, ny, px_m, py_m)
+
+    def _weighted_cluster(positions, min_gap_mm=500):
+        """Cluster positions with weights. Returns [(avg_pos, total_weight), ...]."""
+        if not positions:
+            return []
+        s = sorted(positions, key=lambda p: p[0])
+        clusters = []
+        cur_positions = [s[0]]
+        for pos, wt in s[1:]:
+            if pos - cur_positions[-1][0] < min_gap_mm:
+                cur_positions.append((pos, wt))
+            else:
+                total_w = sum(w for _, w in cur_positions)
+                avg_p = sum(p * w for p, w in cur_positions) / total_w
+                clusters.append((avg_p, total_w))
+                cur_positions = [(pos, wt)]
+        total_w = sum(w for _, w in cur_positions)
+        avg_p = sum(p * w for p, w in cur_positions) / total_w
+        clusters.append((avg_p, total_w))
+        return clusters
+
+    def _select_top(clusters, min_gap_mm=1500, max_axes=12):
+        """Select top clusters that are well-spaced."""
+        if not clusters:
+            return []
+        by_weight = sorted(clusters, key=lambda c: c[1], reverse=True)
+        selected = []
+        for pos, wt in by_weight:
+            if len(selected) >= max_axes:
+                break
+            if all(abs(pos - s) > min_gap_mm for s in selected):
+                selected.append(pos)
+        selected.sort()
+        return selected
+
+    # Gap between axes should be at least 60% of portée
+    min_gap_x = (px_m * 1000 * 0.6) if px_m else 1500
+    min_gap_y = (py_m * 1000 * 0.6) if py_m else 1500
+
+    x_clusters = _weighted_cluster(x_positions, min_gap_mm=400)
+    y_clusters = _weighted_cluster(y_positions, min_gap_mm=400)
+
+    axes_x = _select_top(x_clusters, min_gap_mm=min_gap_x)
+    axes_y = _select_top(y_clusters, min_gap_mm=min_gap_y)
+
+    if len(axes_x) < 2 or len(axes_y) < 2:
+        return _infer_axes_fallback(dwg, nx, ny, px_m, py_m)
+
+    return axes_x, axes_y
+
+
+def _infer_axes_fallback(dwg, nx=None, ny=None, px_m=None, py_m=None):
+    """Fallback: create a uniform grid from bounding box when wall-based inference fails."""
+    bounds = _dwg_bounds(dwg)
+    if not bounds:
+        return [], []
+    xn, yn, xx, yx = bounds
+    dw = xx - xn
+    dh = yx - yn
+    if dw < 1000 or dh < 1000:  # too small
+        return [], []
+
+    # Use project grid parameters to divide the bounding box
+    n_ax = (nx + 1) if nx else max(2, round(dw / ((px_m or 5.0) * 1000)))
+    n_ay = (ny + 1) if ny else max(2, round(dh / ((py_m or 4.0) * 1000)))
+    n_ax = max(2, min(n_ax, 10))
+    n_ay = max(2, min(n_ay, 8))
+
+    axes_x = [xn + i * dw / (n_ax - 1) for i in range(n_ax)]
+    axes_y = [yn + j * dh / (n_ay - 1) for j in range(n_ay)]
+    return axes_x, axes_y
+
+
+def _ensure_axes(dwg, nx=None, ny=None, px_m=None, py_m=None):
+    """Ensure dwg geometry has axes_x/axes_y. Infer from walls if missing."""
+    if dwg.get('axes_x') and dwg.get('axes_y'):
+        return dwg  # Already has axes
+
+    ax, ay = _infer_axes_from_walls(dwg, nx, ny, px_m, py_m)
+    if ax and ay:
+        dwg = dict(dwg)  # Don't mutate original
+        dwg['axes_x'] = ax
+        dwg['axes_y'] = ay
+    return dwg
+
+
+# ══════════════════════════════════════════
 # DWG REAL GEOMETRY — quand disponible
 # ══════════════════════════════════════════
 
@@ -282,29 +418,63 @@ def _dwg_layout(w, h, dwg, ml=50*mm, mb=55*mm, mr=72*mm, mt=30*mm):
     return tx, ty, sc, gw, gh
 
 
-def _draw_dwg(c, dwg, tx, ty, light=False):
+def _draw_dwg(c, dwg, tx, ty, light=False, sc=None):
     """Dessine la géométrie DWG réelle (murs, fenêtres, portes, labels).
-    light=True pour les plans MEP (architecture très claire en fond)."""
+    light=True pour les plans MEP (architecture très claire en fond).
+    sc = scale factor (mm to points) for thickness calculation."""
     import re
-    # Murs
-    wall_color = colors.HexColor("#DDDDDD") if light else GRIS2
-    wall_width = 0.2 if light else 0.5
-    c.setStrokeColor(wall_color); c.setLineWidth(wall_width)
-    for item in dwg.get('walls', []):
-        if item['type'] == 'line':
-            c.line(tx(item['start'][0]), ty(item['start'][1]),
-                   tx(item['end'][0]), ty(item['end'][1]))
-        elif item['type'] == 'polyline':
-            pts = item['points']
-            for i in range(len(pts)-1):
-                c.line(tx(pts[i][0]), ty(pts[i][1]),
-                       tx(pts[i+1][0]), ty(pts[i+1][1]))
-            if item.get('closed') and len(pts) > 2:
-                c.line(tx(pts[-1][0]), ty(pts[-1][1]),
-                       tx(pts[0][0]), ty(pts[0][1]))
-    # Fenêtres
-    win_color = colors.HexColor("#D6E8F5") if light else colors.HexColor("#90CAF9")
-    c.setStrokeColor(win_color); c.setLineWidth(0.15 if light else 0.3)
+
+    # Wall thickness in drawing units (use scale to get proper visual thickness)
+    wall_thick_pt = 1.8  # default wall line weight in points
+    if sc and sc > 0:
+        # 200mm wall at scale → visible thickness
+        wall_thick_pt = max(200 * sc * 0.6, 0.8)
+        wall_thick_pt = min(wall_thick_pt, 4.0)  # cap at 4pt
+
+    # ── Murs — double-line style for structure, single for MEP ──
+    if light:
+        # MEP background: light single lines
+        c.setStrokeColor(colors.HexColor("#CCCCCC")); c.setLineWidth(0.3)
+        for item in dwg.get('walls', []):
+            if item['type'] == 'line':
+                c.line(tx(item['start'][0]), ty(item['start'][1]),
+                       tx(item['end'][0]), ty(item['end'][1]))
+            elif item['type'] == 'polyline':
+                pts = item['points']
+                for i in range(len(pts)-1):
+                    c.line(tx(pts[i][0]), ty(pts[i][1]),
+                           tx(pts[i+1][0]), ty(pts[i+1][1]))
+                if item.get('closed') and len(pts) > 2:
+                    c.line(tx(pts[-1][0]), ty(pts[-1][1]),
+                           tx(pts[0][0]), ty(pts[0][1]))
+    else:
+        # Structure: thick walls with fill for visibility
+        wall_fill = colors.HexColor("#E0E0E0")
+        wall_stroke = colors.HexColor("#333333")
+        for item in dwg.get('walls', []):
+            if item['type'] == 'line':
+                x1, y1 = tx(item['start'][0]), ty(item['start'][1])
+                x2, y2 = tx(item['end'][0]), ty(item['end'][1])
+                # Draw thick filled wall (rectangle along the line)
+                c.setStrokeColor(wall_stroke); c.setLineWidth(0.3)
+                c.setFillColor(wall_fill)
+                _draw_thick_wall(c, x1, y1, x2, y2, wall_thick_pt)
+            elif item['type'] == 'polyline':
+                pts = item['points']
+                c.setStrokeColor(wall_stroke); c.setLineWidth(0.3)
+                c.setFillColor(wall_fill)
+                for i in range(len(pts)-1):
+                    x1, y1 = tx(pts[i][0]), ty(pts[i][1])
+                    x2, y2 = tx(pts[i+1][0]), ty(pts[i+1][1])
+                    _draw_thick_wall(c, x1, y1, x2, y2, wall_thick_pt)
+                if item.get('closed') and len(pts) > 2:
+                    x1, y1 = tx(pts[-1][0]), ty(pts[-1][1])
+                    x2, y2 = tx(pts[0][0]), ty(pts[0][1])
+                    _draw_thick_wall(c, x1, y1, x2, y2, wall_thick_pt)
+
+    # ── Fenêtres — blue thin lines with gap ──
+    win_color = colors.HexColor("#D6E8F5") if light else colors.HexColor("#64B5F6")
+    c.setStrokeColor(win_color); c.setLineWidth(0.2 if light else 0.6)
     for item in dwg.get('windows', []):
         if item['type'] == 'line':
             c.line(tx(item['start'][0]), ty(item['start'][1]),
@@ -314,9 +484,10 @@ def _draw_dwg(c, dwg, tx, ty, light=False):
             for i in range(len(pts)-1):
                 c.line(tx(pts[i][0]), ty(pts[i][1]),
                        tx(pts[i+1][0]), ty(pts[i+1][1]))
-    # Portes
-    door_color = colors.HexColor("#E0D5CF") if light else colors.HexColor("#BCAAA4")
-    c.setStrokeColor(door_color); c.setLineWidth(0.15 if light else 0.25)
+
+    # ── Portes — brown lines ──
+    door_color = colors.HexColor("#E0D5CF") if light else colors.HexColor("#8D6E63")
+    c.setStrokeColor(door_color); c.setLineWidth(0.15 if light else 0.4)
     for item in dwg.get('doors', []):
         if item['type'] == 'line':
             c.line(tx(item['start'][0]), ty(item['start'][1]),
@@ -326,13 +497,41 @@ def _draw_dwg(c, dwg, tx, ty, light=False):
             for i in range(len(pts)-1):
                 c.line(tx(pts[i][0]), ty(pts[i][1]),
                        tx(pts[i+1][0]), ty(pts[i+1][1]))
-    # Labels pièces — uniquement sur les plans structure (pas MEP)
+
+    # ── Labels pièces ──
     if not light:
-        c.setFillColor(GRIS3); c.setFont("Helvetica", 3.5)
+        c.setFillColor(GRIS2); c.setFont("Helvetica", 4.5)
+        for r in dwg.get('rooms', []):
+            name = r.get('name', '')
+            if name and not re.match(r'^\d', name):
+                c.drawCentredString(tx(r['x']), ty(r['y']), name[:25])
+    else:
+        # Even in light mode, show room names very faintly
+        c.setFillColor(colors.HexColor("#AAAAAA")); c.setFont("Helvetica", 3)
         for r in dwg.get('rooms', []):
             name = r.get('name', '')
             if name and not re.match(r'^\d', name):
                 c.drawCentredString(tx(r['x']), ty(r['y']), name[:20])
+
+
+def _draw_thick_wall(c, x1, y1, x2, y2, thickness):
+    """Draw a wall as a filled rectangle along a line segment."""
+    dx = x2 - x1
+    dy = y2 - y1
+    length = (dx**2 + dy**2) ** 0.5
+    if length < 0.5:
+        return
+    # Normal vector (perpendicular)
+    nx = -dy / length * thickness / 2
+    ny = dx / length * thickness / 2
+
+    path = c.beginPath()
+    path.moveTo(x1 + nx, y1 + ny)
+    path.lineTo(x2 + nx, y2 + ny)
+    path.lineTo(x2 - nx, y2 - ny)
+    path.lineTo(x1 - nx, y1 - ny)
+    path.close()
+    c.drawPath(path, fill=1, stroke=1)
 
 
 # ══════════════════════════════════════════
@@ -537,7 +736,7 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
     nb_niv = p.get("nb_niveaux", len(r.poteaux))
     he = p.get("hauteur_etage_m", 3.0)
 
-    # Normalize dwg_geometry to level dict
+    # Normalize dwg_geometry to level dict — with axis inference
     LEVEL_LABELS = {
         'SOUS_SOL': 'Sous-Sol', 'RDC': 'Rez-de-Chaussée',
         'ETAGES_1_7': 'Étage courant', 'ETAGE_8': 'Étage 8', 'TERRASSE': 'Terrasse',
@@ -545,11 +744,13 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
     dwg_levels = {}
     if dwg_geometry:
         if 'walls' in dwg_geometry:
-            dwg_levels = {'Étage courant': dwg_geometry}
+            enriched = _ensure_axes(dwg_geometry, nx, ny, px_m, py_m)
+            dwg_levels = {'Étage courant': enriched}
         else:
             for key, geom in dwg_geometry.items():
                 if isinstance(geom, dict) and len(geom.get('walls', [])) >= 5:
-                    dwg_levels[LEVEL_LABELS.get(key, key)] = geom
+                    enriched = _ensure_axes(geom, nx, ny, px_m, py_m)
+                    dwg_levels[LEVEL_LABELS.get(key, key)] = enriched
 
     # Build level list
     level_names = []
@@ -582,8 +783,8 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
         if use_dwg:
             dtx, dty, dsc, dgw, dgh = _dwg_layout(w, h, lvl_geom)
             if dtx:
-                # 1. Architecture en fond gris clair
-                _draw_dwg(c, lvl_geom, dtx, dty)
+                # 1. Architecture with thick walls
+                _draw_dwg(c, lvl_geom, dtx, dty, sc=dsc)
 
                 real_ax = lvl_geom.get('axes_x', [])
                 real_ay = lvl_geom.get('axes_y', [])
@@ -734,9 +935,10 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
     use_dwg_dalle = False
     real_ax_d = []; real_ay_d = []
     if lvl_geom and len(lvl_geom.get('walls', [])) >= 5:
+        # Axes already enriched via _ensure_axes during normalization
         dtx, dty, dsc, dgw, dgh = _dwg_layout(w, h, lvl_geom)
         if dtx:
-            _draw_dwg(c, lvl_geom, dtx, dty)
+            _draw_dwg(c, lvl_geom, dtx, dty, sc=dsc)
             real_ax_d = lvl_geom.get('axes_x', [])
             real_ay_d = lvl_geom.get('axes_y', [])
             if real_ax_d and real_ay_d:
@@ -826,9 +1028,10 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
     use_dwg_fond = False
     real_ax_f = []; real_ay_f = []
     if lvl_geom and len(lvl_geom.get('walls', [])) >= 5:
+        # Axes already enriched via _ensure_axes during normalization
         dtx, dty, dsc, dgw, dgh = _dwg_layout(w, h, lvl_geom)
         if dtx:
-            _draw_dwg(c, lvl_geom, dtx, dty)
+            _draw_dwg(c, lvl_geom, dtx, dty, sc=dsc)
             real_ax_f = lvl_geom.get('axes_x', [])
             real_ay_f = lvl_geom.get('axes_y', [])
             if real_ax_f and real_ay_f:
@@ -903,43 +1106,130 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
     c.drawString(14*mm, h - 17*mm, "COUPE GÉNÉRALE")
 
     nc = min(nx, 5)
-    rml = 50*mm; rmb = 48*mm
-    rdw = w - rml - 40*mm; rdh = h - rmb - 35*mm
+    rml = 55*mm; rmb = 52*mm
+    rdw = w - rml - 45*mm; rdh = h - rmb - 38*mm
     tot_hm = nb_niv * he; tot_wm = px_m * nc
     rsc = min(rdw / tot_wm, rdh / tot_hm)
     cgw = tot_wm * rsc; cgh = tot_hm * rsc
     cox = rml + (rdw - cgw) / 2; coy = rmb + (rdh - cgh) / 2
 
+    # Foundation depth visualization
+    fd_depth_m = fd.profondeur_m if hasattr(fd, 'profondeur_m') else 1.5
+    fd_h = max(fd_depth_m * rsc, 8)
+
+    # Ground line hatch pattern
+    ground_y = coy
+    c.setStrokeColor(GRIS3); c.setLineWidth(0.8)
+    c.line(cox - 20, ground_y, cox + cgw + 20, ground_y)
+    # Earth hatch below ground
+    c.setStrokeColor(GRIS4); c.setLineWidth(0.15)
+    for k in range(0, int(cgw + 40), 6):
+        c.line(cox - 20 + k, ground_y, cox - 20 + k - 4, ground_y - 4)
+
+    # Foundation — hatched concrete block
+    c.setFillColor(colors.HexColor("#D7CCC8")); c.setStrokeColor(NOIR); c.setLineWidth(0.5)
+    c.rect(cox - 8, coy - fd_h, cgw + 16, fd_h, fill=1, stroke=1)
+    # Cross-hatch for concrete
+    c.setStrokeColor(GRIS3); c.setLineWidth(0.1)
+    for k in range(0, int(cgw + 24 + fd_h), 4):
+        lx1 = cox - 8 + min(k, cgw + 16)
+        ly1 = coy - fd_h + max(0, k - (cgw + 16))
+        lx2 = cox - 8 + max(0, k - fd_h)
+        ly2 = coy - fd_h + min(k, fd_h)
+        c.line(lx1, ly1, lx2, ly2)
+    c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 5)
+    c.drawCentredString(cox + cgw/2, coy - fd_h + 3, f"FONDATIONS — {type_f}")
+    c.setFillColor(GRIS2); c.setFont("Helvetica", 4)
+    c.drawCentredString(cox + cgw/2, coy - fd_h - 5, f"Prof. {fd_depth_m:.1f}m — σsol={r.pression_sol_MPa:.2f} MPa")
+
+    # Draw each storey
     for niv in range(nb_niv):
         yb = coy + niv * he * rsc; yt = coy + (niv + 1) * he * rsc
         pot_k = r.poteaux[niv] if niv < len(r.poteaux) else pot0
         sec_k = pot_k.section_mm
         pw = max(sec_k * rsc / 1000, 2.5)
-        dh_s = max(dalle_ep * rsc / 1000, 1.5)
-        c.setFillColor(GRIS5); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
-        c.rect(cox, yt - dh_s, cgw, dh_s, fill=1, stroke=1)
+        dh_s = max(dalle_ep * rsc / 1000, 2.0)
+
+        # Slab — filled with hatch
+        c.setFillColor(GRIS5); c.setStrokeColor(NOIR); c.setLineWidth(0.4)
+        c.rect(cox - 3, yt - dh_s, cgw + 6, dh_s, fill=1, stroke=1)
+        # Slab hatch (diagonal lines)
+        c.setStrokeColor(GRIS3); c.setLineWidth(0.08)
+        for k in range(0, int(cgw + 6 + dh_s), 3):
+            lx1 = cox - 3 + min(k, cgw + 6)
+            ly1 = yt - dh_s + max(0, k - (cgw + 6))
+            lx2 = cox - 3 + max(0, k - dh_s)
+            ly2 = yt - dh_s + min(k, dh_s)
+            c.line(lx1, ly1, lx2, ly2)
+
+        # Columns — hatched rectangles
         for i in range(nc + 1):
             cpx = cox + i * px_m * rsc
-            c.setFillColor(colors.Color(0.88, 0.88, 0.88))
-            c.rect(cpx - pw/2, yb, pw, yt - yb - dh_s, fill=1, stroke=1)
+            col_h = yt - yb - dh_s
+            c.setFillColor(colors.HexColor("#E0E0E0")); c.setStrokeColor(NOIR); c.setLineWidth(0.4)
+            c.rect(cpx - pw/2, yb, pw, col_h, fill=1, stroke=1)
+            # Column hatch
+            c.setStrokeColor(GRIS3); c.setLineWidth(0.08)
+            for k in range(0, int(pw + col_h), 3):
+                lx1 = cpx - pw/2 + min(k, pw)
+                ly1 = yb + max(0, k - pw)
+                lx2 = cpx - pw/2 + max(0, k - col_h)
+                ly2 = yb + min(k, col_h)
+                c.line(lx1, ly1, lx2, ly2)
+
+        # Beams at slab level (visible on section as thicker zone)
+        if pp_h > dalle_ep:
+            beam_ext = max((pp_h - dalle_ep) * rsc / 1000, 1)
+            for i in range(nc):
+                bx1 = cox + i * px_m * rsc + pw
+                bx2 = cox + (i + 1) * px_m * rsc - pw
+                c.setFillColor(GRIS5); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
+                c.rect(bx1, yt - dh_s - beam_ext, bx2 - bx1, beam_ext, fill=1, stroke=1)
+
+        # Level label on left
         niv_label = getattr(pot_k, 'niveau', f'N{niv}')
-        c.setFillColor(NOIR); c.setFont("Helvetica", 5)
-        c.drawString(cox - 18*mm, yb + (yt-yb)/2 - 2, niv_label)
-        c.setFillColor(GRIS3); c.setFont("Helvetica", 4.5)
-        c.drawString(cox + cgw + 3, yb + (yt-yb)/2 - 2, f"{sec_k}×{sec_k}")
+        c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 6)
+        c.drawRightString(cox - 22*mm, yb + (yt-yb)/2, niv_label)
 
-    fd_h = max(6, 500 * rsc / 1000)
-    c.setFillColor(GRIS4); c.setStrokeColor(NOIR); c.setLineWidth(0.4)
-    c.rect(cox - 5, coy - fd_h, cgw + 10, fd_h, fill=1, stroke=1)
-    c.setFillColor(NOIR); c.setFont("Helvetica", 5)
-    c.drawCentredString(cox + cgw/2, coy - fd_h + 2, f"FONDATIONS — {type_f}")
+        # Storey height dimension on right
+        c.setStrokeColor(GRIS3); c.setLineWidth(0.3)
+        dim_x = cox + cgw + 10
+        c.line(dim_x, yb + 1, dim_x, yt - 1)
+        c.line(dim_x - 2, yb + 1, dim_x + 2, yb + 1)
+        c.line(dim_x - 2, yt - 1, dim_x + 2, yt - 1)
+        c.setFillColor(GRIS2); c.setFont("Helvetica", 4)
+        c.drawString(dim_x + 3, yb + (yt-yb)/2 - 2, f"{he:.1f}m")
 
-    c.setFont("Helvetica-Bold", 6); c.setFillColor(NOIR)
-    c.drawString(cox + cgw + 5, coy + cgh/2, f"H = {tot_hm:.1f} m")
-    c.drawString(cox + cgw + 5, coy + cgh/2 - 8, f"Béton {beton}")
+        # Column section label
+        c.setFillColor(GRIS3); c.setFont("Helvetica", 3.5)
+        c.drawString(dim_x + 3, yb + (yt-yb)/2 - 8, f"Pot.{sec_k}×{sec_k}")
 
+    # Total height dimension on far right
+    total_dim_x = cox + cgw + 25
+    c.setStrokeColor(NOIR); c.setLineWidth(0.4)
+    c.line(total_dim_x, coy, total_dim_x, coy + cgh)
+    c.line(total_dim_x - 3, coy, total_dim_x + 3, coy)
+    c.line(total_dim_x - 3, coy + cgh, total_dim_x + 3, coy + cgh)
+    c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 6)
+    c.saveState()
+    c.translate(total_dim_x + 5, coy + cgh/2); c.rotate(90)
+    c.drawCentredString(0, 0, f"H totale = {tot_hm:.1f} m")
+    c.restoreState()
+
+    # Axis labels at bottom
     for i in range(nc + 1):
-        _axis_label(c, cox + i * px_m * rsc, coy - fd_h - 10*mm, str(i+1))
+        _axis_label(c, cox + i * px_m * rsc, coy - fd_h - 14*mm, str(i+1))
+
+    # Span dimensions at bottom
+    c.setFillColor(GRIS2); c.setFont("Helvetica", 4.5)
+    for i in range(nc):
+        mid = cox + (i + 0.5) * px_m * rsc
+        c.drawCentredString(mid, coy - fd_h - 8*mm, f"{px_m*1000:.0f}")
+
+    # Technical info
+    c.setFont("Helvetica", 5); c.setFillColor(GRIS3)
+    c.drawString(14*mm, 46*mm, f"Béton {beton} — Acier {acier}")
+    c.drawString(14*mm, 41*mm, f"Dalle ep.{dalle_ep}mm — PP {pp_b}×{pp_h}mm")
 
     _cartouche(c, w, h, p, "COUPE GÉNÉRALE", page, total_pages, ech="1/200")
     c.showPage()
@@ -979,12 +1269,17 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
     if hasattr(params, "__dict__"):
         params = {k: v for k, v in vars(params).items() if not k.startswith("_")}
 
-    # Normalize dwg_geometry to a dict of levels
+    rm = resultats_mep
+    p = params
+    nx, ny, px_m, py_m = _build_grid(p)
+
+    # Normalize dwg_geometry to a dict of levels — with axis inference
     dwg_levels = {}
     if dwg_geometry:
         if 'walls' in dwg_geometry:
             # Single geometry — use as "Étage courant"
-            dwg_levels = {'Étage courant': dwg_geometry}
+            enriched = _ensure_axes(dwg_geometry, nx, ny, px_m, py_m)
+            dwg_levels = {'Étage courant': enriched}
         else:
             # Multi-level dict
             LEVEL_LABELS = {
@@ -996,12 +1291,10 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
             }
             for key, geom in dwg_geometry.items():
                 if isinstance(geom, dict) and len(geom.get('walls', [])) >= 5:
+                    enriched = _ensure_axes(geom, nx, ny, px_m, py_m)
                     label = LEVEL_LABELS.get(key, geom.get('label', key))
-                    dwg_levels[label] = geom
+                    dwg_levels[label] = enriched
 
-    rm = resultats_mep
-    p = params
-    nx, ny, px_m, py_m = _build_grid(p)
     el = rm.electrique
     pl = rm.plomberie
     cv = rm.cvc
@@ -1076,7 +1369,7 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
     c.setAuthor("Tijan AI")
 
     for title, lot_label, key in sublots:
-      for level_label, level_geom in level_list:
+      for level_idx_mep, (level_label, level_geom) in enumerate(level_list):
         page += 1
         w, h = A3L; c.setPageSize(A3L); _border(c, w, h)
         c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 12)
@@ -1087,7 +1380,7 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
         if level_geom and len(level_geom.get('walls', [])) >= 5:
             dwg_tx, dwg_ty, dwg_sc, dwg_gw, dwg_gh = _dwg_layout(w, h, level_geom)
             if dwg_tx:
-                _draw_dwg(c, level_geom, dwg_tx, dwg_ty, light=True)
+                _draw_dwg(c, level_geom, dwg_tx, dwg_ty, light=True, sc=dwg_sc)
                 tx, ty = dwg_tx, dwg_ty
                 bounds = _dwg_bounds(level_geom)
                 ox = tx(bounds[0]); oy = ty(bounds[1])
@@ -1099,7 +1392,7 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
         if not use_dwg:
             # Try PDF raster background if archi PDF available
             if archi_pdf_path:
-                pdf_page_idx = min(level_idx, 4)  # cap at page 5
+                pdf_page_idx = min(level_idx_mep, 4)  # cap at page 5
                 _render_pdf_background(c, archi_pdf_path, pdf_page_idx, w, h, opacity=0.12)
             ox, oy, gw, gh = ox_g, oy_g, gw_g, gh_g
             _draw_grid_axes(c, ox, oy, sc_g, nx, ny, px_m, py_m, gw, gh)
@@ -1587,11 +1880,13 @@ def generer_plans_structure_dxf(output_path, resultats=None, params=None, dwg_ge
     dwg_levels = {}
     if dwg_geometry:
         if 'walls' in dwg_geometry:
-            dwg_levels = {'Étage courant': dwg_geometry}
+            enriched = _ensure_axes(dwg_geometry, nx, ny, px_m, py_m)
+            dwg_levels = {'Étage courant': enriched}
         else:
             for key, geom in dwg_geometry.items():
                 if isinstance(geom, dict) and len(geom.get('walls', [])) >= 5:
-                    dwg_levels[LEVEL_LABELS.get(key, key)] = geom
+                    enriched = _ensure_axes(geom, nx, ny, px_m, py_m)
+                    dwg_levels[LEVEL_LABELS.get(key, key)] = enriched
 
     level_names = []
     if p.get("avec_sous_sol"):
@@ -1788,11 +2083,12 @@ def generer_plans_mep_dxf(output_path, resultats_mep=None, resultats_structure=N
     p = params
     nx, ny, px_m, py_m = _build_grid(p)
 
-    # Normalize DWG geometry
+    # Normalize DWG geometry — with axis inference
     dwg_levels = {}
     if dwg_geometry:
         if 'walls' in dwg_geometry:
-            dwg_levels = {'Étage courant': dwg_geometry}
+            enriched = _ensure_axes(dwg_geometry, nx, ny, px_m, py_m)
+            dwg_levels = {'Étage courant': enriched}
         else:
             LEVEL_LABELS = {
                 'SOUS_SOL': 'Sous-Sol', 'RDC': 'Rez-de-Chaussée',
@@ -1800,7 +2096,8 @@ def generer_plans_mep_dxf(output_path, resultats_mep=None, resultats_structure=N
             }
             for key, geom in dwg_geometry.items():
                 if isinstance(geom, dict) and len(geom.get('walls', [])) >= 5:
-                    dwg_levels[LEVEL_LABELS.get(key, key)] = geom
+                    enriched = _ensure_axes(geom, nx, ny, px_m, py_m)
+                    dwg_levels[LEVEL_LABELS.get(key, key)] = enriched
 
     level_names = []
     if p.get('avec_sous_sol'):
