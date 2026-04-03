@@ -17,6 +17,9 @@ ezdxf==1.4.2
 opencv-python-headless==4.11.0.86
 numpy>=1.24.0
 
+# Image processing (PDF background desaturation)
+Pillow>=10.0.0
+
 # PDF vectoriel (extraction texte + cotes)
 pymupdf==1.25.3
 

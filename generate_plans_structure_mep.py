@@ -922,10 +922,12 @@ def _legend(c, w, h, items):
 
 def _render_pdf_background(c, archi_pdf_path, page_idx, w, h,
                             ml=50*mm, mb=55*mm, mr=72*mm, mt=30*mm,
-                            opacity=0.18, dpi=150):
+                            opacity=0.18, dpi=150, grayscale=True):
     """Render a page from the architectural PDF as a background image.
 
     Uses PyMuPDF to rasterize the page, then places it on the ReportLab canvas.
+    When grayscale=True, converts to grayscale so colors don't compete with
+    structural/MEP annotations drawn on top.
 
     Returns (success, placement_dict) where placement_dict contains:
         ox, oy: bottom-left of the placed image on the ReportLab page
@@ -952,17 +954,38 @@ def _render_pdf_background(c, archi_pdf_path, page_idx, w, h,
         # Render at specified DPI
         mat = fitz.Matrix(dpi / 72, dpi / 72)
         pix = page.get_pixmap(matrix=mat, alpha=False)
-        img_bytes = pix.tobytes("png")
+
+        # Convert to grayscale to strip architectural colors
+        img_w_px = pix.width
+        img_h_px = pix.height
+        if grayscale:
+            try:
+                from PIL import Image as _PILImage
+                import numpy as _np
+                pil_img = _PILImage.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                pil_gray = pil_img.convert("L")
+                # Lighten: push midtones toward white for cleaner background
+                arr = _np.array(pil_gray, dtype=_np.float32)
+                arr = 255 - (255 - arr) * 0.6  # reduce contrast by 40%
+                pil_gray = _PILImage.fromarray(arr.astype(_np.uint8), mode="L")
+                buf = _io.BytesIO()
+                pil_gray.save(buf, format="PNG")
+                img_bytes = buf.getvalue()
+                img_w_px, img_h_px = pil_gray.size
+            except ImportError:
+                # Pillow not available — fallback to color image
+                img_bytes = pix.tobytes("png")
+        else:
+            img_bytes = pix.tobytes("png")
+
         doc.close()
 
         # Calculate placement — fit within drawing area with margins
         aw = w - ml - mr
         ah = h - mb - mt
-        img_w = pix.width
-        img_h = pix.height
-        img_scale = min(aw / img_w, ah / img_h)
-        draw_w = img_w * img_scale
-        draw_h = img_h * img_scale
+        img_scale = min(aw / img_w_px, ah / img_h_px)
+        draw_w = img_w_px * img_scale
+        draw_h = img_h_px * img_scale
         ox = ml + (aw - draw_w) / 2
         oy = mb + (ah - draw_h) / 2
 
@@ -1123,7 +1146,7 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
             pdf_page_idx = level_names.index(level_name) if level_name in level_names else 0
             ok, placement = _render_pdf_background(
                 c, archi_pdf_path, pdf_page_idx, w, h,
-                opacity=0.85, dpi=200  # high quality, high opacity
+                opacity=0.90, dpi=200, grayscale=True
             )
             if ok and placement:
                 # Get axes from extracted geometry (used for annotation positioning)
@@ -1231,7 +1254,7 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
 
     # MODE 1: PDF background for ferraillage
     if archi_pdf_path and (is_from_pdf_d or not has_geom_d):
-        ok, placement = _render_pdf_background(c, archi_pdf_path, 0, w, h, opacity=0.70, dpi=200)
+        ok, placement = _render_pdf_background(c, archi_pdf_path, 0, w, h, opacity=0.80, dpi=200, grayscale=True)
         if ok and placement and has_geom_d:
             real_ax_d = lvl_geom.get('axes_x', [])
             real_ay_d = lvl_geom.get('axes_y', [])
@@ -1365,7 +1388,7 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
 
     # MODE 1: PDF background for fondations
     if archi_pdf_path and (is_from_pdf_f or not has_geom_f):
-        ok, placement = _render_pdf_background(c, archi_pdf_path, 0, w, h, opacity=0.60, dpi=200)
+        ok, placement = _render_pdf_background(c, archi_pdf_path, 0, w, h, opacity=0.75, dpi=200, grayscale=True)
         if ok and placement and has_geom_f:
             real_ax_f = lvl_geom.get('axes_x', [])
             real_ay_f = lvl_geom.get('axes_y', [])
@@ -1750,7 +1773,7 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
         if archi_pdf_path and (is_from_pdf_mep or not has_geom_mep):
             pdf_page_idx = min(level_idx_mep, 4)
             ok_mep, placement_mep = _render_pdf_background(
-                c, archi_pdf_path, pdf_page_idx, w, h, opacity=0.80, dpi=200
+                c, archi_pdf_path, pdf_page_idx, w, h, opacity=0.85, dpi=200, grayscale=True
             )
             if ok_mep and placement_mep and has_geom_mep and placement_mep.get('pdf_h_pt'):
                 mep_tx, mep_ty, mep_sc = _pdf_bg_transforms(
