@@ -182,6 +182,7 @@ class ParamsProjet(BaseModel):
     urn:                Optional[str] = None
     dwg_geometry:       Optional[dict] = None
     archi_pdf_url:      Optional[str] = None  # URL of uploaded archi PDF for plan background
+    archi_pdf_ref:      Optional[str] = None  # Temp key for cached archi PDF (from /parse)
 
 
 # ════════════════════════════════════════════════════════════
@@ -388,6 +389,11 @@ async def parse_fichier(
             # PDF: extract params via Claude + try vector geometry extraction
             from parse_plans import extraire_params
             result = extraire_params(tmp_path)
+            # Save original PDF for use as plan background later
+            try:
+                result["archi_pdf_ref"] = _save_archi_pdf(tmp_path)
+            except Exception as e:
+                logger.warning(f"Failed to cache archi PDF: {e}")
             # Try extracting vector geometry from PDF (cascade: dwg_converter first, then extract_pdf_geometry)
             if not result.get("dwg_geometry"):
                 # Primary: dwg_converter.pdf_to_geometry (proven to work)
@@ -1361,9 +1367,8 @@ async def generate_plans_structure(params: ParamsProjet):
         dwg_geometry = params.dwg_geometry
         if not dwg_geometry and params.urn:
             dwg_geometry = _load_project_geometry(params.urn)
-        # Download archi PDF for background if URL provided and no DWG
-        if not dwg_geometry and params.archi_pdf_url:
-            archi_pdf_path = _download_archi_pdf(params.archi_pdf_url)
+        # Resolve archi PDF for background (from cache ref or URL)
+        archi_pdf_path = _resolve_archi_pdf(params)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             out_path = tmp.name
         generer_plans_structure(out_path, resultats=rs, params=params.dict(),
@@ -1381,7 +1386,8 @@ async def generate_plans_structure(params: ParamsProjet):
                 os.unlink(out_path)
             except OSError:
                 pass
-        if archi_pdf_path:
+        # Don't delete cached archi PDFs — they're managed by TTL in _save_archi_pdf
+        if archi_pdf_path and _ARCHI_PDF_CACHE_DIR not in archi_pdf_path:
             try:
                 os.unlink(archi_pdf_path)
             except OSError:
@@ -1404,9 +1410,8 @@ async def generate_plans_mep(params: ParamsProjet):
         dwg_geometry = params.dwg_geometry
         if not dwg_geometry and params.urn:
             dwg_geometry = _load_project_geometry(params.urn)
-        # Download archi PDF for background if URL provided and no DWG
-        if not dwg_geometry and params.archi_pdf_url:
-            archi_pdf_path = _download_archi_pdf(params.archi_pdf_url)
+        # Resolve archi PDF for background (from cache ref or URL)
+        archi_pdf_path = _resolve_archi_pdf(params)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             out_path = tmp.name
         generer_plans_mep(out_path, resultats_mep=rm, resultats_structure=rs,
@@ -1424,7 +1429,8 @@ async def generate_plans_mep(params: ParamsProjet):
                 os.unlink(out_path)
             except OSError:
                 pass
-        if archi_pdf_path:
+        # Don't delete cached archi PDFs — they're managed by TTL in _save_archi_pdf
+        if archi_pdf_path and _ARCHI_PDF_CACHE_DIR not in archi_pdf_path:
             try:
                 os.unlink(archi_pdf_path)
             except OSError:
@@ -1520,6 +1526,51 @@ def _download_archi_pdf(url: str) -> str:
     except Exception as e:
         logger.warning(f"Failed to download archi PDF from {url[:80]}: {e}")
         return None
+
+
+# ── Archi PDF cache — persists between /parse and /generate-plans-* ──
+_ARCHI_PDF_CACHE_DIR = os.path.join(tempfile.gettempdir(), "tijan_archi_cache")
+os.makedirs(_ARCHI_PDF_CACHE_DIR, exist_ok=True)
+
+
+def _save_archi_pdf(file_path: str) -> str:
+    """Save an uploaded PDF to the cache dir. Returns a unique reference key."""
+    import hashlib, shutil, time
+    with open(file_path, "rb") as f:
+        content_hash = hashlib.md5(f.read(8192)).hexdigest()[:12]
+    ref_key = f"{int(time.time())}_{content_hash}"
+    cached_path = os.path.join(_ARCHI_PDF_CACHE_DIR, f"{ref_key}.pdf")
+    shutil.copy2(file_path, cached_path)
+    # Cleanup old cached PDFs (older than 30 min)
+    try:
+        now = time.time()
+        for fn in os.listdir(_ARCHI_PDF_CACHE_DIR):
+            fp = os.path.join(_ARCHI_PDF_CACHE_DIR, fn)
+            if now - os.path.getmtime(fp) > 1800:
+                os.unlink(fp)
+    except OSError:
+        pass
+    logger.info(f"Cached archi PDF: {ref_key}")
+    return ref_key
+
+
+def _resolve_archi_pdf(params) -> str:
+    """Resolve archi PDF path from params. Checks cache ref first, then URL.
+    Returns temp file path or None."""
+    # Priority 1: cached ref from /parse
+    ref = getattr(params, 'archi_pdf_ref', None) or (params.get('archi_pdf_ref') if isinstance(params, dict) else None)
+    if ref:
+        cached_path = os.path.join(_ARCHI_PDF_CACHE_DIR, f"{ref}.pdf")
+        if os.path.isfile(cached_path):
+            logger.info(f"Using cached archi PDF: {ref}")
+            return cached_path
+        else:
+            logger.warning(f"Cached archi PDF not found: {ref}")
+    # Priority 2: download from URL
+    url = getattr(params, 'archi_pdf_url', None) or (params.get('archi_pdf_url') if isinstance(params, dict) else None)
+    if url:
+        return _download_archi_pdf(url)
+    return None
 
 
 def _load_project_geometry(urn: str) -> dict:
