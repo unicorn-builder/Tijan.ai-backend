@@ -183,6 +183,7 @@ class ParamsProjet(BaseModel):
     dwg_geometry:       Optional[dict] = None
     archi_pdf_url:      Optional[str] = None  # URL of uploaded archi PDF for plan background
     archi_pdf_ref:      Optional[str] = None  # Temp key for cached archi PDF (from /parse)
+    geom_ref:           Optional[str] = None  # Temp key for cached geometry (from /parse)
 
 
 # ════════════════════════════════════════════════════════════
@@ -461,6 +462,14 @@ async def parse_fichier(
                     if dm:
                         dm["nb_occupants"] = nb_occ
 
+        # Cache geometry server-side so it survives page refreshes
+        geom = result.get("dwg_geometry")
+        if geom and isinstance(geom, dict):
+            try:
+                result["geom_ref"] = _save_geometry(geom)
+            except Exception as e:
+                logger.warning(f"Failed to cache geometry: {e}")
+
         return JSONResponse(content=result)
     except Exception as e:
         logger.error(f"/parse error: {e}")
@@ -610,6 +619,10 @@ async def _parse_multi_fast(saved_files, nb_niveaux, ville, beton):
 
     if dwg_geometry:
         main_result["dwg_geometry"] = dwg_geometry
+        try:
+            main_result["geom_ref"] = _save_geometry(dwg_geometry)
+        except Exception as e:
+            logger.warning(f"Failed to cache multi-level geometry: {e}")
 
     return JSONResponse(content=main_result)
 
@@ -700,6 +713,10 @@ def _parse_multi_worker(job_id, saved_files, nb_niveaux, ville, beton):
         if dwg_geometry:
             result["dwg_geometry"] = dwg_geometry
             result["levels_detected"] = list(dwg_geometry.keys())
+            try:
+                result["geom_ref"] = _save_geometry(dwg_geometry)
+            except Exception as e:
+                logger.warning(f"Failed to cache batch geometry: {e}")
 
         _update_job(job_id, result=result, status="done",
                    progress=f"{len(sorted_files)}/{len(sorted_files)}")
@@ -1381,10 +1398,10 @@ async def generate_plans_structure(params: ParamsProjet):
         from generate_plans_structure_mep import generer_plans_structure
         donnees = params_to_donnees(params)
         rs = calculer_structure(donnees)
-        # Geometry priority: body > APS URN > None (grid fallback)
-        dwg_geometry = params.dwg_geometry
-        if not dwg_geometry and params.urn:
-            dwg_geometry = _load_project_geometry(params.urn)
+        # Geometry priority: body > cache ref > APS URN > None (grid fallback)
+        dwg_geometry = _resolve_geometry(params)
+        logger.info(f"/generate-plans-structure: geometry={'yes' if dwg_geometry else 'no'}"
+                     f" walls={len(dwg_geometry.get('walls',[])) if dwg_geometry and 'walls' in dwg_geometry else '?'}")
         # Resolve archi PDF for background (from cache ref or URL)
         archi_pdf_path = _resolve_archi_pdf(params)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -1425,9 +1442,9 @@ async def generate_plans_mep(params: ParamsProjet):
         donnees = params_to_donnees(params)
         rs = calculer_structure(donnees)
         rm = calculer_mep(donnees, rs)
-        dwg_geometry = params.dwg_geometry
-        if not dwg_geometry and params.urn:
-            dwg_geometry = _load_project_geometry(params.urn)
+        # Geometry priority: body > cache ref > APS URN > None (grid fallback)
+        dwg_geometry = _resolve_geometry(params)
+        logger.info(f"/generate-plans-mep: geometry={'yes' if dwg_geometry else 'no'}")
         # Resolve archi PDF for background (from cache ref or URL)
         archi_pdf_path = _resolve_archi_pdf(params)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -1546,9 +1563,73 @@ def _download_archi_pdf(url: str) -> str:
         return None
 
 
-# ── Archi PDF cache — persists between /parse and /generate-plans-* ──
+# ── Geometry + Archi PDF cache — persists between /parse and /generate-plans-* ──
 _ARCHI_PDF_CACHE_DIR = os.path.join(tempfile.gettempdir(), "tijan_archi_cache")
 os.makedirs(_ARCHI_PDF_CACHE_DIR, exist_ok=True)
+
+_GEOM_CACHE_DIR = os.path.join(tempfile.gettempdir(), "tijan_geom_cache")
+os.makedirs(_GEOM_CACHE_DIR, exist_ok=True)
+
+
+def _save_geometry(geom: dict) -> str:
+    """Save extracted geometry to cache. Returns a unique reference key."""
+    import hashlib, time, json
+    geom_json = json.dumps(geom, default=str, ensure_ascii=False)
+    content_hash = hashlib.md5(geom_json[:4096].encode()).hexdigest()[:12]
+    ref_key = f"{int(time.time())}_{content_hash}"
+    cached_path = os.path.join(_GEOM_CACHE_DIR, f"{ref_key}.json")
+    with open(cached_path, "w") as f:
+        f.write(geom_json)
+    # Cleanup old cached geometry (older than 2 hours)
+    try:
+        now = time.time()
+        for fn in os.listdir(_GEOM_CACHE_DIR):
+            fp = os.path.join(_GEOM_CACHE_DIR, fn)
+            if now - os.path.getmtime(fp) > 7200:
+                os.unlink(fp)
+    except OSError:
+        pass
+    logger.info(f"Cached geometry: {ref_key} ({len(geom.get('walls', []))} walls)")
+    return ref_key
+
+
+def _resolve_geometry(params) -> dict:
+    """Resolve geometry: body dict > cache ref > APS URN > None."""
+    import json
+    # Priority 1: geometry in request body
+    geom = getattr(params, 'dwg_geometry', None)
+    if isinstance(params, dict):
+        geom = params.get('dwg_geometry')
+    if geom and isinstance(geom, dict):
+        # Check it has actual content
+        has_walls = 'walls' in geom and len(geom.get('walls', [])) >= 3
+        has_levels = any(isinstance(v, dict) and len(v.get('walls', [])) >= 3 for v in geom.values() if isinstance(v, dict))
+        if has_walls or has_levels:
+            return geom
+
+    # Priority 2: cached geometry ref
+    ref = getattr(params, 'geom_ref', None) or (params.get('geom_ref') if isinstance(params, dict) else None)
+    if ref:
+        cached_path = os.path.join(_GEOM_CACHE_DIR, f"{ref}.json")
+        if os.path.isfile(cached_path):
+            try:
+                with open(cached_path) as f:
+                    cached_geom = json.load(f)
+                logger.info(f"Loaded cached geometry: {ref}")
+                return cached_geom
+            except Exception as e:
+                logger.warning(f"Failed to load cached geometry {ref}: {e}")
+        else:
+            logger.warning(f"Cached geometry not found: {ref}")
+
+    # Priority 3: APS URN re-extraction
+    urn = getattr(params, 'urn', None) or (params.get('urn') if isinstance(params, dict) else None)
+    if urn:
+        urn_geom = _load_project_geometry(urn)
+        if urn_geom:
+            return urn_geom
+
+    return None
 
 
 def _save_archi_pdf(file_path: str) -> str:

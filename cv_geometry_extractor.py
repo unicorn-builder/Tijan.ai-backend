@@ -567,7 +567,7 @@ def _compute_scale(vision_dims: list, lines: list, img_w: int, img_h: int,
     # So mm/px ≈ 42000 / 3307 ≈ 12.7
     if img_w > 0:
         assumed_building_width_mm = 30000  # 30m typical
-        return assumed_building_width_mm / img_w
+        return float(assumed_building_width_mm / img_w)
 
     return 10.0  # absolute fallback
 
@@ -588,14 +588,14 @@ def _fuse_geometry(cv_lines: dict, cv_rooms: list, cv_doors: list,
         axes_y: [sorted floats in mm]
     }
     """
-    # Coordinate transform functions: pixel → mm
+    # Coordinate transform functions: pixel → mm (native Python float)
     # Origin at top-left of image, Y increases downward
     # Convert to building coords: origin at bottom-left, Y increases upward
     def px_to_mm_x(px):
-        return round(px * mm_per_px, 1)
+        return round(float(px) * mm_per_px, 1)
 
     def px_to_mm_y(py):
-        return round((img_h - py) * mm_per_px, 1)
+        return round(float(img_h - py) * mm_per_px, 1)
 
     geometry = {
         'walls': [],
