@@ -13,6 +13,10 @@ pypdf==4.1.0
 # Parsing géométrie
 ezdxf==1.4.2
 
+# Computer Vision (plan geometry extraction)
+opencv-python-headless==4.11.0.86
+numpy>=1.24.0
+
 # PDF vectoriel (extraction texte + cotes)
 pymupdf==1.25.3
 

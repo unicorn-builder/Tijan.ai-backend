@@ -1095,12 +1095,16 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
 
         # Detect if geometry came from PDF (coordinates in points, small range)
         # vs DWG (coordinates in mm, large range)
+        # Also detect CV pipeline output (mm coordinates but source was PDF)
         is_from_pdf = False
+        is_from_cv = bool(lvl_geom.get('_cv_meta')) if has_geom else False
         if has_geom:
             bounds = _dwg_bounds(lvl_geom)
             if bounds:
                 span = max(bounds[2] - bounds[0], bounds[3] - bounds[1])
                 is_from_pdf = span < 5000  # PDF points are typically < 2000
+            if is_from_cv and lvl_geom.get('_cv_meta', {}).get('source') == 'pdf':
+                is_from_pdf = True  # CV extracted from PDF — use PDF background
 
         rendered = False
 
@@ -1204,11 +1208,14 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
     lvl_geom = dwg_levels.get('Étage courant') or dwg_levels.get('Rez-de-Chaussée')
     has_geom_d = lvl_geom and len(lvl_geom.get('walls', [])) >= 5
     is_from_pdf_d = False
+    is_from_cv_d = bool(lvl_geom.get('_cv_meta')) if has_geom_d else False
     if has_geom_d:
         bounds_d = _dwg_bounds(lvl_geom)
         if bounds_d:
             span_d = max(bounds_d[2] - bounds_d[0], bounds_d[3] - bounds_d[1])
             is_from_pdf_d = span_d < 5000
+        if is_from_cv_d and lvl_geom.get('_cv_meta', {}).get('source') == 'pdf':
+            is_from_pdf_d = True
 
     rendered_dalle = False
     real_ax_d = []; real_ay_d = []
@@ -1331,11 +1338,14 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
     lvl_geom = dwg_levels.get('Sous-Sol') or dwg_levels.get('Rez-de-Chaussée')
     has_geom_f = lvl_geom and len(lvl_geom.get('walls', [])) >= 5
     is_from_pdf_f = False
+    is_from_cv_f = bool(lvl_geom.get('_cv_meta')) if has_geom_f else False
     if has_geom_f:
         bounds_f = _dwg_bounds(lvl_geom)
         if bounds_f:
             span_f = max(bounds_f[2] - bounds_f[0], bounds_f[3] - bounds_f[1])
             is_from_pdf_f = span_f < 5000
+        if is_from_cv_f and lvl_geom.get('_cv_meta', {}).get('source') == 'pdf':
+            is_from_pdf_f = True
 
     rendered_fond = False
     real_ax_f = []; real_ay_f = []
@@ -1715,11 +1725,14 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
         # ── Fond de plan : 3 modes (PDF background, DWG redraw, parametric grid) ──
         has_geom_mep = level_geom and len(level_geom.get('walls', [])) >= 5
         is_from_pdf_mep = False
+        is_from_cv_mep = bool(level_geom.get('_cv_meta')) if has_geom_mep else False
         if has_geom_mep:
             bounds_mep = _dwg_bounds(level_geom)
             if bounds_mep:
                 span_mep = max(bounds_mep[2] - bounds_mep[0], bounds_mep[3] - bounds_mep[1])
                 is_from_pdf_mep = span_mep < 5000
+            if is_from_cv_mep and level_geom.get('_cv_meta', {}).get('source') == 'pdf':
+                is_from_pdf_mep = True
 
         use_dwg = False
         # Always compute grid layout (needed for fallback bays calculation)

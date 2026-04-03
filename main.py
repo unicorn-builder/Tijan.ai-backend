@@ -394,19 +394,37 @@ async def parse_fichier(
                 result["archi_pdf_ref"] = _save_archi_pdf(tmp_path)
             except Exception as e:
                 logger.warning(f"Failed to cache archi PDF: {e}")
-            # Try extracting vector geometry from PDF (cascade: dwg_converter first, then extract_pdf_geometry)
+            # Try extracting geometry from PDF — cascade:
+            # 1. CV pipeline (OpenCV + Claude Vision) — best quality
+            # 2. dwg_converter.pdf_to_geometry (vector extraction)
+            # 3. extract_pdf_geometry (fallback vector)
             if not result.get("dwg_geometry"):
-                # Primary: dwg_converter.pdf_to_geometry (proven to work)
+                # Primary: CV pipeline (OpenCV + Vision)
                 try:
-                    from dwg_converter import pdf_to_geometry
-                    pdf_geom = pdf_to_geometry(tmp_path)
-                    if pdf_geom:
-                        result["dwg_geometry"] = pdf_geom
-                        logger.info("PDF geometry (dwg_converter): %d walls, %d rooms",
-                                    len(pdf_geom.get('walls',[])), len(pdf_geom.get('rooms',[])))
+                    from cv_geometry_extractor import extract_geometry_from_pdf_cv
+                    cv_geom = extract_geometry_from_pdf_cv(tmp_path, use_vision=True)
+                    if cv_geom and len(cv_geom.get('walls', [])) >= 5:
+                        result["dwg_geometry"] = cv_geom
+                        logger.info("PDF geometry (CV pipeline): %d walls, %d rooms, quality=%s",
+                                    len(cv_geom.get('walls', [])),
+                                    len(cv_geom.get('rooms', [])),
+                                    cv_geom.get('_cv_meta', {}).get('quality', '?'))
                 except Exception as e:
-                    logger.warning("PDF geometry extraction (dwg_converter) failed: %s", e)
-                # Fallback 2: try our dedicated PDF geometry extractor
+                    logger.warning("CV geometry extraction failed: %s", e)
+
+                # Fallback 1: dwg_converter.pdf_to_geometry (vector)
+                if not result.get("dwg_geometry"):
+                    try:
+                        from dwg_converter import pdf_to_geometry
+                        pdf_geom = pdf_to_geometry(tmp_path)
+                        if pdf_geom:
+                            result["dwg_geometry"] = pdf_geom
+                            logger.info("PDF geometry (dwg_converter): %d walls, %d rooms",
+                                        len(pdf_geom.get('walls',[])), len(pdf_geom.get('rooms',[])))
+                    except Exception as e:
+                        logger.warning("PDF geometry extraction (dwg_converter) failed: %s", e)
+
+                # Fallback 2: extract_pdf_geometry
                 if not result.get("dwg_geometry"):
                     try:
                         from extract_pdf_geometry import extract_geometry_from_pdf
