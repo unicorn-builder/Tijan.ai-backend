@@ -77,6 +77,51 @@ def _cartouche(c, w, h, p, titre, pg, total, ech="1/100"):
     c.drawString(cx+c2+3*mm, cy+5*mm, f"Pl. {pg}/{total}")
 
 
+def _cartouche_pro(c, w, h, p, titre, pg, total, lot_label="", ech="1/100"):
+    """Enhanced cartouche with lot label, phase, and revision history."""
+    cw, ch_ = 180*mm, 55*mm
+    cx = w - cw - 8*mm; cy = 6*mm
+    c.setFillColor(BLANC); c.setStrokeColor(NOIR); c.setLineWidth(0.7)
+    c.rect(cx, cy, cw, ch_, fill=1, stroke=1)
+
+    # Column dividers
+    c1, c2 = 38*mm, 108*mm
+    c.setLineWidth(0.3)
+    c.line(cx+c1, cy, cx+c1, cy+ch_)
+    c.line(cx+c2, cy, cx+c2, cy+ch_)
+    c.line(cx+c1, cy+ch_*0.6, cx+cw, cy+ch_*0.6)
+    c.line(cx, cy+ch_*0.3, cx+cw, cy+ch_*0.3)
+
+    # Top left: Tijan branding
+    c.setFillColor(VERT); c.setFont("Helvetica-Bold", 10)
+    c.drawString(cx+3*mm, cy+ch_-9*mm, "TIJAN AI")
+    c.setFillColor(GRIS3); c.setFont("Helvetica", 5.5)
+    c.drawString(cx+3*mm, cy+ch_-14*mm, "Engineering Intelligence")
+    c.drawString(cx+3*mm, cy+5*mm, f"Date: {datetime.now().strftime('%d/%m/%Y')}")
+
+    # Middle left: Project + Lot label
+    c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 8)
+    c.drawString(cx+c1+3*mm, cy+ch_-9*mm, p.get("nom","Projet")[:25])
+    c.setFillColor(VERT); c.setFont("Helvetica-Bold", 6.5)
+    c.drawString(cx+c1+3*mm, cy+ch_-15*mm, lot_label[:40])
+
+    # Top right: Scale, city, page
+    c.setFillColor(GRIS3); c.setFont("Helvetica", 6)
+    c.drawString(cx+c2+3*mm, cy+ch_-9*mm, f"Éch: {ech}")
+    c.drawString(cx+c2+3*mm, cy+ch_-14*mm, p.get("ville","Dakar"))
+    c.drawString(cx+c2+3*mm, cy+5*mm, f"Pl. {pg}/{total}")
+
+    # Middle: Plan title
+    c.setFillColor(VERT); c.setFont("Helvetica-Bold", 7)
+    c.drawString(cx+c1+3*mm, cy+ch_*0.45-3*mm, titre)
+
+    # Bottom: Phase + Revision
+    c.setFillColor(GRIS3); c.setFont("Helvetica-Bold", 5)
+    c.drawString(cx+c1+3*mm, cy+ch_*0.15+2*mm, "APD")
+    c.setFont("Helvetica", 4.5)
+    c.drawString(cx+c2+3*mm, cy+ch_*0.15+2*mm, "Rév. v1.0")
+
+
 def _build_grid(p):
     """Build grid params — même logique que pl_coffrage dans v4."""
     nx = min(p.get("nb_travees_x", 4), 8)
@@ -825,23 +870,106 @@ def _draw_dalle_hatch_dwg(c, tx, ty, xn, yn, nx, ny, px_m, py_m):
 
 
 def _legend(c, w, h, items):
-    """Draw legend box — top right."""
+    """Draw legend box — top right. Backward-compatible with old format."""
     lx = w - 58*mm; ly = h - 28*mm
     c.setFont("Helvetica-Bold", 7); c.setFillColor(NOIR)
     c.drawString(lx, ly, "LÉGENDE"); ly -= 12
-    for color, width, label in items:
-        if width == 'fill':
-            c.setFillColor(color)
-            c.rect(lx, ly, 5, 5, fill=1, stroke=1)
-        elif width == 'circle':
-            c.setFillColor(color)
-            c.circle(lx + 3, ly + 3, 3, fill=1, stroke=0)
+    for item in items:
+        # Support both old format (color, width, label) and new format (dict)
+        if isinstance(item, dict):
+            color = item.get('color', NOIR)
+            symbol_type = item.get('type', 'line')
+            label = item.get('label', '')
+            width = item.get('width', 0.5)
         else:
-            c.setStrokeColor(color); c.setLineWidth(width)
+            color, width, label = item
+            symbol_type = 'circle' if width == 'circle' else ('fill' if width == 'fill' else 'line')
+
+        if symbol_type == 'fill':
+            c.setFillColor(color); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
+            c.rect(lx, ly, 5, 5, fill=1, stroke=1)
+        elif symbol_type == 'circle':
+            c.setFillColor(color); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
+            c.circle(lx + 3, ly + 3, 3, fill=1, stroke=1)
+        elif symbol_type == 'cross_circle':
+            c.setFillColor(BLANC); c.setStrokeColor(color); c.setLineWidth(0.4)
+            c.circle(lx + 3, ly + 3, 3, fill=1, stroke=1)
+            c.setStrokeColor(color); c.setLineWidth(0.3)
+            c.line(lx+0.5, ly+3, lx+5.5, ly+3); c.line(lx+3, ly+0.5, lx+3, ly+5.5)
+        elif symbol_type == 'triangle':
+            c.setFillColor(color); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
+            path = c.beginPath()
+            path.moveTo(lx+3, ly+5); path.lineTo(lx, ly); path.lineTo(lx+6, ly); path.close()
+            c.drawPath(path, fill=1, stroke=1)
+        elif symbol_type == 'rect_label':
+            c.setFillColor(color); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
+            c.rect(lx, ly, 6, 5, fill=1, stroke=1)
+            c.setFillColor(BLANC); c.setFont("Helvetica-Bold", 3)
+            c.drawCentredString(lx+3, ly+1.5, item.get('symbol_text',''))
+        else:  # line
+            c.setStrokeColor(color); c.setLineWidth(width if isinstance(width, (int, float)) else 0.5)
             c.line(lx, ly + 3, lx + 15, ly + 3)
+
         c.setFillColor(NOIR); c.setFont("Helvetica", 5.5)
         c.drawString(lx + 18, ly + 1, label)
         ly -= 10
+
+
+def _legend_pro(c, w, h, items, title="LÉGENDE"):
+    """Enhanced legend with bordered box and rich symbol support."""
+    lx = w - 62*mm; ly = h - 25*mm
+    leg_h = min(len(items) * 10 + 16, 180*mm)
+    c.setFillColor(BLANC); c.setStrokeColor(NOIR); c.setLineWidth(0.5)
+    c.rect(lx, ly - leg_h, 60*mm, leg_h, fill=1, stroke=1)
+
+    c.setFont("Helvetica-Bold", 6.5); c.setFillColor(VERT)
+    c.drawString(lx + 3*mm, ly - 8*mm, title)
+    ly_item = ly - 14*mm
+
+    for item in items:
+        if isinstance(item, dict):
+            color = item.get('color', NOIR)
+            symbol_type = item.get('type', 'line')
+            label = item.get('label', '')
+            width = item.get('width', 0.5)
+        else:
+            color, width, label = item
+            symbol_type = 'circle' if width == 'circle' else ('fill' if width == 'fill' else 'line')
+
+        # Draw symbol
+        sx = lx + 3*mm
+        if symbol_type == 'fill':
+            c.setFillColor(color); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
+            c.rect(sx, ly_item, 4, 4, fill=1, stroke=1)
+        elif symbol_type == 'circle':
+            c.setFillColor(color); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
+            c.circle(sx + 2, ly_item + 2, 2.2, fill=1, stroke=1)
+        elif symbol_type == 'cross_circle':
+            c.setFillColor(BLANC); c.setStrokeColor(color); c.setLineWidth(0.35)
+            c.circle(sx + 2, ly_item + 2, 2.2, fill=1, stroke=1)
+            c.setStrokeColor(color); c.setLineWidth(0.25)
+            c.line(sx+0.3, ly_item+2, sx+3.7, ly_item+2)
+            c.line(sx+2, ly_item+0.3, sx+2, ly_item+3.7)
+        elif symbol_type == 'triangle':
+            c.setFillColor(color); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
+            path = c.beginPath()
+            path.moveTo(sx+2, ly_item+3.5); path.lineTo(sx-0.5, ly_item)
+            path.lineTo(sx+4.5, ly_item); path.close()
+            c.drawPath(path, fill=1, stroke=1)
+        elif symbol_type == 'rect_label':
+            c.setFillColor(color); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
+            c.rect(sx, ly_item, 5, 4, fill=1, stroke=1)
+            c.setFillColor(BLANC); c.setFont("Helvetica-Bold", 2.5)
+            c.drawCentredString(sx+2.5, ly_item+1, item.get('symbol_text',''))
+        else:  # line
+            c.setStrokeColor(color)
+            c.setLineWidth(width if isinstance(width, (int, float)) else 0.5)
+            c.line(sx, ly_item + 2, sx + 12, ly_item + 2)
+
+        # Draw label
+        c.setFillColor(NOIR); c.setFont("Helvetica", 5)
+        c.drawString(sx + 16, ly_item - 0.5, label)
+        ly_item -= 9
 
 
 # ══════════════════════════════════════════
@@ -1680,6 +1808,8 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
         w, h = A3L; c.setPageSize(A3L); _border(c, w, h)
         c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 12)
         c.drawString(14*mm, h - 17*mm, f"{title} — {level_label}")
+        # Use enhanced cartouche
+        _cartouche_pro(c, w, h, p, f"Plan {title}", page, total_pages, lot_label)
 
         # ── Fond de plan : 3 modes (PDF background, DWG redraw, parametric grid) ──
         has_geom_mep = level_geom and len(level_geom.get('walls', [])) >= 5
@@ -1796,39 +1926,52 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                 c.drawString(gtx_p+10, gty_p+5, f"CM EF DN{pl.diam_colonne_montante_mm}")
                 c.setFont("Helvetica", 3)
                 c.drawString(gtx_p+10, gty_p, f"Citerne {int(pl.volume_citerne_m3)}m³")
+                circuit_idx = 1
                 for wr in wet_r:
                     wx, wy = tx(wr['x']), ty(wr['y'])
                     _route_to_gt(c, wx, wy, gtx_p, gty_p, BLEU)
                     n = wr.get('name','').lower()
+                    circuit_ref = f"EF{circuit_idx}"
                     if 'sdb' in n or 'douche' in n:
                         c.setFillColor(BLANC); c.setStrokeColor(BLEU); c.setLineWidth(0.8)
                         c.circle(wx, wy, 5, fill=1, stroke=1)
                         c.setFillColor(BLEU); c.setFont("Helvetica-Bold", 4)
                         c.drawCentredString(wx, wy-1.5, "SDB")
+                        c.setFont("Helvetica", 2.5); c.drawString(wx+8, wy-3, circuit_ref)
                     elif 'wc' in n or 'toil' in n:
                         c.setFillColor(BLEU); c.circle(wx, wy, 4, fill=1, stroke=0)
                         c.setFillColor(BLANC); c.setFont("Helvetica-Bold", 3.5)
                         c.drawCentredString(wx, wy-1.5, "WC")
+                        c.setFillColor(NOIR); c.setFont("Helvetica", 2.5)
+                        c.drawString(wx+7, wy-2.5, circuit_ref)
                     elif 'cuisine' in n or 'kitch' in n:
                         c.setFillColor(BLEU); c.rect(wx-6, wy-3.5, 12, 7, fill=1, stroke=0)
                         c.setFillColor(BLANC); c.setFont("Helvetica-Bold", 4)
                         c.drawCentredString(wx, wy-1.5, "CUI")
+                        c.setFillColor(NOIR); c.setFont("Helvetica", 2.5)
+                        c.drawString(wx+8, wy-5, circuit_ref)
                     elif 'buanderie' in n:
                         c.setFillColor(CYAN); c.rect(wx-5, wy-3.5, 10, 7, fill=1, stroke=0)
                         c.setFillColor(BLANC); c.setFont("Helvetica-Bold", 3.5)
                         c.drawCentredString(wx, wy-1.5, "BUA")
+                        c.setFillColor(NOIR); c.setFont("Helvetica", 2.5)
+                        c.drawString(wx+7, wy-5, circuit_ref)
+                    circuit_idx += 1
                 notes = [f"Colonne montante EF DN{pl.diam_colonne_montante_mm}",
                          f"Citerne {int(pl.volume_citerne_m3)}m³ — Surpresseur {pl.debit_surpresseur_m3h}m³/h",
                          f"{pl.nb_robinets_eco} robinets économiseurs — {pl.nb_wc_double_chasse} WC double chasse"]
-                _legend(c, w, h, [(BLEU, 'fill', f"GT — CM EF DN{pl.diam_colonne_montante_mm}"),
-                                  (BLEU, 0.5, "Distribution EF"),
-                                  (BLEU, 'circle', "SDB / Douche"),
-                                  (BLEU, 'fill', "WC / Toilettes"),
-                                  (BLEU, 'fill', "Évier cuisine"),
-                                  (CYAN, 'fill', "Buanderie")])
+                _legend_pro(c, w, h, [(BLEU, 'fill', f"GT — CM EF DN{pl.diam_colonne_montante_mm}"),
+                                      (BLEU, 0.5, "Distribution EF"),
+                                      (BLEU, 'circle', "SDB / Douche"),
+                                      (BLEU, 'fill', "WC / Toilettes"),
+                                      (BLEU, 'fill', "Évier cuisine"),
+                                      (CYAN, 'fill', "Buanderie")], "LÉGENDE EAU FROIDE")
 
             elif key == "plb_ec":
                 _draw_gt(c, gtx_p, gty_p, "EC", ROUGE)
+                c.setFillColor(ROUGE); c.setFont("Helvetica", 2.5)
+                c.drawString(gtx_p+8, gty_p-1, f"CE {pl.nb_chauffe_eau_solaire}×CESI")
+                circuit_idx = 1
                 for wr in wet_r:
                     n = wr.get('name','').lower()
                     if any(k in n for k in ['sdb','douche','cuisine','kitch','buanderie']):
@@ -1836,21 +1979,38 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                         _route_to_gt(c, wx, wy, gtx_p, gty_p, ROUGE, 0.5, (3,1.5))
                         c.setFillColor(BLANC); c.setStrokeColor(ROUGE); c.setLineWidth(0.5)
                         c.circle(wx, wy, 2.5, fill=1, stroke=1)
+                        c.setFillColor(NOIR); c.setFont("Helvetica", 2.5)
+                        c.drawString(wx+6, wy-1, f"EC{circuit_idx}")
+                        circuit_idx += 1
                 notes = ["CM EC DN32", f"{pl.nb_chauffe_eau_solaire} CESI"]
-                _legend(c, w, h, [(ROUGE, 'fill', "GT — EC DN32"), (ROUGE, 0.5, "Distribution EC")])
+                _legend_pro(c, w, h, [(ROUGE, 'fill', "GT — Chauffe-eau"),
+                                      (ROUGE, 0.5, "Distribution EC — DN32"),
+                                      (colors.HexColor("#E57373"), 0.5, "Circulation ECS DN16")], "LÉGENDE EAU CHAUDE")
 
             elif key == "plb_eu":
                 _draw_gt(c, gtx_p, gty_p, "EU", MARRON)
                 c.setFillColor(MARRON); c.setFont("Helvetica", 3)
                 c.drawString(gtx_p+7, gty_p+3, "CE EU DN100")
+                c.setFont("Helvetica", 2.2)
+                c.drawString(gtx_p+7, gty_p-2, f"EP DN75")
+                circuit_idx = 1
                 for wr in wet_r:
-                    wx, wy = tx(wr['x']), ty(wr['y'])
-                    _route_to_gt(c, wx, wy, gtx_p, gty_p, MARRON, 0.5, (4,2))
-                    c.setFillColor(MARRON); c.circle(wx, wy, 2, fill=1, stroke=0)
+                    n = wr.get('name','').lower()
+                    if any(k in n for k in ['sdb','wc','toil','douche','cuisine','kitch','buanderie']):
+                        wx, wy = tx(wr['x']), ty(wr['y'])
+                        _route_to_gt(c, wx, wy, gtx_p, gty_p, MARRON, 0.5, (4,2))
+                        c.setFillColor(MARRON); c.circle(wx, wy, 2, fill=1, stroke=0)
+                        c.setFillColor(NOIR); c.setFont("Helvetica", 2.5)
+                        c.drawString(wx+6, wy-1, f"EU{circuit_idx}")
+                        circuit_idx += 1
                 notes = ["Chute EU DN100", f"Conso {pl.conso_eau_annuelle_m3:.0f}m³/an"]
-                _legend(c, w, h, [(MARRON, 'fill', "GT — EU DN100"), (MARRON, 0.5, "Collecteur")])
+                _legend_pro(c, w, h, [(MARRON, 'fill', "Colonne EU — DN100"),
+                                      (colors.HexColor("#A1887F"), 'fill', "Colonne EP — DN75"),
+                                      (MARRON, 0.5, "Chute EU"),
+                                      (colors.HexColor("#A1887F"), 0.5, "Chute EP")], "LÉGENDE ÉVACUATIONS")
 
             elif key == "elec_ecl":
+                circuit_idx = 1
                 for r in all_r:
                     n = r.get('name','').lower()
                     if any(k in n for k in ['terrasse','balcon','jardin','piscine','vide','espace']): continue
@@ -1860,22 +2020,30 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                     c.circle(rx, ry+6, 5, fill=1, stroke=1)
                     c.setStrokeColor(JAUNE); c.setLineWidth(0.5)
                     c.line(rx-3.5, ry+6, rx+3.5, ry+6); c.line(rx, ry+2.5, rx, ry+9.5)
+                    # Circuit reference and power annotation
+                    c.setFillColor(NOIR); c.setFont("Helvetica", 2.5)
+                    c.drawString(rx+7, ry+6, f"L{circuit_idx}")
                     # Interrupteur
                     if any(k in n for k in ['chambre','salon','sejour','bureau','sam','bar','cuisine','sdb','wc','restaurant','magasin','salle']):
                         c.setFillColor(colors.HexColor("#FFF9C4")); c.setStrokeColor(ORANGE); c.setLineWidth(0.5)
                         c.circle(rx-10, ry+2, 3, fill=1, stroke=1)
                         c.setStrokeColor(ORANGE); c.setLineWidth(0.4)
                         c.line(rx-10, ry+5, rx-7, ry+7)
+                    circuit_idx += 1
                 notes = [f"Puissance éclairage: {el.puissance_eclairage_kw:.1f} kW",
                          f"Puissance totale: {el.puissance_totale_kva:.0f} kVA"]
-                _legend(c, w, h, [(JAUNE, 'circle', "Luminaire plafonnier"),
-                                  (colors.HexColor("#FFF9C4"), 'circle', "Interrupteur simple allumage")])
+                _legend_pro(c, w, h, [(JAUNE, 'circle', "Plafonnier"),
+                                      (ORANGE, 'circle', "Interrupteur simple allumage"),
+                                      (colors.HexColor("#FFB74D"), 'circle', "Interrupteur VA-ET-VIENT"),
+                                      (colors.HexColor("#FFA726"), 'circle', "Détecteur de mouvement"),
+                                      (JAUNE, 0.5, "Distribution éclairage")], "LÉGENDE ÉLECTRICITÉ")
 
             elif key == "elec_dist":
                 # TD dans la gaine technique
                 _draw_gt(c, gtx_p, gty_p, "TD", VERT)
                 c.setFillColor(VERT); c.setFont("Helvetica", 3)
                 c.drawString(gtx_p+7, gty_p+3, f"Transfo {el.transfo_kva}kVA")
+                c.setFont("Helvetica", 2.2); c.drawString(gtx_p+7, gty_p-2, f"GE {el.groupe_electrogene_kva}kVA")
                 # Chemin de câbles principal via les circulations → GT
                 sh = sorted(halls, key=lambda r: r['y'])
                 if sh:
@@ -1884,12 +2052,14 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                     for hh in sh:
                         hx, hy = tx(hh['x']), ty(hh['y'])
                         c.line(prev_x, prev_y, hx, hy); prev_x, prev_y = hx, hy
-                # Prises dans chaque pièce
+                # Prises dans chaque pièce avec références circuits
+                circuit_idx = 1
                 for r in all_r:
                     n = r.get('name','').lower()
                     if any(k in n for k in ['terrasse','balcon','jardin','piscine','vide','espace']): continue
                     rx, ry = tx(r['x']), ty(r['y'])
                     c.setFillColor(ORANGE); c.setStrokeColor(NOIR); c.setLineWidth(0.15)
+                    circuit_ref = f"D{circuit_idx}"
                     if any(k in n for k in ['chambre','salon','sejour','bureau','sam','bar','restaurant']):
                         for dx, dy in [(-6,-3),(6,-3),(-6,3),(6,3)]:
                             c.rect(rx+dx-2, ry+dy-1.2, 4, 2.4, fill=1, stroke=1)
@@ -1898,12 +2068,19 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                             c.rect(rx+dx-2, ry+dy-1.2, 4, 2.4, fill=1, stroke=1)
                     else:
                         c.rect(rx+4, ry-0.8, 2.4, 1.6, fill=1, stroke=1)
+                    c.setFillColor(NOIR); c.setFont("Helvetica", 2.5)
+                    c.drawString(rx+10, ry+2, circuit_ref)
+                    circuit_idx += 1
                 notes = [f"Transfo {el.transfo_kva}kVA", f"GE {el.groupe_electrogene_kva}kVA",
                          f"{el.nb_compteurs} compteurs — Col.{el.section_colonne_mm2}mm²"]
-                _legend(c, w, h, [(VERT, 'fill', "GT — TD"), (ORANGE, 1.5, "Chemin câbles"),
-                                  (ORANGE, 'fill', "Prise 2P+T")])
+                _legend_pro(c, w, h, [(VERT, 'fill', "TGBT / Transfo"),
+                                      (ORANGE, 1.5, "Chemin câbles principal"),
+                                      (ORANGE, 'fill', "Prise 2P+T 16A"),
+                                      (colors.HexColor("#FF7043"), 'fill', "Prise spécialisée"),
+                                      (colors.HexColor("#E64A19"), 'fill', "Prise cuisinière/Chauffe-eau")], "LÉGENDE PRISES & DISTRIBUTION")
 
             elif key == "cvc_clim":
+                circuit_idx = 1
                 for r in living_r:
                     n = r.get('name','').lower()
                     if any(k in n for k in ['chambre','salon','sejour','bureau','sam','bar','gym','restaurant','salle','magasin']):
@@ -1911,23 +2088,38 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                         c.setFillColor(CYAN); c.setStrokeColor(colors.HexColor("#006064")); c.setLineWidth(0.35)
                         c.rect(rx-6, ry+7, 12, 4, fill=1, stroke=1)
                         c.setFillColor(colors.HexColor("#006064")); c.setFont("Helvetica", 2.2)
+                        btu_val = "18000"
                         if 'salon' in n or 'sejour' in n or 'sam' in n or 'restaurant' in n:
                             c.drawCentredString(rx, ry+11.5, "18000 BTU")
                         elif 'chambre' in n:
                             c.drawCentredString(rx, ry+11.5, "12000 BTU")
+                            btu_val = "12000"
                         else:
                             c.drawCentredString(rx, ry+11.5, "9000 BTU")
+                            btu_val = "9000"
+                        c.setFillColor(NOIR); c.setFont("Helvetica", 2.5)
+                        c.drawString(rx+8, ry+7, f"C{circuit_idx}")
+                        circuit_idx += 1
                 notes = [f"P frigo: {cv.puissance_frigorifique_kw:.0f}kW",
                          f"Splits séj: {cv.nb_splits_sejour} — ch: {cv.nb_splits_chambre}"]
-                _legend(c, w, h, [(CYAN, 'fill', "Split mural")])
+                _legend_pro(c, w, h, [(CYAN, 'fill', "Split mural 18000 BTU"),
+                                      (colors.HexColor("#80DEEA"), 'fill', "Split mural 12000 BTU"),
+                                      (colors.HexColor("#B2EBF2"), 'fill', "Split mural 9000 BTU"),
+                                      (CYAN, 0.5, "Liaison frigorifique"),
+                                      (MARRON, 0.5, "Ligne condensats")], "LÉGENDE CLIMATISATION")
 
             elif key == "cvc_vmc":
+                vmc_idx = 1
                 for r in wet_r:
+                    n = r.get('name','').lower()
                     rx, ry = tx(r['x']), ty(r['y'])
                     c.setStrokeColor(colors.HexColor("#2E7D32")); c.setFillColor(colors.HexColor("#C8E6C9"))
                     c.setLineWidth(0.4); c.circle(rx, ry+5, 4, fill=1, stroke=1)
                     c.setStrokeColor(colors.HexColor("#2E7D32")); c.setLineWidth(0.5)
                     c.line(rx, ry+6.5, rx, ry+9)
+                    c.setFillColor(NOIR); c.setFont("Helvetica", 2.5)
+                    c.drawString(rx+7, ry+5, f"V{vmc_idx}")
+                    vmc_idx += 1
                 if len(halls) >= 2:
                     sh = sorted(halls, key=lambda r: r['y'])
                     c.setStrokeColor(colors.HexColor("#2E7D32")); c.setLineWidth(1.2); c.setDash(5,2)
@@ -1935,10 +2127,13 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                         c.line(tx(sh[i]['x']), ty(sh[i]['y']), tx(sh[i+1]['x']), ty(sh[i+1]['y']))
                     c.setDash()
                 notes = [f"{cv.nb_vmc} VMC {cv.type_vmc}"]
-                _legend(c, w, h, [(colors.HexColor("#2E7D32"), 'circle', "Bouche VMC"),
-                                  (colors.HexColor("#2E7D32"), 0.5, "Gaine VMC")])
+                _legend_pro(c, w, h, [(colors.HexColor("#2E7D32"), 'circle', "Bouche de soufflage VMC"),
+                                      (colors.HexColor("#1B5E20"), 'circle', "Bouche de reprise VMC"),
+                                      (colors.HexColor("#2E7D32"), 1.2, "Gaine VMC principal"),
+                                      (colors.HexColor("#2E7D32"), 0.5, "Gaine VMC distribution")], "LÉGENDE VENTILATION")
 
             elif key == "ssi_det":
+                det_idx = 1
                 for r in all_r:
                     n = r.get('name','').lower()
                     if any(k in n for k in ['terrasse','balcon','jardin','piscine','vide']): continue
@@ -1947,34 +2142,56 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                     c.circle(rx, ry-6, 4, fill=1, stroke=1)
                     c.setFillColor(ROUGE); c.setFont("Helvetica-Bold", 3)
                     c.drawCentredString(rx, ry-8, "DF")
+                    c.setFillColor(NOIR); c.setFont("Helvetica", 2.5)
+                    c.drawString(rx+7, ry-6, f"D{det_idx}")
+                    det_idx += 1
                 exits = [r for r in lvl_service if any(k in r.get('name','').lower() for k in ['palier','hall','sas'])]
+                dm_idx = 1
                 for r in exits:
                     rx, ry = tx(r['x']), ty(r['y'])
                     c.setFillColor(ROUGE); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
                     c.rect(rx-9, ry-3, 6, 6, fill=1, stroke=1)
                     c.setFillColor(BLANC); c.setFont("Helvetica-Bold", 2.5)
                     c.drawCentredString(rx-6, ry-1, "DM")
+                    c.setFillColor(NOIR); c.setFont("Helvetica", 2)
+                    c.drawString(rx-8, ry-7, f"DM{dm_idx}")
+                    dm_idx += 1
                 notes = [f"{si.nb_detecteurs_fumee} DF — {si.nb_declencheurs_manuels} DM",
                          f"Cat.ERP {si.categorie_erp} — {si.centrale_zones} zones"]
-                _legend(c, w, h, [(ROUGE, 'circle', "DF"), (ROUGE, 'fill', "DM")])
+                _legend_pro(c, w, h, [(ROUGE, 'circle', "Détecteur fumée"),
+                                      (ROUGE, 'fill', "Déclencheur manuel"),
+                                      (colors.HexColor("#D32F2F"), 'cross_circle', "Détecteur chaleur"),
+                                      (colors.HexColor("#C62828"), 'circle', "Sirène sonovisuelle"),
+                                      (ROUGE, 0.5, "Liaison détection")], "LÉGENDE SÉCURITÉ INCENDIE")
 
             elif key == "ssi_ext":
                 stairs = [r for r in lvl_service if 'palier' in r.get('name','').lower()]
+                ria_idx = 1
                 for r in stairs:
                     rx, ry = tx(r['x']), ty(r['y'])
                     c.setFillColor(BLANC); c.setStrokeColor(ROUGE); c.setLineWidth(0.7)
                     c.circle(rx+10, ry+5, 5, fill=1, stroke=1)
                     c.setFillColor(ROUGE); c.setFont("Helvetica-Bold", 4)
                     c.drawCentredString(rx+10, ry+3, "R")
+                    c.setFillColor(NOIR); c.setFont("Helvetica", 2.5)
+                    c.drawString(rx+16, ry+5, f"RIA{ria_idx}")
+                    ria_idx += 1
                     c.setFillColor(VERT); c.setStrokeColor(NOIR); c.setLineWidth(0.25)
                     c.rect(rx+4, ry-10, 8, 5, fill=1, stroke=1)
                     c.setFillColor(BLANC); c.setFont("Helvetica-Bold", 2)
                     c.drawCentredString(rx+8, ry-8.5, "BAES")
+                    c.setFillColor(NOIR); c.setFont("Helvetica", 2)
+                    c.drawString(rx+2, ry-12, f"BD{ria_idx-1}")
                 notes = [f"{si.nb_extincteurs_co2+si.nb_extincteurs_poudre} ext. — RIA {si.longueur_ria_ml:.0f}ml",
                          f"Sprinklers: {'OUI' if si.sprinklers_requis else 'NON'}"]
-                _legend(c, w, h, [(ROUGE, 'circle', "RIA"), (VERT, 'fill', "BAES")])
+                _legend_pro(c, w, h, [(ROUGE, 'circle', "RIA - Robinet d'incendie armé"),
+                                      (VERT, 'fill', "BAES - Bloc autonome éclairage"),
+                                      (colors.HexColor("#E53935"), 'fill', "Extincteur poudre"),
+                                      (colors.HexColor("#1565C0"), 'fill', "Extincteur CO2"),
+                                      (ROUGE, 0.5, "Distribution arrosage")], "LÉGENDE EXTINCTION & ÉVACUATION")
 
             elif key == "cfa":
+                rj45_idx = 1
                 for r in all_r:
                     n = r.get('name','').lower()
                     if any(k in n for k in ['terrasse','balcon','jardin','piscine','vide']): continue
@@ -1982,17 +2199,28 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                         rx, ry = tx(r['x']), ty(r['y'])
                         c.setFillColor(VIOLET); c.setStrokeColor(NOIR); c.setLineWidth(0.2)
                         c.rect(rx-2.5, ry-5, 5, 4, fill=1, stroke=1)
+                        c.setFillColor(NOIR); c.setFont("Helvetica", 2.5)
+                        c.drawString(rx+6, ry-5, f"RJ{rj45_idx}")
+                        rj45_idx += 1
                 cams = [r for r in lvl_service if any(k in r.get('name','').lower() for k in ['hall','palier','sas','porche'])]
+                cam_idx = 1
                 for r in cams:
                     rx, ry = tx(r['x']), ty(r['y'])
                     c.setFillColor(colors.HexColor("#CE93D8")); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
                     path = c.beginPath()
                     path.moveTo(rx, ry+10); path.lineTo(rx-4, ry+3); path.lineTo(rx+4, ry+3)
                     path.close(); c.drawPath(path, fill=1, stroke=0)
+                    c.setFillColor(NOIR); c.setFont("Helvetica", 2.5)
+                    c.drawString(rx+8, ry+10, f"CAM{cam_idx}")
+                    cam_idx += 1
                 notes = [f"{cf.nb_prises_rj45} RJ45 — {cf.nb_cameras_int+cf.nb_cameras_ext} caméras"]
-                _legend(c, w, h, [(VIOLET, 'fill', "RJ45"), (colors.HexColor("#CE93D8"), 'circle', "Caméra IP")])
+                _legend_pro(c, w, h, [(VIOLET, 'fill', "Prise RJ45"),
+                                      (colors.HexColor("#CE93D8"), 'triangle', "Caméra IP intérieure"),
+                                      (colors.HexColor("#BA68C8"), 'triangle', "Caméra IP extérieure"),
+                                      (VIOLET, 0.5, "Réseau données")], "LÉGENDE COURANTS FAIBLES")
 
             elif key == "asc_plan":
+                asc_idx = 1
                 for r in lvl_service:
                     if 'asc' in r.get('name','').lower():
                         rx, ry = tx(r['x']), ty(r['y'])
@@ -2002,8 +2230,13 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                         c.line(rx-10, ry-10, rx+10, ry+10); c.line(rx-10, ry+10, rx+10, ry-10)
                         c.setFillColor(BLEU); c.setFont("Helvetica-Bold", 3)
                         c.drawCentredString(rx, ry-12, f"{asc.nb_ascenseurs}× {asc.capacite_kg}kg")
+                        c.setFillColor(NOIR); c.setFont("Helvetica", 2.5)
+                        c.drawString(rx+12, ry-10, f"A{asc_idx}")
+                        asc_idx += 1
                 notes = [f"{asc.nb_ascenseurs} asc. {asc.capacite_kg}kg — {asc.vitesse_ms}m/s"]
-                _legend(c, w, h, [(BLEU_B, 'fill', "Gaine ascenseur")])
+                _legend_pro(c, w, h, [(BLEU_B, 'fill', f"Gaine ascenseur {asc.capacite_kg}kg"),
+                                      (colors.HexColor("#0277BD"), 'fill', "Cage escalier"),
+                                      (BLEU, 0.5, "Gaine technique")], "LÉGENDE ASCENSEURS")
 
             elif key == "gtb":
                 if len(halls) >= 2:
@@ -2011,16 +2244,27 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                     c.setStrokeColor(BLEU); c.setLineWidth(1.8)
                     for i in range(len(sh)-1):
                         c.line(tx(sh[i]['x']), ty(sh[i]['y']), tx(sh[i+1]['x']), ty(sh[i+1]['y']))
+                sensor_idx = 1
                 for r in all_r:
                     n = r.get('name','').lower()
                     if any(k in n for k in ['terrasse','balcon','jardin','piscine','vide']): continue
                     rx, ry = tx(r['x']), ty(r['y'])
                     if any(k in n for k in ['hall','palier','dgt','sas']):
                         c.setFillColor(ORANGE); c.circle(rx-6, ry+6, 2, fill=1, stroke=0)
+                        c.setFillColor(NOIR); c.setFont("Helvetica", 2)
+                        c.drawString(rx-7, ry+1, f"S{sensor_idx}")
+                        sensor_idx += 1
                     if any(k in n for k in ['chambre','salon','sejour','bureau','sam']):
                         c.setFillColor(ORANGE); c.rect(rx-7, ry-5, 4, 3, fill=1, stroke=0)
+                        c.setFillColor(NOIR); c.setFont("Helvetica", 2)
+                        c.drawString(rx-6, ry-7, f"S{sensor_idx}")
+                        sensor_idx += 1
                 notes = [f"{aut.protocole} — {aut.niveau} — {aut.nb_points_controle} pts"]
-                _legend(c, w, h, [(BLEU, 1.8, f"Bus {aut.protocole}"), (ORANGE, 'circle', "Capteur")])
+                _legend_pro(c, w, h, [(BLEU, 1.8, f"Bus {aut.protocole}"),
+                                      (ORANGE, 'circle', "Capteur température"),
+                                      (colors.HexColor("#FFB74D"), 'circle', "Capteur humidité"),
+                                      (ORANGE, 'fill', "Actionneur éclairage"),
+                                      (colors.HexColor("#FFB74D"), 'fill', "Actionneur climatisation")], "LÉGENDE AUTOMATISATION GTB")
 
         else:
             # MODE GRILLE : distribution dans les travées
@@ -2050,8 +2294,10 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                     c.line(cx_noy, cy_noy, cx_noy, by); c.line(cx_noy, by, bx, by)
                     c.setFillColor(BLEU); c.circle(bx, by, 2, fill=1, stroke=0)
                 notes = [f"CM EF DN{pl.diam_colonne_montante_mm}", f"Citerne {int(pl.volume_citerne_m3)}m³"]
-                _legend(c, w, h, [(BLEU, 'circle', f"CM EF DN{pl.diam_colonne_montante_mm}"),
-                                  (BLEU, 0.6, "Distribution EF")])
+                _legend_pro(c, w, h, [(BLEU, 'fill', f"CM EF DN{pl.diam_colonne_montante_mm}"),
+                                      (BLEU, 0.6, "Distribution EF"),
+                                      (BLEU, 'circle', "Branchement"),
+                                      (BLEU, 0.3, "Alimentation compteur")], "LÉGENDE EAU FROIDE")
             elif key == "plb_ec":
                 c.setFillColor(ROUGE); c.setStrokeColor(NOIR); c.setLineWidth(0.6)
                 c.circle(cx_noy, cy_noy, 4, fill=1, stroke=1)
@@ -2060,7 +2306,9 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                     c.setStrokeColor(ROUGE); c.setLineWidth(0.5); c.setDash(3,1.5)
                     c.line(cx_noy, cy_noy, cx_noy, by); c.line(cx_noy, by, bx, by); c.setDash()
                 notes = ["CM EC DN32", f"{pl.nb_chauffe_eau_solaire} CESI"]
-                _legend(c, w, h, [(ROUGE, 'circle', "CM EC DN32"), (ROUGE, 0.5, "Distribution EC")])
+                _legend_pro(c, w, h, [(ROUGE, 'fill', "CM EC"),
+                                      (ROUGE, 0.5, "Distribution EC — DN32"),
+                                      (colors.HexColor("#E57373"), 0.5, "Circulation ECS DN16")], "LÉGENDE EAU CHAUDE")
             elif key == "plb_eu":
                 c.setFillColor(MARRON); c.setStrokeColor(NOIR); c.setLineWidth(0.6)
                 c.circle(cx_noy, cy_noy, 4, fill=1, stroke=1)
@@ -2070,7 +2318,10 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                     c.line(bx, by, cx_noy, by); c.line(cx_noy, by, cx_noy, cy_noy); c.setDash()
                     c.setFillColor(MARRON); c.circle(bx, by, 1.5, fill=1, stroke=0)
                 notes = ["Chute EU DN100", f"Conso {pl.conso_eau_annuelle_m3:.0f}m³/an"]
-                _legend(c, w, h, [(MARRON, 'circle', "Chute EU DN100"), (MARRON, 0.5, "Collecteur")])
+                _legend_pro(c, w, h, [(MARRON, 'fill', "Colonne EU — DN100"),
+                                      (colors.HexColor("#A1887F"), 'fill', "Colonne EP — DN75"),
+                                      (MARRON, 0.5, "Chute EU"),
+                                      (colors.HexColor("#A1887F"), 0.5, "Chute EP")], "LÉGENDE ÉVACUATIONS")
             elif key == "elec_ecl":
                 for bx, by in bays:
                     c.setStrokeColor(JAUNE); c.setFillColor(colors.HexColor("#FFF8E1")); c.setLineWidth(0.4)
@@ -2078,7 +2329,11 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                     c.setStrokeColor(JAUNE); c.setLineWidth(0.3)
                     c.line(bx-2, by, bx+2, by); c.line(bx, by-2, bx, by+2)
                 notes = [f"P éclairage: {el.puissance_eclairage_kw:.1f}kW"]
-                _legend(c, w, h, [(JAUNE, 'circle', "Luminaire")])
+                _legend_pro(c, w, h, [(JAUNE, 'circle', "Plafonnier"),
+                                      (ORANGE, 'circle', "Interrupteur simple allumage"),
+                                      (colors.HexColor("#FFB74D"), 'circle', "Interrupteur VA-ET-VIENT"),
+                                      (colors.HexColor("#FFA726"), 'circle', "Détecteur de mouvement"),
+                                      (JAUNE, 0.5, "Distribution éclairage")], "LÉGENDE ÉLECTRICITÉ")
             elif key == "elec_dist":
                 c.setFillColor(VERT); c.setStrokeColor(NOIR); c.setLineWidth(0.6)
                 c.rect(cx_noy-5, cy_noy-5, 10, 7, fill=1, stroke=1)
@@ -2090,26 +2345,41 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                     for dx, dy in [(-4,-2),(4,-2),(-4,2),(4,2)]:
                         c.rect(bx+dx-1.2, by+dy-0.8, 2.4, 1.6, fill=1, stroke=1)
                 notes = [f"Transfo {el.transfo_kva}kVA", f"GE {el.groupe_electrogene_kva}kVA"]
-                _legend(c, w, h, [(VERT, 'fill', "TGBT"), (ORANGE, 1.2, "Chemin câbles"), (ORANGE, 'fill', "Prise")])
+                _legend_pro(c, w, h, [(VERT, 'fill', "TGBT / Transfo"),
+                                      (ORANGE, 1.2, "Chemin câbles principal"),
+                                      (ORANGE, 'fill', "Prise 2P+T 16A"),
+                                      (colors.HexColor("#FF7043"), 'fill', "Prise spécialisée"),
+                                      (colors.HexColor("#E64A19"), 'fill', "Prise cuisinière/Chauffe-eau")], "LÉGENDE PRISES & DISTRIBUTION")
             elif key == "cvc_clim":
                 for bx, by in bays:
                     c.setFillColor(CYAN); c.setStrokeColor(colors.HexColor("#006064")); c.setLineWidth(0.35)
                     c.rect(bx-5, by+4, 10, 3, fill=1, stroke=1)
                 notes = [f"P frigo: {cv.puissance_frigorifique_kw:.0f}kW", f"Splits: {cv.nb_splits_sejour+cv.nb_splits_chambre}"]
-                _legend(c, w, h, [(CYAN, 'fill', "Split")])
+                _legend_pro(c, w, h, [(CYAN, 'fill', "Split mural 18000 BTU"),
+                                      (colors.HexColor("#80DEEA"), 'fill', "Split mural 12000 BTU"),
+                                      (colors.HexColor("#B2EBF2"), 'fill', "Split mural 9000 BTU"),
+                                      (CYAN, 0.5, "Liaison frigorifique"),
+                                      (MARRON, 0.5, "Ligne condensats")], "LÉGENDE CLIMATISATION")
             elif key == "cvc_vmc":
                 for bx, by in bays:
                     c.setStrokeColor(colors.HexColor("#2E7D32")); c.setFillColor(colors.HexColor("#C8E6C9"))
                     c.setLineWidth(0.4); c.circle(bx, by-3, 3, fill=1, stroke=1)
                 notes = [f"{cv.nb_vmc} VMC {cv.type_vmc}"]
-                _legend(c, w, h, [(colors.HexColor("#2E7D32"), 'circle', "Bouche VMC")])
+                _legend_pro(c, w, h, [(colors.HexColor("#2E7D32"), 'circle', "Bouche de soufflage VMC"),
+                                      (colors.HexColor("#1B5E20"), 'circle', "Bouche de reprise VMC"),
+                                      (colors.HexColor("#2E7D32"), 1.2, "Gaine VMC principal"),
+                                      (colors.HexColor("#2E7D32"), 0.5, "Gaine VMC distribution")], "LÉGENDE VENTILATION")
             elif key == "ssi_det":
                 for bx, by in bays:
                     c.setFillColor(BLANC); c.setStrokeColor(ROUGE); c.setLineWidth(0.5)
                     c.circle(bx, by, 3, fill=1, stroke=1)
                     c.setFillColor(ROUGE); c.setFont("Helvetica-Bold", 3.5); c.drawCentredString(bx, by-1.5, "DF")
                 notes = [f"{si.nb_detecteurs_fumee} DF — {si.nb_declencheurs_manuels} DM"]
-                _legend(c, w, h, [(ROUGE, 'circle', "DF")])
+                _legend_pro(c, w, h, [(ROUGE, 'circle', "Détecteur fumée"),
+                                      (ROUGE, 'fill', "Déclencheur manuel"),
+                                      (colors.HexColor("#D32F2F"), 'cross_circle', "Détecteur chaleur"),
+                                      (colors.HexColor("#C62828"), 'circle', "Sirène sonovisuelle"),
+                                      (ROUGE, 0.5, "Liaison détection")], "LÉGENDE SÉCURITÉ INCENDIE")
             elif key == "ssi_ext":
                 for corner in [(ox+10, oy+10), (ox+gw-10, oy+gh-10)]:
                     rx, ry = corner
@@ -2118,13 +2388,20 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                     c.setFillColor(ROUGE); c.setFont("Helvetica-Bold", 5); c.drawCentredString(rx, ry-2, "R")
                     c.setFillColor(VERT); c.rect(rx+8, ry-4, 6, 3.5, fill=1, stroke=1)
                 notes = [f"{si.nb_extincteurs_co2+si.nb_extincteurs_poudre} ext. — RIA {si.longueur_ria_ml:.0f}ml"]
-                _legend(c, w, h, [(ROUGE, 'circle', "RIA"), (VERT, 'fill', "BAES")])
+                _legend_pro(c, w, h, [(ROUGE, 'circle', "RIA - Robinet d'incendie armé"),
+                                      (VERT, 'fill', "BAES - Bloc autonome éclairage"),
+                                      (colors.HexColor("#E53935"), 'fill', "Extincteur poudre"),
+                                      (colors.HexColor("#1565C0"), 'fill', "Extincteur CO2"),
+                                      (ROUGE, 0.5, "Distribution arrosage")], "LÉGENDE EXTINCTION & ÉVACUATION")
             elif key == "cfa":
                 for bx, by in bays:
                     c.setFillColor(VIOLET); c.setStrokeColor(NOIR); c.setLineWidth(0.2)
                     c.rect(bx-2, by-2, 4, 3, fill=1, stroke=1)
                 notes = [f"{cf.nb_prises_rj45} RJ45 — {cf.nb_cameras_int+cf.nb_cameras_ext} caméras"]
-                _legend(c, w, h, [(VIOLET, 'fill', "RJ45")])
+                _legend_pro(c, w, h, [(VIOLET, 'fill', "Prise RJ45"),
+                                      (colors.HexColor("#CE93D8"), 'triangle', "Caméra IP intérieure"),
+                                      (colors.HexColor("#BA68C8"), 'triangle', "Caméra IP extérieure"),
+                                      (VIOLET, 0.5, "Réseau données")], "LÉGENDE COURANTS FAIBLES")
             elif key == "asc_plan":
                 c.setFillColor(BLEU_B); c.setStrokeColor(BLEU); c.setLineWidth(1)
                 c.rect(cx_noy-8, cy_noy-8, 16, 16, fill=1, stroke=1)
@@ -2133,21 +2410,27 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                 c.setFillColor(BLEU); c.setFont("Helvetica-Bold", 4)
                 c.drawCentredString(cx_noy, cy_noy-12, f"{asc.nb_ascenseurs}× {asc.capacite_kg}kg")
                 notes = [f"{asc.nb_ascenseurs} asc. {asc.capacite_kg}kg"]
-                _legend(c, w, h, [(BLEU_B, 'fill', "Gaine ascenseur")])
+                _legend_pro(c, w, h, [(BLEU_B, 'fill', f"Gaine ascenseur {asc.capacite_kg}kg"),
+                                      (colors.HexColor("#0277BD"), 'fill', "Cage escalier"),
+                                      (BLEU, 0.5, "Gaine technique")], "LÉGENDE ASCENSEURS")
             elif key == "gtb":
                 c.setStrokeColor(BLEU); c.setLineWidth(1.8)
                 c.line(ox, cy_noy, ox+gw, cy_noy)
                 for bx, by in bays:
                     c.setFillColor(ORANGE); c.circle(bx-3, by+3, 1.5, fill=1, stroke=0)
                 notes = [f"{aut.protocole} — {aut.nb_points_controle} pts"]
-                _legend(c, w, h, [(BLEU, 1.8, f"Bus {aut.protocole}"), (ORANGE, 'circle', "Capteur")])
+                _legend_pro(c, w, h, [(BLEU, 1.8, f"Bus {aut.protocole}"),
+                                      (ORANGE, 'circle', "Capteur température"),
+                                      (colors.HexColor("#FFB74D"), 'circle', "Capteur humidité"),
+                                      (ORANGE, 'fill', "Actionneur éclairage"),
+                                      (colors.HexColor("#FFB74D"), 'fill', "Actionneur climatisation")], "LÉGENDE AUTOMATISATION GTB")
 
         # Notes en bas
         c.setFont("Helvetica", 5); c.setFillColor(GRIS3)
         for k_n, note in enumerate(notes[:3]):
             c.drawString(14*mm, 42*mm - k_n*5*mm, note)
 
-        _cartouche(c, w, h, p, f"{title} — {level_label}", page, total_pages)
+        _cartouche_pro(c, w, h, p, f"Plan {title}", page, total_pages, lot_label)
         c.showPage()
 
     c.save()
