@@ -972,6 +972,393 @@ def _legend_pro(c, w, h, items, title="LÉGENDE"):
         ly_item -= 9
 
 
+def _label_columns_on_grid(c, ox, oy, sc, nx, ny, px_m, py_m, pot_s):
+    """Add P1, P2, P3... labels to columns on parametric grid."""
+    c.setFont("Helvetica-Bold", 3.5); c.setFillColor(NOIR)
+    col_idx = 1
+    for i in range(nx + 1):
+        for j in range(ny + 1):
+            xp = ox + i * px_m * sc
+            yp = oy + j * py_m * sc
+            pt_d = max(pot_s * sc / 1000, 3)
+            # Label above/right of column
+            c.drawString(xp + pt_d/2 + 1, yp + pt_d/2 + 1, f"P{col_idx}")
+            col_idx += 1
+
+
+def _label_columns_on_real_axes(c, tx, ty, axes_x, axes_y, pot_s):
+    """Add P1, P2... labels to columns on real axes (DWG/PDF mode).
+
+    This function labels columns at axis intersections using real coordinate transforms.
+    tx, ty are callable transforms from model coordinates to page coordinates.
+    """
+    if not axes_x or not axes_y:
+        return
+
+    c.setFont("Helvetica-Bold", 4); c.setFillColor(NOIR)
+    col_idx = 1
+    for ax in axes_x:
+        for ay in axes_y:
+            px_pt = tx(ax)
+            py_pt = ty(ay)
+            pt_d = max(pot_s / 1000 * 2, 3)  # Rough conversion for label sizing
+            c.drawString(px_pt + pt_d/2 + 1, py_pt + pt_d/2 + 1, f"P{col_idx}")
+            col_idx += 1
+
+
+def _draw_section_callouts(c, ox, oy, sc, nx, ny, px_m, py_m, pp_b, pp_h, ps_b, ps_h):
+    """Draw section cut symbols (COUPE A-A, COUPE B-B callouts) on coffrage plan.
+
+    Adds small section cut indicator circles with arrows showing viewing direction.
+    Placed at strategic beam locations to indicate where cross-sections are taken.
+    """
+    # COUPE A-A — along first beam line (X direction)
+    callout_y = oy + (ny / 2) * py_m * sc
+    callout_x = ox + 0.5 * px_m * sc
+
+    # Draw circle with "A" inside
+    r = 4*mm
+    c.setFillColor(BLANC); c.setStrokeColor(ROUGE); c.setLineWidth(0.6)
+    c.circle(callout_x, callout_y, r, fill=1, stroke=1)
+    c.setFillColor(ROUGE); c.setFont("Helvetica-Bold", 5)
+    c.drawCentredString(callout_x, callout_y - 1.2, "A")
+
+    # Draw arrow line with direction indicators
+    arrow_len = 25*mm
+    c.setStrokeColor(ROUGE); c.setLineWidth(0.5)
+    c.line(callout_x - r - 3, callout_y, callout_x - r - arrow_len, callout_y)
+    # Arrowheads
+    c.line(callout_x - r - arrow_len, callout_y, callout_x - r - arrow_len + 3, callout_y + 2)
+    c.line(callout_x - r - arrow_len, callout_y, callout_x - r - arrow_len + 3, callout_y - 2)
+
+    # COUPE B-B — along column line (Y direction)
+    callout_x_b = ox + (nx / 2) * px_m * sc
+    callout_y_b = oy + 0.5 * py_m * sc
+
+    c.setFillColor(BLANC); c.setStrokeColor(BLEU); c.setLineWidth(0.6)
+    c.circle(callout_x_b, callout_y_b, r, fill=1, stroke=1)
+    c.setFillColor(BLEU); c.setFont("Helvetica-Bold", 5)
+    c.drawCentredString(callout_x_b, callout_y_b - 1.2, "B")
+
+    c.setStrokeColor(BLEU); c.setLineWidth(0.5)
+    c.line(callout_x_b, callout_y_b - r - 3, callout_x_b, callout_y_b - r - arrow_len)
+    # Arrowheads
+    c.line(callout_x_b, callout_y_b - r - arrow_len, callout_x_b + 2, callout_y_b - r - arrow_len + 3)
+    c.line(callout_x_b, callout_y_b - r - arrow_len, callout_x_b - 2, callout_y_b - r - arrow_len + 3)
+
+
+def _label_beams_and_slabs_on_grid(c, ox, oy, sc, nx, ny, px_m, py_m, pp_b, pp_h, ps_b, ps_h, dalle_ep):
+    """Add section callouts and panel labels (D1, D2...) to parametric grid.
+    Professional notation: PP 1(20×40) for main beams, PS for secondary, D1 for panels."""
+    # ── Beam section callouts along main beams (horizontal) ──
+    c.setFont("Helvetica-Bold", 3); c.setFillColor(GRIS2)
+    beam_pp_idx = 1
+    for j in range(ny + 1):
+        yp = oy + j * py_m * sc
+        for i in range(nx):
+            mid_x = ox + (i + 0.5) * px_m * sc
+            # Professional notation: beam_index(b×h)
+            c.drawCentredString(mid_x, yp + 3, f"{beam_pp_idx}({pp_b}×{pp_h})")
+            beam_pp_idx += 1
+
+    # ── Secondary beam callouts (vertical) ──
+    if ps_b > 0 and ps_h > 0:
+        c.setFont("Helvetica", 2.5); c.setFillColor(GRIS3)
+        beam_ps_idx = 1
+        for i in range(nx + 1):
+            xp = ox + i * px_m * sc
+            for j in range(ny):
+                mid_y = oy + (j + 0.5) * py_m * sc
+                c.saveState()
+                c.translate(xp + 3, mid_y); c.rotate(90)
+                c.drawCentredString(0, 0, f"PS{beam_ps_idx}({ps_b}×{ps_h})")
+                c.restoreState()
+                beam_ps_idx += 1
+
+    # ── Dalle panel labels (D1, D2...) with thickness ──
+    panel_idx = 1
+    for i in range(nx):
+        for j in range(ny):
+            sx = ox + i * px_m * sc
+            sy = oy + j * py_m * sc
+            sw = px_m * sc
+            sh = py_m * sc
+            cx_p = sx + sw / 2
+            cy_p = sy + sh / 2
+            # Panel reference in circle
+            c.setStrokeColor(GRIS3); c.setFillColor(BLANC); c.setLineWidth(0.3)
+            c.circle(cx_p, cy_p, 5, fill=1, stroke=1)
+            c.setFont("Helvetica-Bold", 3.5); c.setFillColor(NOIR)
+            c.drawCentredString(cx_p, cy_p - 1.2, f"D{panel_idx}")
+            # Thickness below
+            c.setFont("Helvetica", 2.5); c.setFillColor(GRIS3)
+            c.drawCentredString(cx_p, cy_p - 7, f"ep.{dalle_ep}")
+            panel_idx += 1
+
+
+def _label_foundations_at_grid(c, ox, oy, sc, nx, ny, px_m, py_m, r, fd):
+    """Add S1/P1... labels, NEd loads, and foundation dimensions to grid positions.
+    Professional descente de charges notation per West African bureau d'études standards."""
+    if not r.poteaux or len(r.poteaux) == 0:
+        return
+
+    nb_pieux = getattr(fd, 'nb_pieux', 0)
+    diam_p = getattr(fd, 'diam_pieu_mm', 600)
+    larg_sem = getattr(fd, 'largeur_semelle_m', 1.5)
+    # Total descente de charges: sum NEd across all levels
+    total_NEd = sum(p.NEd_kN for p in r.poteaux)
+
+    c.setFont("Helvetica-Bold", 3.5); c.setFillColor(NOIR)
+    found_idx = 1
+    for i in range(nx + 1):
+        for j in range(ny + 1):
+            xp = ox + i * px_m * sc
+            yp = oy + j * py_m * sc
+            found_type = "S" if fd.type.value == "semelle_isolee" else "P"
+            # Foundation reference
+            c.setFont("Helvetica-Bold", 3.5); c.setFillColor(NOIR)
+            c.drawString(xp + 3, yp - 8, f"{found_type}{found_idx}")
+            # Foundation dimension
+            c.setFont("Helvetica", 2.5); c.setFillColor(GRIS2)
+            if nb_pieux > 0:
+                c.drawString(xp + 3, yp - 12, f"ø{diam_p}")
+            else:
+                c.drawString(xp + 3, yp - 12, f"{larg_sem:.1f}×{larg_sem:.1f}m")
+            # Descente de charges
+            if total_NEd > 0:
+                c.drawString(xp + 3, yp - 16, f"N={total_NEd:.0f}kN")
+            found_idx += 1
+
+
+def _draw_coupe_dimension_callouts(c, cox, coy, cgh, rsc, he, nb_niv, dalle_ep, pp_h, pp_b):
+    """Draw detailed dimension callouts on coupe section.
+
+    Shows element dimensions with leader lines and annotations:
+    - Slab thickness annotation (ep=XXmm)
+    - Beam drop height (retombée XXmm)
+    - Column section labels
+    """
+    # Slab thickness callout (first slab only for clarity)
+    dh_s = max(dalle_ep * rsc / 1000, 2.0)
+    slab_y = coy + he * rsc - dh_s / 2
+    c.setStrokeColor(ROUGE); c.setLineWidth(0.5)
+    c.line(cox - 10, slab_y, cox - 25, slab_y)
+    c.line(cox - 25, slab_y, cox - 25, slab_y + 8)
+    c.setFillColor(ROUGE); c.setFont("Helvetica-Bold", 4)
+    c.drawString(cox - 24, slab_y + 9, f"ep={dalle_ep}mm")
+
+    # Beam drop callout (if beam is taller than slab)
+    if pp_h > dalle_ep:
+        beam_drop = pp_h - dalle_ep
+        drop_y = coy + he * rsc - (dalle_ep + beam_drop/2) * rsc / 1000
+        c.setStrokeColor(BLEU); c.setLineWidth(0.5)
+        c.line(cox + 30, drop_y, cox + 45, drop_y)
+        c.line(cox + 45, drop_y, cox + 45, drop_y + 8)
+        c.setFillColor(BLEU); c.setFont("Helvetica-Bold", 4)
+        c.drawString(cox + 46, drop_y + 9, f"retombée {beam_drop:.0f}mm")
+
+    # Beam width label
+    c.setFillColor(GRIS2); c.setFont("Helvetica", 3.5)
+    c.drawString(cox + 20, coy + he * rsc + 2, f"PP b={pp_b}mm")
+
+
+def _draw_accumulated_heights(c, cox, coy, cgh, rsc, he, nb_niv, p, fd_depth_m):
+    """Draw accumulated height annotations on right side of coupe."""
+    accum_dim_x = cox + 55*mm
+    c.setStrokeColor(NOIR); c.setLineWidth(0.25)
+    c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 4)
+
+    # Draw horizontal lines at each level and annotate accumulated height
+    accumulated_h = fd_depth_m  # Start with foundation depth
+    for niv in range(nb_niv):
+        y_level = coy + niv * he * rsc
+        # Draw tick mark
+        c.line(accum_dim_x - 1.5, y_level, accum_dim_x + 1.5, y_level)
+        # Annotate accumulated height
+        c.drawString(accum_dim_x + 3, y_level - 1.5, f"{accumulated_h:.1f}m")
+        accumulated_h += he
+
+    # Final tick at top
+    y_top = coy + nb_niv * he * rsc
+    c.line(accum_dim_x - 1.5, y_top, accum_dim_x + 1.5, y_top)
+    c.drawString(accum_dim_x + 3, y_top - 1.5, f"{accumulated_h:.1f}m")
+
+
+def _draw_notes_techniques(c, x, y, beton_class, acier_class, fck, fyk, charge_g, charge_q, zone_sismique):
+    """Draw technical notes box (60×25mm) with concrete, steel, coverage, norms, charges, seismic."""
+    from reportlab.lib import colors as rl_colors
+    box_w, box_h = 60*mm, 28*mm
+    # Light beige background
+    c.setFillColor(rl_colors.HexColor("#FFF9F5")); c.setStrokeColor(GRIS3); c.setLineWidth(0.4)
+    c.rect(x, y, box_w, box_h, fill=1, stroke=1)
+
+    c.setFont("Helvetica-Bold", 5.5); c.setFillColor(NOIR)
+    c.drawString(x + 2*mm, y + box_h - 3*mm, "NOTES TECHNIQUES")
+
+    c.setFont("Helvetica", 4); c.setFillColor(GRIS2)
+    y_line = y + box_h - 8*mm
+    line_spacing = 3.2*mm
+
+    c.drawString(x + 2*mm, y_line, f"Béton: {beton_class} (fck={fck:.0f} MPa)")
+    y_line -= line_spacing
+    c.drawString(x + 2*mm, y_line, f"Acier: {acier_class} (fyk={fyk:.0f} MPa)")
+    y_line -= line_spacing
+    c.drawString(x + 2*mm, y_line, "Enrobage: 30mm (fond: 50mm)")
+    y_line -= line_spacing
+    c.drawString(x + 2*mm, y_line, "EC2 + EC8 — NF EN 1992/1998")
+    y_line -= line_spacing
+    c.drawString(x + 2*mm, y_line, f"G={charge_g:.1f} kN/m², Q={charge_q:.1f} kN/m²")
+    y_line -= line_spacing
+    c.drawString(x + 2*mm, y_line, f"Zone sismique: {zone_sismique}")
+
+
+def _estimate_bar_from_as(as_cm2_ml):
+    """Estimate bar diameter and spacing from As in cm²/ml.
+    Returns (diameter_mm, spacing_cm, as_actual_cm2_ml).
+    Used across ferraillage annotations and nomenclature."""
+    import math
+    if as_cm2_ml < 2.0:
+        return 8, 25, math.pi * 0.8**2 / 4 * (100 / 25)
+    elif as_cm2_ml < 3.0:
+        return 10, 25, math.pi * 1.0**2 / 4 * (100 / 25)
+    elif as_cm2_ml < 5.0:
+        return 12, 20, math.pi * 1.2**2 / 4 * (100 / 20)
+    elif as_cm2_ml < 7.0:
+        return 14, 20, math.pi * 1.4**2 / 4 * (100 / 20)
+    else:
+        return 16, 15, math.pi * 1.6**2 / 4 * (100 / 15)
+
+
+def _bar_notation(as_cm2_ml):
+    """Return professional bar notation string like 'HA12 esp.20'."""
+    diam, esp, _ = _estimate_bar_from_as(as_cm2_ml)
+    return f"HA{diam} esp.{esp}"
+
+
+def _draw_rebar_nomenclature(c, x, y, dalle, nx, ny, px_m, py_m):
+    """Draw nomenclature table for rebar schedule (small table bottom-left)."""
+    from reportlab.platypus import Table, TableStyle
+    from reportlab.lib import colors as rl_colors
+
+    diam_x, esp_x = _estimate_bar_from_as(dalle.As_x_cm2_ml)
+    diam_y, esp_y = _estimate_bar_from_as(dalle.As_y_cm2_ml)
+
+    # Compute number of bars (approximation)
+    # nb = (portée_m * 1000) / espacement_cm
+    nb_x = max(1, int((px_m * 1000) / (esp_x * 10)))
+    nb_y = max(1, int((py_m * 1000) / (esp_y * 10)))
+
+    # Build table data
+    data = [
+        ["Rep.", "Nombre", "Ø (mm)", "Esp. (cm)", "L unit. (m)", "Type"],
+        ["1", str(nb_x * ny), str(diam_x), str(esp_x), f"{px_m:.2f}", "Nappe inf X"],
+        ["2", str(nb_y * nx), str(diam_y), str(esp_y), f"{py_m:.2f}", "Nappe inf Y"],
+        ["3", str(max(1, int(nb_x / 2))), str(diam_x), str(esp_x * 2), f"{px_m/3:.2f}", "Chapeau X"],
+    ]
+
+    # Create table with small font
+    table = Table(data, colWidths=[12*mm, 14*mm, 12*mm, 14*mm, 14*mm, 16*mm])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor("#E8F5E9")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), NOIR),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 4.5),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 2),
+        ('GRID', (0, 0), (-1, -1), 0.3, GRIS3),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [BLANC, rl_colors.HexColor("#F5F5F5")]),
+    ]))
+
+    # Draw the table
+    table.drawOn(c, x, y - 30*mm)
+
+
+def _draw_chapeau_indicators(c, ox, oy, sc, nx, ny, px_m, py_m):
+    """Draw chapeau (top mesh) indicators on ferraillage dalle plan.
+
+    Draws short colored lines at grid intersections to indicate location of
+    chapeaux d'appui (top rebar over supports). Green for X direction, purple for Y.
+    """
+    # Chapeau d'appui length ≈ 1/5 of span
+    chapel_len = 3*mm
+
+    for i in range(nx + 1):
+        for j in range(ny + 1):
+            xp = ox + i * px_m * sc
+            yp = oy + j * py_m * sc
+
+            # X direction chapeau (green)
+            c.setStrokeColor(colors.HexColor("#66BB6A")); c.setLineWidth(0.6)
+            c.line(xp - chapel_len/2, yp + 1.5, xp + chapel_len/2, yp + 1.5)
+
+            # Y direction chapeau (purple)
+            c.setStrokeColor(VIOLET); c.setLineWidth(0.6)
+            c.line(xp + 1.5, yp - chapel_len/2, xp + 1.5, yp + chapel_len/2)
+
+
+def _draw_column_schedule(c, x, y, poteaux, nx, ny, px_m, py_m):
+    """Draw column nomenclature schedule on coffrage plan.
+
+    Shows a table with: Rep. | Section | Niveau | NEd (kN) | NRd (kN) | Taux | Armatures
+    This professional table helps builders and inspectors identify column requirements.
+    """
+    from reportlab.platypus import Table, TableStyle
+    from reportlab.lib import colors as rl_colors
+
+    if not poteaux or len(poteaux) == 0:
+        return
+
+    # Get first level column data (representative)
+    pot0 = poteaux[0]
+    sec_mm = pot0.section_mm
+    nred_kn = pot0.NEd_kN if hasattr(pot0, 'NEd_kN') else 0
+    nrrd_kn = pot0.NRd_kN if hasattr(pot0, 'NRd_kN') else 0
+    taux = pot0.taux_armature_pct if hasattr(pot0, 'taux_armature_pct') else 0
+    nb_barres = pot0.nb_barres if hasattr(pot0, 'nb_barres') else 0
+    diam_mm = pot0.diametre_mm if hasattr(pot0, 'diametre_mm') else 14
+
+    # Calculate ratio
+    ratio = (nred_kn / nrrd_kn * 100) if nrrd_kn > 0 else 0
+
+    # Build table data — showing representative column + typical from each level
+    data = [
+        ["Rep.", "Section", "Niveau", "NEd", "NRd", "Ratio", "Armatures"],
+        ["P1-P" + str((nx+1)*(ny+1)), f"{sec_mm}×{sec_mm}", "RDC", f"{nred_kn:.0f}", f"{nrrd_kn:.0f}",
+         f"{ratio:.0f}%", f"{nb_barres}HA{diam_mm}"],
+    ]
+
+    # Add rows for other levels if available
+    for idx, pot_level in enumerate(poteaux[1:3], 1):  # Show up to 2 more levels
+        nred_l = pot_level.NEd_kN if hasattr(pot_level, 'NEd_kN') else nred_kn
+        nrrd_l = pot_level.NRd_kN if hasattr(pot_level, 'NRd_kN') else nrrd_kn
+        ratio_l = (nred_l / nrrd_l * 100) if nrrd_l > 0 else ratio
+        level_name = f"R+{idx}"
+        data.append(
+            ["(identique)", f"{sec_mm}×{sec_mm}", level_name, f"{nred_l:.0f}", f"{nrrd_l:.0f}",
+             f"{ratio_l:.0f}%", f"{nb_barres}HA{diam_mm}"]
+        )
+
+    # Create table
+    table = Table(data, colWidths=[16*mm, 16*mm, 14*mm, 12*mm, 12*mm, 12*mm, 18*mm])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor("#C8E6C9")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), NOIR),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 4),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 3.5),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 2),
+        ('GRID', (0, 0), (-1, -1), 0.3, GRIS3),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [BLANC, rl_colors.HexColor("#F1F8F1")]),
+    ]))
+
+    # Draw the table
+    table.drawOn(c, x, y - 20*mm)
+
+
 # ══════════════════════════════════════════
 # PDF RASTER BACKGROUND — archi PDF as greyed-out background image
 # ══════════════════════════════════════════
@@ -1267,23 +1654,30 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
             _draw_poutres_pp(c, ox, oy, sc, nx, ny, px_m, py_m, pp_b)
             _draw_poutres_ps(c, ox, oy, sc, nx, ny, px_m, py_m)
             _draw_poteaux(c, ox, oy, sc, nx, ny, px_m, py_m, pot_s)
-            c.setFillColor(GRIS3); c.setFont("Helvetica", 4.5)
-            for i in range(nx):
-                for j in range(ny):
-                    cx_p = ox + (i + 0.5) * px_m * sc
-                    cy_p = oy + (j + 0.5) * py_m * sc
-                    c.drawCentredString(cx_p, cy_p, f"D ep.{dalle_ep}")
+            # Add element labels: P1, P2... for columns, D1, D2... for dalle panels
+            _label_columns_on_grid(c, ox, oy, sc, nx, ny, px_m, py_m, pot_s)
+            _label_beams_and_slabs_on_grid(c, ox, oy, sc, nx, ny, px_m, py_m, pp_b, pp_h, ps_b, ps_h, dalle_ep)
+            # Add section callout symbols
+            _draw_section_callouts(c, ox, oy, sc, nx, ny, px_m, py_m, pp_b, pp_h, ps_b, ps_h)
 
-        _legend(c, w, h, [
-            (NOIR, 'fill', f"Poteau {pot_s}×{pot_s}"),
-            (NOIR, 0.8, f"PP {pp_b}×{pp_h}"),
-            (GRIS3, 0.4, f"PS {ps_b}×{ps_h}" if ps else "PS"),
-            (GRIS4, 0.1, f"Dalle ep.{dalle_ep}mm"),
-        ])
+        _legend_pro(c, w, h, [
+            (NOIR, 'fill', f"Poteau P — {pot_s}×{pot_s}mm — Béton {beton}"),
+            (NOIR, 0.8, f"Poutre Principale (PP) {pp_b}×{pp_h}mm"),
+            (GRIS3, 0.4, f"Poutre Secondaire (PS) {ps_b}×{ps_h}mm" if ps else "PS — (non utilisée)"),
+            (GRIS4, 0.1, f"Dalle — Épaisseur {dalle_ep}mm"),
+            (GRIS4, 0.05, "Axes de cotation — grille structure"),
+            (colors.HexColor("#D7CCC8"), 'fill', "Chaînage/Linteau"),
+            (colors.HexColor("#FFE082"), 0.4, "Acrotère"),
+            (ROUGE, 0.6, "COUPE A-A — Section poutre"),
+            (BLEU, 0.6, "COUPE B-B — Section colonne"),
+        ], "ÉLÉMENTS STRUCTURELS")
 
-        c.setFont("Helvetica", 5); c.setFillColor(GRIS3)
-        c.drawString(14*mm, 42*mm, f"Béton {beton} — Acier {acier} — Enrobage 30mm")
-        _cartouche(c, w, h, p, f"COFFRAGE — {level_name}", page, total_pages)
+        # Notes techniques box
+        _draw_notes_techniques(c, 14*mm, 42*mm, beton, acier, r.fck_MPa, r.fyk_MPa,
+                              r.charge_G_kNm2, r.charge_Q_kNm2, r.sismique.zone)
+        # Column schedule nomenclature
+        _draw_column_schedule(c, 85*mm, 42*mm, r.poteaux, nx, ny, px_m, py_m)
+        _cartouche_pro(c, w, h, p, f"COFFRAGE — {level_name}", page, total_pages, "STRUCTURE BÉTON ARMÉ")
         c.showPage()
 
     # ── FERRAILLAGE DALLE ──
@@ -1358,6 +1752,8 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
         ox, oy, sc, gw, gh = _grid_layout(w, h, nx, ny, px_m, py_m)
         _draw_grid_axes(c, ox, oy, sc, nx, ny, px_m, py_m, gw, gh)
         _draw_poteaux(c, ox, oy, sc, nx, ny, px_m, py_m, pot_s)
+        # Add chapeau (top mesh) indicators at grid intersections
+        _draw_chapeau_indicators(c, ox, oy, sc, nx, ny, px_m, py_m)
 
     # Rebar direction arrows in each panel
     if rendered_dalle and real_ax_d and real_ay_d and dalle_tx:
@@ -1384,8 +1780,8 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
                 c.restoreState()
                 if sw > 10 and sh > 10:
                     c.setFillColor(NOIR); c.setFont("Helvetica", 2.5)
-                    c.drawCentredString(cx_p, cy_p + 2, f"As x={dalle.As_x_cm2_ml:.2f}")
-                    c.drawCentredString(cx_p, cy_p - 3, f"As y={dalle.As_y_cm2_ml:.2f}")
+                    c.drawCentredString(cx_p, cy_p + 2, f"X: {_bar_notation(dalle.As_x_cm2_ml)}")
+                    c.drawCentredString(cx_p, cy_p - 3, f"Y: {_bar_notation(dalle.As_y_cm2_ml)}")
     elif not rendered_dalle:
         for i in range(nx):
             for j in range(ny):
@@ -1403,17 +1799,20 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
                     xb = sx + 4 + k * (sw - 8) / max(nb_y - 1, 1)
                     c.line(xb, sy + 3, xb, sy + sh - 3)
                 c.setFillColor(NOIR); c.setFont("Helvetica", 3.5)
-                c.drawCentredString(cx_p, cy_p + 3, f"As x={dalle.As_x_cm2_ml:.2f}")
-                c.drawCentredString(cx_p, cy_p - 3, f"As y={dalle.As_y_cm2_ml:.2f}")
+                c.drawCentredString(cx_p, cy_p + 3, f"X: {_bar_notation(dalle.As_x_cm2_ml)}")
+                c.drawCentredString(cx_p, cy_p - 3, f"Y: {_bar_notation(dalle.As_y_cm2_ml)}")
 
-    _legend(c, w, h, [
-        (ROUGE, 0.5, f"Nappe inf X — As={dalle.As_x_cm2_ml:.2f} cm²/ml"),
-        (BLEU, 0.4, f"Nappe inf Y — As={dalle.As_y_cm2_ml:.2f} cm²/ml"),
-        (NOIR, 'fill', f"Poteau {pot_s}×{pot_s}"),
-    ])
-    c.setFont("Helvetica", 5); c.setFillColor(GRIS3)
-    c.drawString(14*mm, 42*mm, f"Dalle ep.{dalle_ep}mm — {beton} — {acier}")
-    _cartouche(c, w, h, p, "FERRAILLAGE DALLE", page, total_pages)
+    _legend_pro(c, w, h, [
+        (ROUGE, 0.5, f"Nappe inf. X — {_bar_notation(dalle.As_x_cm2_ml)} (As={dalle.As_x_cm2_ml:.2f} cm²/ml)"),
+        (BLEU, 0.4, f"Nappe inf. Y — {_bar_notation(dalle.As_y_cm2_ml)} (As={dalle.As_y_cm2_ml:.2f} cm²/ml)"),
+        (colors.HexColor("#66BB6A"), 0.5, "Chapeaux d'appui X — Nappe supérieure"),
+        (VIOLET, 0.5, "Chapeaux d'appui Y — Nappe supérieure"),
+        (NOIR, 'fill', f"Poteau {pot_s}×{pot_s}mm"),
+    ], "FERRAILLAGE DALLE")
+
+    # Add nomenclature table for rebar schedule
+    _draw_rebar_nomenclature(c, 14*mm, 42*mm, dalle, nx, ny, px_m, py_m)
+    _cartouche_pro(c, w, h, p, "FERRAILLAGE DALLE", page, total_pages, "FERRAILLAGE BÉTON")
     c.showPage()
 
     # ── FONDATIONS ──
@@ -1522,15 +1921,20 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
             for j in range(ny):
                 y1 = oy + j * py_m * sc + pr; y2 = oy + (j+1) * py_m * sc - pr
                 c.line(ox + i * px_m * sc, y1, ox + i * px_m * sc, y2)
+        # Add foundation labels S1, S2... on parametric grid
+        _label_foundations_at_grid(c, ox, oy, sc, nx, ny, px_m, py_m, r, fd)
 
     type_f = fd.type.value.replace('_', ' ').title()
     c.setFont("Helvetica", 5.5); c.setFillColor(GRIS2)
     c.drawString(14*mm, 42*mm, f"{type_f} — prof.{fd.profondeur_m:.1f}m — σsol={r.pression_sol_MPa:.2f}MPa — {beton}")
-    _legend(c, w, h, [
+    _legend_pro(c, w, h, [
         (VERT, 'fill', f"{'Pieu ø'+str(diam_p)+'mm' if nb_pieux else 'Semelle '+str(larg_sem)+'×'+str(larg_sem)+'m'}"),
-        (NOIR, 0.8, "Longrine"),
-    ])
-    _cartouche(c, w, h, p, "FONDATIONS", page, total_pages)
+        (NOIR, 0.8, "Longrine de liaison — Liant pieux/semelles"),
+        (colors.HexColor("#D7CCC8"), 'fill', f"Dallage sur sol (ep.{dalle_ep}mm)" if not p.get("avec_sous_sol") else ""),
+        (GRIS4, 0.05, "Axes de trame — Grille structure"),
+        (colors.HexColor("#FFC107"), 0.4, "Charges concentrées (NEd/poteau)"),
+    ], "FONDATIONS")
+    _cartouche_pro(c, w, h, p, "FONDATIONS", page, total_pages, "FONDATIONS STRUCTURE")
     c.showPage()
 
     # ── COUPE GÉNÉRALE ──
@@ -1620,9 +2024,20 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
                 c.setFillColor(GRIS5); c.setStrokeColor(NOIR); c.setLineWidth(0.3)
                 c.rect(bx1, yt - dh_s - beam_ext, bx2 - bx1, beam_ext, fill=1, stroke=1)
 
-        # Level label on left
-        niv_label = getattr(pot_k, 'niveau', f'N{niv}')
-        c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 6)
+        # Level label on left — generate proper level names (SOUS-SOL, RDC, R+1, R+2, ..., TERRASSE)
+        if niv == 0:
+            if p.get("avec_sous_sol"):
+                niv_label = "SOUS-SOL"
+            else:
+                niv_label = "RDC"
+        elif p.get("avec_sous_sol"):
+            if niv == 1:
+                niv_label = "RDC"
+            else:
+                niv_label = f"R+{niv - 1}"
+        else:
+            niv_label = f"R+{niv}"
+        c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 6.5)
         c.drawRightString(cox - 22*mm, yb + (yt-yb)/2, niv_label)
 
         # Storey height dimension on right
@@ -1650,6 +2065,12 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
     c.drawCentredString(0, 0, f"H totale = {tot_hm:.1f} m")
     c.restoreState()
 
+    # Draw accumulated height annotations
+    _draw_accumulated_heights(c, cox, coy, cgh, rsc, he, nb_niv, p, fd_depth_m)
+
+    # Draw dimension callouts for element thicknesses and drops
+    _draw_coupe_dimension_callouts(c, cox, coy, cgh, rsc, he, nb_niv, dalle_ep, pp_h, pp_b)
+
     # Axis labels at bottom
     for i in range(nc + 1):
         _axis_label(c, cox + i * px_m * rsc, coy - fd_h - 14*mm, str(i+1))
@@ -1665,7 +2086,14 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
     c.drawString(14*mm, 46*mm, f"Béton {beton} — Acier {acier}")
     c.drawString(14*mm, 41*mm, f"Dalle ep.{dalle_ep}mm — PP {pp_b}×{pp_h}mm")
 
-    _cartouche(c, w, h, p, "COUPE GÉNÉRALE", page, total_pages, ech="1/200")
+    _legend_pro(c, w, h, [
+        (GRIS2, 'fill', f"Poteau {pot_s}×{pot_s}mm — Béton {beton}"),
+        (colors.HexColor("#1565C0"), 0.8, f"Poutre principale {pp_b}×{pp_h}mm"),
+        (colors.HexColor("#8D6E63"), 0.5, f"Dalle ep.{dalle_ep}mm"),
+        (colors.HexColor("#F57C00"), 0.6, f"Fondation prof.{fd.profondeur_m:.1f}m"),
+    ], "COUPE GÉNÉRALE")
+
+    _cartouche_pro(c, w, h, p, "COUPE GÉNÉRALE", page, total_pages, "STRUCTURE BÉTON ARMÉ", ech="1/200")
     c.showPage()
 
     # ── PLANCHES FERRAILLAGE depuis generate_plans_v4.py (validées) ──
