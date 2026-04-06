@@ -18,9 +18,12 @@ Version : 2.0 — Mars 2026
 """
 
 import math
+import logging
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict
 from enum import Enum
+
+logger = logging.getLogger("tijan")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1597,9 +1600,12 @@ def calculer_mep(d: DonneesProjet, struct_resultats=None, edge_optimise: bool = 
         prix_mep = _PrixFallback()
 
     surf_batie = _surf_batie(d)
-    nb_log = _estimer_logements(d, surf_batie)
-    # Default 4 persons per unit (French standard: ~3.2-4 pers/logement depending on region)
-    # hasattr check always fails since DonneesProjet doesn't have personnes_par_logement attribute
+    # nb_logements fourni par l'utilisateur — obligatoire, pas d'estimation
+    nb_log = getattr(d, 'nb_logements', 0) or 0
+    if nb_log <= 0:
+        # Fallback pour projets anciens sans nb_logements saisi
+        nb_log = _estimer_logements(d, surf_batie)
+        logger.warning(f"nb_logements non fourni — estimation fallback: {nb_log} (à éviter)")
     nb_pers = nb_log * 4
 
     # Données BOQ structure pour EDGE

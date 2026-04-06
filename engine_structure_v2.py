@@ -117,6 +117,7 @@ class DonneesProjet:
     hauteur_etage_m:     float = 3.0
     surface_emprise_m2:  float = 500.0
     surface_terrain_m2:  float = 0.0    # 0 = non fourni
+    nb_logements:        int   = 0     # 0 = non fourni (saisi par l'utilisateur)
     portee_max_m:        float = 6.0
     portee_min_m:        float = 4.5
     nb_travees_x:        int   = 4

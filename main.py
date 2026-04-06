@@ -164,6 +164,7 @@ class ParamsProjet(BaseModel):
     hauteur_etage_m:    float = 3.0
     surface_emprise_m2: float = 500.0
     surface_terrain_m2: float = 0.0
+    nb_logements:       Optional[int] = None
     portee_max_m:       float = 5.5
     portee_min_m:       float = 4.0
     nb_travees_x:       int   = 3
@@ -225,6 +226,7 @@ def params_to_donnees(params: ParamsProjet):
         hauteur_etage_m=params.hauteur_etage_m,
         surface_emprise_m2=params.surface_emprise_m2,
         surface_terrain_m2=params.surface_terrain_m2,
+        nb_logements=params.nb_logements or 0,
         portee_max_m=params.portee_max_m,
         portee_min_m=params.portee_min_m,
         nb_travees_x=params.nb_travees_x,
