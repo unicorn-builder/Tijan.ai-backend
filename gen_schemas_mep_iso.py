@@ -1,23 +1,12 @@
 """
 gen_schemas_mep_iso.py — Schemas de principe MEP Tijan AI
 
-Produit un PDF avec 10 schemas blocs (un par lot), montrant les composants
-principaux et leurs interactions :
-  1. Electricite                 (TR + Genset + ATS + TGBT + Colonne + TD)
-  2. Plomberie                   (Citerne + Surpresseur + Colonne + Nourrices + ECS)
-  3. Climatisation               (UE + UI + Liaisons frigo + Condensats)
-  4. Ventilation                 (VMC + Reseau + Bouches + Extracteurs)
-  5. CCTV                        (NVR + Switch PoE + Cameras int/ext)
-  6. Sonorisation                (Console + Ampli + Zones HP)
-  7. Detection incendie          (ECS + Detecteurs + DM + Sirenes/UGA)
-  8. Extinction incendie         (Bache + Pompe + Colonne seche + RIA + Sprinklers)
-  9. Controle d'acces / Interphone (Controleur + Lecteurs + Ventouses + Interphone)
- 10. GTB / BMS                   (Superviseur + Bus + Automates + Liens vers tous lots)
-
-Chaque diagramme est dessine en blocs (rectangles + connecteurs) sur sa propre
-page, avec une mini table des parametres-cles a cote ou au-dessus. Toutes les
-valeurs proviennent du moteur MEP. Bilingue FR / EN.
+Produit un PDF professionnel avec 10 schemas blocs (un par lot) montrant les
+composants principaux et leurs interactions. Mise en page soignee : grille
+4 colonnes x 6 rangees, routage orthogonal des connecteurs avec trunk
+fan-out, libelles sur fond blanc pour eviter tout chevauchement.
 """
+import math
 from io import BytesIO
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -38,30 +27,42 @@ def _T(fr, en):
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  Diagramme generique a blocs
+#  Grille et constantes visuelles
 # ─────────────────────────────────────────────────────────────────────
-#
-# Un schema = (nodes, edges, title)
-#   node  = dict(id, x, y, w, h, title, sub, color)   coords en mm internes
-#   edge  = dict(src, dst, label='', style='solid|dashed', color=None,
-#                src_side='r', dst_side='l')
-#
-# Le rendu se fait dans un Drawing dont la taille est calculee a partir
-# de la bounding box des nodes + une marge configurable, evitant tout
-# debordement et donc tout chevauchement avec d'autres flowables.
+PAD      = 9 * mm
+H_TITLE  = 11 * mm
+CONTENT_W = 180   # mm
+CONTENT_H = 130   # mm
 
-PAD = 8 * mm
-H_TITLE = 9 * mm
+# Colonnes (x en mm) et rangees (y en mm) pour des placements propres
+# Largeurs de nodes typiques : 38mm pour corps, hauteurs 14-18mm
+COL = {'A': 6, 'B': 52, 'C': 100, 'D': 148}
+ROW = {'1': 108, '2': 90, '3': 72, '4': 54, '5': 36, '6': 18}
 
 NODE_COLORS = {
-    'power':   (ORANGE_LT, ORANGE),
-    'water':   (BLEU_LT,   BLEU),
-    'hvac':    (BLEU_LT,   VERT_DARK),
-    'fire':    (ORANGE_LT, ROUGE),
-    'low':     (VERT_LIGHT, VERT),
-    'gtb':     (VERT_LIGHT, VERT_DARK),
-    'neutral': (GRIS1,     NOIR),
+    'power':   (colors.HexColor('#FFF1DC'), ORANGE),
+    'water':   (colors.HexColor('#E4F1FB'), BLEU),
+    'hvac':    (colors.HexColor('#E4F1FB'), VERT_DARK),
+    'fire':    (colors.HexColor('#FEE8E4'), ROUGE),
+    'low':     (colors.HexColor('#E8F4EA'), VERT),
+    'gtb':     (colors.HexColor('#E8F4EA'), VERT_DARK),
+    'neutral': (colors.HexColor('#F4F4F4'), colors.HexColor('#555555')),
 }
+
+SHADOW = colors.Color(0, 0, 0, alpha=0.10)
+
+
+# ─────────────────────────────────────────────────────────────────────
+#  Nodes
+# ─────────────────────────────────────────────────────────────────────
+def _node(x=0, y=0, w=38, h=16, id='', title='', sub='', color='neutral',
+          col=None, row=None):
+    if col is not None:
+        x = COL[col]
+    if row is not None:
+        y = ROW[row]
+    return {'id': id, 'x': x, 'y': y, 'w': w, 'h': h,
+            'title': title, 'sub': sub, 'color': color}
 
 
 def _node_rect(d, n):
@@ -70,20 +71,27 @@ def _node_rect(d, n):
     y = PAD + n['y'] * mm
     w = n['w'] * mm
     h = n['h'] * mm
-    d.add(Rect(x, y, w, h, rx=2, ry=2,
-               fillColor=fill, strokeColor=stroke, strokeWidth=1.2))
+    # Drop shadow
+    d.add(Rect(x + 0.8 * mm, y - 0.8 * mm, w, h, rx=2.5, ry=2.5,
+               fillColor=SHADOW, strokeColor=None))
+    # Body
+    d.add(Rect(x, y, w, h, rx=2.5, ry=2.5,
+               fillColor=fill, strokeColor=stroke, strokeWidth=1.3))
     title = n.get('title', '')
     sub = n.get('sub', '')
+    cx = x + w / 2
     cy = y + h / 2
     if sub:
-        d.add(String(x + w / 2, cy + 2, title,
-                     fontName='Helvetica-Bold', fontSize=8, textAnchor='middle', fillColor=NOIR))
-        d.add(String(x + w / 2, cy - 7, sub,
-                     fontName='Helvetica', fontSize=7, textAnchor='middle', fillColor=NOIR))
+        d.add(String(cx, cy + 1.6, title,
+                     fontName='Helvetica-Bold', fontSize=8.4,
+                     textAnchor='middle', fillColor=NOIR))
+        d.add(String(cx, cy - 7.0, sub,
+                     fontName='Helvetica', fontSize=6.8,
+                     textAnchor='middle', fillColor=colors.HexColor('#444444')))
     else:
-        d.add(String(x + w / 2, cy - 2, title,
-                     fontName='Helvetica-Bold', fontSize=8, textAnchor='middle', fillColor=NOIR))
-    return x, y, w, h
+        d.add(String(cx, cy - 2.5, title,
+                     fontName='Helvetica-Bold', fontSize=8.6,
+                     textAnchor='middle', fillColor=NOIR))
 
 
 def _anchor(node, side):
@@ -91,74 +99,105 @@ def _anchor(node, side):
     y = PAD + node['y'] * mm
     w = node['w'] * mm
     h = node['h'] * mm
-    if side == 'r':
-        return x + w, y + h / 2
-    if side == 'l':
-        return x, y + h / 2
-    if side == 't':
-        return x + w / 2, y + h
-    if side == 'b':
-        return x + w / 2, y
+    if side == 'r': return x + w, y + h / 2
+    if side == 'l': return x, y + h / 2
+    if side == 't': return x + w / 2, y + h
+    if side == 'b': return x + w / 2, y
     return x + w / 2, y + h / 2
 
 
+# ─────────────────────────────────────────────────────────────────────
+#  Edges : routage orthogonal + fleche + label fond blanc
+# ─────────────────────────────────────────────────────────────────────
 def _arrow_head(d, x, y, dx, dy, color):
-    # Petite tete de fleche dans la direction (dx, dy)
-    import math
     L = math.hypot(dx, dy) or 1
     ux, uy = dx / L, dy / L
-    # rotation 150°
-    a = math.radians(150)
-    sz = 2.2 * mm
-    p1 = (x + (ux * math.cos(a) - uy * math.sin(a)) * sz,
-          y + (ux * math.sin(a) + uy * math.cos(a)) * sz)
-    a = math.radians(-150)
-    p2 = (x + (ux * math.cos(a) - uy * math.sin(a)) * sz,
-          y + (ux * math.sin(a) + uy * math.cos(a)) * sz)
-    d.add(Polygon(points=[x, y, p1[0], p1[1], p2[0], p2[1]],
-                  fillColor=color, strokeColor=color, strokeWidth=0.5))
+    size = 2.6 * mm
+    bx, by = x - ux * size, y - uy * size
+    px, py = -uy * size * 0.55, ux * size * 0.55
+    d.add(Polygon(points=[x, y, bx + px, by + py, bx - px, by - py],
+                  fillColor=color, strokeColor=color, strokeWidth=0.4))
+
+
+def _edge_label(d, lx, ly, text, color):
+    if not text:
+        return
+    tw = len(text) * 3.2 + 5
+    d.add(Rect(lx - tw / 2, ly - 4, tw, 8,
+               fillColor=BLANC, strokeColor=None))
+    d.add(String(lx, ly - 2, text,
+                 fontName='Helvetica', fontSize=6.6,
+                 textAnchor='middle', fillColor=color))
 
 
 def _draw_edge(d, nodes_by_id, e):
     src = nodes_by_id[e['src']]
     dst = nodes_by_id[e['dst']]
-    color = e.get('color') or NOIR
+    color = e.get('color') or colors.HexColor('#555555')
     style = e.get('style', 'solid')
-    sx, sy = _anchor(src, e.get('src_side', 'r'))
-    dx, dy = _anchor(dst, e.get('dst_side', 'l'))
-    # Routage en L (sx,sy) → coude → (dx,dy) horizontal d'abord
-    midx = (sx + dx) / 2
-    pts = [sx, sy, midx, sy, midx, dy, dx, dy]
+    src_side = e.get('src_side', 'r')
+    dst_side = e.get('dst_side', 'l')
+    sx, sy = _anchor(src, src_side)
+    dx, dy = _anchor(dst, dst_side)
+
+    # Routage orthogonal
+    midx_mm = e.get('midx_mm')
+    midy_mm = e.get('midy_mm')
+    label_pos = 'v'  # vertical segment by default
+
+    if src_side in ('r', 'l') and dst_side in ('r', 'l'):
+        if midx_mm is not None:
+            mx = PAD + midx_mm * mm
+        else:
+            mx = (sx + dx) / 2
+        pts = [sx, sy, mx, sy, mx, dy, dx, dy]
+        last = (1 if dx >= mx else -1, 0)
+        lab_x, lab_y = mx, (sy + dy) / 2
+    elif src_side in ('t', 'b') and dst_side in ('t', 'b'):
+        if midy_mm is not None:
+            my = PAD + midy_mm * mm
+        else:
+            my = (sy + dy) / 2
+        pts = [sx, sy, sx, my, dx, my, dx, dy]
+        last = (0, 1 if dy >= my else -1)
+        lab_x, lab_y = (sx + dx) / 2, my
+    else:
+        # Mixte (ex: b → l) : dog-leg en L simple
+        pts = [sx, sy, dx, sy, dx, dy]
+        last = (0, 1 if dy >= sy else -1)
+        lab_x, lab_y = dx, (sy + dy) / 2
+
     if style == 'dashed':
         d.add(PolyLine(points=pts, strokeColor=color, strokeWidth=1.2,
-                       strokeDashArray=[3, 2]))
+                       strokeDashArray=[3, 2], strokeLineCap=1))
     else:
-        d.add(PolyLine(points=pts, strokeColor=color, strokeWidth=1.4))
-    # Tete de fleche en direction de dst
-    last_dx = dx - midx
-    last_dy = 0 if dy == sy else 0
-    _arrow_head(d, dx, dy, dx - midx if dx != midx else 1, 0, color)
-    # Label central
-    lab = e.get('label', '')
-    if lab:
-        d.add(String(midx + 1, (sy + dy) / 2 + 2, lab,
-                     fontName='Helvetica', fontSize=6.5, fillColor=color))
+        d.add(PolyLine(points=pts, strokeColor=color, strokeWidth=1.5,
+                       strokeLineCap=1))
+
+    _arrow_head(d, dx, dy, last[0], last[1], color)
+    _edge_label(d, lab_x, lab_y, e.get('label', ''), color)
 
 
-def _make_diagram(title, nodes, edges, content_w_mm=170, content_h_mm=110):
-    """Cree un Drawing dimensionne avec marges; titre interne en haut."""
-    W_pts = content_w_mm * mm + 2 * PAD
-    H_pts = content_h_mm * mm + 2 * PAD + H_TITLE
+# ─────────────────────────────────────────────────────────────────────
+#  Diagramme
+# ─────────────────────────────────────────────────────────────────────
+def _make_diagram(title, nodes, edges, legend=None):
+    W_pts = CONTENT_W * mm + 2 * PAD
+    H_pts = CONTENT_H * mm + 2 * PAD + H_TITLE
     d = Drawing(W_pts, H_pts)
-    # Bordure douce
-    d.add(Rect(PAD * 0.5, PAD * 0.5,
-               W_pts - PAD, H_pts - PAD,
-               rx=3, ry=3, fillColor=None,
+    # Fond carte + bordure douce
+    d.add(Rect(PAD * 0.35, PAD * 0.35,
+               W_pts - PAD * 0.7, H_pts - PAD * 0.7,
+               rx=4, ry=4,
+               fillColor=colors.HexColor('#FAFBFC'),
                strokeColor=GRIS2, strokeWidth=0.6))
-    # Titre interne
-    d.add(String(W_pts / 2, H_pts - PAD,
-                 title,
-                 fontName='Helvetica-Bold', fontSize=10,
+    # Bandeau titre
+    d.add(Rect(PAD * 0.35, H_pts - PAD * 0.35 - H_TITLE,
+               W_pts - PAD * 0.7, H_TITLE,
+               fillColor=colors.HexColor('#F0F5F1'),
+               strokeColor=None))
+    d.add(String(W_pts / 2, H_pts - PAD * 0.35 - H_TITLE + 3, title,
+                 fontName='Helvetica-Bold', fontSize=10.5,
                  textAnchor='middle', fillColor=VERT_DARK))
     # Nodes
     nodes_by_id = {n['id']: n for n in nodes}
@@ -167,11 +206,21 @@ def _make_diagram(title, nodes, edges, content_w_mm=170, content_h_mm=110):
     # Edges
     for e in edges:
         _draw_edge(d, nodes_by_id, e)
+    # Legende optionnelle en bas
+    if legend:
+        ly = PAD + 2
+        lx = PAD + 4
+        for label, col in legend:
+            d.add(Line(lx, ly + 2, lx + 10, ly + 2,
+                       strokeColor=col, strokeWidth=1.6))
+            d.add(String(lx + 13, ly, label,
+                         fontName='Helvetica', fontSize=6.8, fillColor=NOIR))
+            lx += 13 + len(label) * 3.3 + 10
     return d
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  Helpers — table recap a 2 colonnes
+#  Helpers tables
 # ─────────────────────────────────────────────────────────────────────
 def _kv_table(rows):
     data = [[Paragraph(_T("Parametre", "Parameter"), S['th_l']),
@@ -188,36 +237,41 @@ def _kv_table(rows):
 # ─────────────────────────────────────────────────────────────────────
 def _diag_electricite(rm):
     e = rm.electrique
-    nb_niveaux = int(getattr(rm.params, 'nb_niveaux', 4))
-    n_show = min(max(nb_niveaux, 1), 6)
+    nb = min(max(int(getattr(rm.params, 'nb_niveaux', 4)), 1), 6)
+    ROWS_TD = ['1', '2', '3', '4', '5', '6'][:nb]
     nodes = [
-        {'id': 'tr',   'x': 5,  'y': 80, 'w': 30, 'h': 14,
-         'title': 'TR',  'sub': f"{e.transfo_kva} kVA", 'color': 'power'},
-        {'id': 'gen',  'x': 5,  'y': 55, 'w': 30, 'h': 14,
-         'title': _T('Groupe', 'Genset'), 'sub': f"{e.groupe_electrogene_kva} kVA", 'color': 'neutral'},
-        {'id': 'ats',  'x': 50, 'y': 67, 'w': 22, 'h': 14,
-         'title': 'ATS', 'sub': _T('Inverseur', 'Transfer sw.'), 'color': 'neutral'},
-        {'id': 'tgbt', 'x': 85, 'y': 60, 'w': 30, 'h': 22,
-         'title': 'TGBT', 'sub': f"{e.puissance_totale_kva:.0f} kVA", 'color': 'low'},
-        {'id': 'col',  'x': 130, 'y': 60, 'w': 22, 'h': 22,
-         'title': _T('Colonne', 'Riser'), 'sub': f"{e.section_colonne_mm2} mm²", 'color': 'low'},
+        _node(id='tr',   col='A', row='2', title='TR',
+              sub=f"{e.transfo_kva} kVA", color='power'),
+        _node(id='gen',  col='A', row='4', title=_T('Groupe', 'Genset'),
+              sub=f"{e.groupe_electrogene_kva} kVA", color='neutral'),
+        _node(id='ats',  col='B', row='3', title='ATS',
+              sub=_T('Inverseur', 'Transfer sw.'), color='neutral'),
+        _node(id='tgbt', col='C', row='3', w=40, h=22, title='TGBT',
+              sub=f"{e.puissance_totale_kva:.0f} kVA", color='low'),
     ]
+    # Colonne montante = noeud vertical haut
+    nodes.append(_node(id='col', x=154, y=ROW['5'], w=20, h=ROW['1'] + 16 - ROW['5'],
+                       title=_T('Colonne', 'Riser'),
+                       sub=f"{e.section_colonne_mm2} mm²", color='low'))
+    for i, r in enumerate(ROWS_TD):
+        nid = f'td{i}'
+        # Decalage fin pour eviter superposition avec la colonne
+        nodes.append(_node(id=nid, x=COL['D'] + 28, y=ROW[r], w=28, h=12,
+                           title=f"TD N{i+1}", color='low'))
     edges = [
         {'src': 'tr',   'dst': 'ats',  'color': ORANGE, 'label': 'HTA/BT'},
-        {'src': 'gen',  'dst': 'ats',  'color': NOIR,   'label': _T('Secours', 'Backup')},
+        {'src': 'gen',  'dst': 'ats',  'color': NOIR,   'label': _T('Secours','Backup')},
         {'src': 'ats',  'dst': 'tgbt', 'color': ORANGE},
-        {'src': 'tgbt', 'dst': 'col',  'color': NOIR},
+        {'src': 'tgbt', 'dst': 'col',  'color': NOIR,   'label': 'BT'},
     ]
-    # TD par niveau
-    for i in range(n_show):
-        y = 95 - i * 16
-        nid = f'td{i}'
-        nodes.append({'id': nid, 'x': 158, 'y': y, 'w': 14, 'h': 10,
-                      'title': f"TD N{i+1}", 'color': 'low'})
-        edges.append({'src': 'col', 'dst': nid, 'color': NOIR})
-    return _make_diagram(_T("1. Electricite — Distribution principale",
-                            "1. Electrical — Main distribution"),
-                         nodes, edges)
+    for i in range(nb):
+        edges.append({'src': 'col', 'dst': f'td{i}', 'color': NOIR})
+    return _make_diagram(
+        _T("1. Electricite — Distribution principale",
+           "1. Electrical — Main distribution"),
+        nodes, edges,
+        legend=[(_T('Energie','Power'), ORANGE),
+                (_T('Liaison BT','LV link'), NOIR)])
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -225,36 +279,47 @@ def _diag_electricite(rm):
 # ─────────────────────────────────────────────────────────────────────
 def _diag_plomberie(rm):
     pl = rm.plomberie
-    nb_niveaux = int(getattr(rm.params, 'nb_niveaux', 4))
-    n_show = min(max(nb_niveaux, 1), 6)
+    nb = min(max(int(getattr(rm.params, 'nb_niveaux', 4)), 1), 6)
+    ROWS_N = ['1', '2', '3', '4', '5', '6'][:nb]
     nodes = [
-        {'id': 'cit',  'x': 5,  'y': 75, 'w': 30, 'h': 22,
-         'title': _T('Citerne', 'Tank'), 'sub': f"{pl.volume_citerne_m3:.0f} m³", 'color': 'water'},
-        {'id': 'pmp',  'x': 50, 'y': 80, 'w': 24, 'h': 14,
-         'title': _T('Surpresseur', 'Booster'), 'sub': f"{pl.debit_surpresseur_m3h:.0f} m³/h", 'color': 'water'},
-        {'id': 'col',  'x': 90, 'y': 60, 'w': 22, 'h': 38,
-         'title': _T('Colonne', 'Riser'), 'sub': f"DN{pl.diam_colonne_montante_mm}", 'color': 'water'},
-        {'id': 'ces',  'x': 5,  'y': 25, 'w': 30, 'h': 14,
-         'title': 'CESI', 'sub': f"{pl.nb_chauffe_eau_solaire} {_T('unites','units')}", 'color': 'fire'},
-        {'id': 'ev',   'x': 130, 'y': 20, 'w': 30, 'h': 14,
-         'title': _T('Evac. EU/EV', 'Drain stack'), 'sub': 'PVC DN100', 'color': 'neutral'},
+        _node(id='cit',  col='A', row='2', w=40, h=22,
+              title=_T('Citerne', 'Tank'),
+              sub=f"{pl.volume_citerne_m3:.0f} m³", color='water'),
+        _node(id='pmp',  col='B', row='2', w=38, h=16,
+              title=_T('Surpresseur', 'Booster'),
+              sub=f"{pl.debit_surpresseur_m3h:.0f} m³/h", color='water'),
+        _node(id='ces',  col='A', row='5', w=40, h=14,
+              title='CESI',
+              sub=f"{pl.nb_chauffe_eau_solaire} {_T('unites','units')}",
+              color='fire'),
+        _node(id='col',  x=100, y=ROW['5'], w=20, h=ROW['1'] + 16 - ROW['5'],
+              title=_T('Colonne', 'Riser'),
+              sub=f"DN{pl.diam_colonne_montante_mm}", color='water'),
+        _node(id='ev',   col='B', row='6', w=38, h=12,
+              title=_T('Evac. EU/EV', 'Drain stack'),
+              sub='PVC DN100', color='neutral'),
     ]
-    edges = [
-        {'src': 'cit', 'dst': 'pmp', 'color': BLEU, 'label': _T('Aspiration', 'Suction')},
-        {'src': 'pmp', 'dst': 'col', 'color': BLEU, 'label': _T('Refoulement', 'Discharge')},
-        {'src': 'ces', 'dst': 'col', 'color': ORANGE, 'label': 'ECS', 'src_side': 'r', 'dst_side': 'l'},
-    ]
-    # Nourrices par niveau
-    for i in range(n_show):
-        y = 92 - i * 12
+    for i, r in enumerate(ROWS_N):
         nid = f'nv{i}'
-        nodes.append({'id': nid, 'x': 130, 'y': y, 'w': 24, 'h': 9,
-                      'title': f"N{i+1}", 'sub': _T('Nourrice', 'Manifold'), 'color': 'water'})
-        edges.append({'src': 'col', 'dst': nid, 'color': BLEU})
-    edges.append({'src': 'col', 'dst': 'ev', 'color': GRIS3, 'style': 'dashed', 'src_side': 'b'})
-    return _make_diagram(_T("2. Plomberie — Eau froide / ECS / Evacuation",
-                            "2. Plumbing — Cold water / DHW / Drainage"),
-                         nodes, edges)
+        nodes.append(_node(id=nid, col='D', row=r, w=36, h=12,
+                           title=f"N{i+1} — {_T('Nourrice','Manifold')}",
+                           color='water'))
+    edges = [
+        {'src': 'cit', 'dst': 'pmp', 'color': BLEU, 'label': _T('Aspir.','Suct.')},
+        {'src': 'pmp', 'dst': 'col', 'color': BLEU, 'label': _T('Refoul.','Disch.')},
+        {'src': 'ces', 'dst': 'col', 'color': ORANGE, 'label': 'ECS'},
+    ]
+    for i in range(nb):
+        edges.append({'src': 'col', 'dst': f'nv{i}', 'color': BLEU})
+    edges.append({'src': 'col', 'dst': 'ev', 'color': GRIS3, 'style': 'dashed',
+                  'label': _T('Evac.','Drain')})
+    return _make_diagram(
+        _T("2. Plomberie — Eau froide / ECS / Evacuation",
+           "2. Plumbing — Cold water / DHW / Drainage"),
+        nodes, edges,
+        legend=[(_T('Eau froide','Cold water'), BLEU),
+                ('ECS', ORANGE),
+                (_T('Evacuation','Drainage'), GRIS3)])
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -263,31 +328,40 @@ def _diag_plomberie(rm):
 def _diag_clim(rm):
     c = rm.cvc
     nodes = [
-        {'id': 'ue',  'x': 5,  'y': 80, 'w': 32, 'h': 18,
-         'title': _T('Unites Ext.', 'Outdoor units'), 'sub': f"{c.puissance_frigorifique_kw:.0f} kW", 'color': 'hvac'},
-        {'id': 'lf',  'x': 55, 'y': 82, 'w': 28, 'h': 14,
-         'title': _T('Liaisons frigo', 'Refrigerant lines'), 'sub': 'Cuivre', 'color': 'neutral'},
-        {'id': 'sj',  'x': 100, 'y': 92, 'w': 32, 'h': 12,
-         'title': _T('Splits sejour', 'Living units'), 'sub': f"{c.nb_splits_sejour}", 'color': 'hvac'},
-        {'id': 'ch',  'x': 100, 'y': 76, 'w': 32, 'h': 12,
-         'title': _T('Splits chambre', 'Bedroom units'), 'sub': f"{c.nb_splits_chambre}", 'color': 'hvac'},
-        {'id': 'cas', 'x': 100, 'y': 60, 'w': 32, 'h': 12,
-         'title': _T('Cassettes', 'Cassettes'), 'sub': f"{c.nb_cassettes}", 'color': 'hvac'},
-        {'id': 'cnd', 'x': 145, 'y': 30, 'w': 28, 'h': 12,
-         'title': _T('Condensats', 'Condensate'), 'sub': 'PVC DN32', 'color': 'water'},
+        _node(id='ue',  col='A', row='2', w=40, h=20,
+              title=_T('Unites Ext.', 'Outdoor'),
+              sub=f"{c.puissance_frigorifique_kw:.0f} kW", color='hvac'),
+        _node(id='lf',  col='B', row='2', w=38, h=16,
+              title=_T('Liaisons frigo', 'Refrig. lines'),
+              sub=_T('Cuivre isole','Insul. copper'), color='neutral'),
+        _node(id='sj',  col='C', row='1', w=40, h=14,
+              title=_T('Splits sejour', 'Living splits'),
+              sub=f"× {c.nb_splits_sejour}", color='hvac'),
+        _node(id='ch',  col='C', row='3', w=40, h=14,
+              title=_T('Splits chambre', 'Bedroom splits'),
+              sub=f"× {c.nb_splits_chambre}", color='hvac'),
+        _node(id='cas', col='C', row='5', w=40, h=14,
+              title=_T('Cassettes', 'Cassettes'),
+              sub=f"× {c.nb_cassettes}", color='hvac'),
+        _node(id='cnd', col='D', row='5', w=40, h=14,
+              title=_T('Condensats', 'Condensate'),
+              sub='PVC DN32', color='water'),
     ]
     edges = [
         {'src': 'ue', 'dst': 'lf', 'color': BLEU},
-        {'src': 'lf', 'dst': 'sj', 'color': BLEU},
-        {'src': 'lf', 'dst': 'ch', 'color': BLEU},
-        {'src': 'lf', 'dst': 'cas','color': BLEU},
+        {'src': 'lf', 'dst': 'sj', 'color': BLEU, 'label': 'R410A'},
+        {'src': 'lf', 'dst': 'ch', 'color': BLEU, 'label': 'R410A'},
+        {'src': 'lf', 'dst': 'cas','color': BLEU, 'label': 'R410A'},
         {'src': 'sj', 'dst': 'cnd','color': GRIS3, 'style': 'dashed'},
         {'src': 'ch', 'dst': 'cnd','color': GRIS3, 'style': 'dashed'},
         {'src': 'cas','dst': 'cnd','color': GRIS3, 'style': 'dashed'},
     ]
-    return _make_diagram(_T("3. Climatisation — Detente directe DRV",
-                            "3. HVAC — VRF direct expansion"),
-                         nodes, edges)
+    return _make_diagram(
+        _T("3. Climatisation — Detente directe DRV",
+           "3. HVAC — VRF direct expansion"),
+        nodes, edges,
+        legend=[(_T('Frigo','Refrig.'), BLEU),
+                (_T('Condensats','Condensate'), GRIS3)])
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -296,29 +370,40 @@ def _diag_clim(rm):
 def _diag_vent(rm):
     c = rm.cvc
     nodes = [
-        {'id': 'vmc', 'x': 5,  'y': 80, 'w': 32, 'h': 16,
-         'title': f"VMC {c.type_vmc}", 'sub': f"{c.nb_vmc} {_T('caissons','units')}", 'color': 'hvac'},
-        {'id': 'gp',  'x': 55, 'y': 82, 'w': 28, 'h': 12,
-         'title': _T('Gaines princ.', 'Main ducts'), 'sub': 'Galva', 'color': 'neutral'},
-        {'id': 'cuis','x': 100, 'y': 92, 'w': 32, 'h': 12,
-         'title': _T('Bouches cuisine', 'Kitchen vents'), 'color': 'hvac'},
-        {'id': 'sdb', 'x': 100, 'y': 76, 'w': 32, 'h': 12,
-         'title': _T('Bouches SdB / WC', 'Bath / WC vents'), 'color': 'hvac'},
-        {'id': 'amen','x': 100, 'y': 60, 'w': 32, 'h': 12,
-         'title': _T('Entree air neuf', 'Fresh air inlets'), 'color': 'hvac'},
-        {'id': 'rej', 'x': 145, 'y': 30, 'w': 28, 'h': 12,
-         'title': _T('Rejet toiture', 'Roof exhaust'), 'color': 'neutral'},
+        _node(id='vmc', col='A', row='2', w=40, h=18,
+              title=f"VMC {c.type_vmc}",
+              sub=f"× {c.nb_vmc} {_T('caissons','units')}", color='hvac'),
+        _node(id='gp',  col='B', row='2', w=38, h=16,
+              title=_T('Gaines princ.', 'Main ducts'),
+              sub=_T('Galva isolee','Insul. galv.'), color='neutral'),
+        _node(id='cuis',col='C', row='1', w=40, h=14,
+              title=_T('Bouches cuisine', 'Kitchen vents'),
+              color='hvac'),
+        _node(id='sdb', col='C', row='3', w=40, h=14,
+              title=_T('Bouches SdB/WC', 'Bath/WC vents'),
+              color='hvac'),
+        _node(id='amen',col='C', row='5', w=40, h=14,
+              title=_T('Entree air neuf', 'Fresh air'),
+              color='hvac'),
+        _node(id='rej', col='D', row='5', w=40, h=14,
+              title=_T('Rejet toiture', 'Roof exhaust'),
+              color='neutral'),
     ]
     edges = [
-        {'src': 'vmc', 'dst': 'gp', 'color': BLEU},
-        {'src': 'gp',  'dst': 'cuis','color': BLEU},
-        {'src': 'gp',  'dst': 'sdb', 'color': BLEU},
-        {'src': 'amen','dst': 'gp',  'color': VERT, 'label': _T("Air neuf","Fresh")},
-        {'src': 'gp',  'dst': 'rej', 'color': GRIS3, 'style': 'dashed'},
+        {'src': 'vmc', 'dst': 'gp',  'color': BLEU},
+        {'src': 'gp',  'dst': 'cuis','color': BLEU, 'label': _T('Extr.','Exh.')},
+        {'src': 'gp',  'dst': 'sdb', 'color': BLEU, 'label': _T('Extr.','Exh.')},
+        {'src': 'amen','dst': 'gp',  'color': VERT, 'label': _T('Air neuf','Fresh')},
+        {'src': 'gp',  'dst': 'rej', 'color': GRIS3, 'style': 'dashed',
+         'label': _T('Rejet','Exhaust')},
     ]
-    return _make_diagram(_T("4. Ventilation — Schema aeraulique",
-                            "4. Ventilation — Air-flow schematic"),
-                         nodes, edges)
+    return _make_diagram(
+        _T("4. Ventilation — Schema aeraulique",
+           "4. Ventilation — Air-flow schematic"),
+        nodes, edges,
+        legend=[(_T('Extraction','Exhaust'), BLEU),
+                (_T('Air neuf','Fresh air'), VERT),
+                (_T('Rejet','Discharge'), GRIS3)])
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -327,26 +412,32 @@ def _diag_vent(rm):
 def _diag_cctv(rm):
     cf = rm.courants_faibles
     nodes = [
-        {'id': 'nvr', 'x': 5,   'y': 75, 'w': 32, 'h': 18,
-         'title': 'NVR', 'sub': _T('Enregistreur', 'Recorder'), 'color': 'low'},
-        {'id': 'sw',  'x': 55,  'y': 75, 'w': 28, 'h': 18,
-         'title': 'Switch PoE', 'color': 'low'},
-        {'id': 'cint','x': 100, 'y': 90, 'w': 36, 'h': 14,
-         'title': _T('Cameras int.', 'Indoor cams'), 'sub': f"{cf.nb_cameras_int}", 'color': 'low'},
-        {'id': 'cext','x': 100, 'y': 65, 'w': 36, 'h': 14,
-         'title': _T('Cameras ext.', 'Outdoor cams'), 'sub': f"{cf.nb_cameras_ext}", 'color': 'low'},
-        {'id': 'ecran','x': 5,  'y': 35, 'w': 32, 'h': 14,
-         'title': _T('Ecran PC', 'Monitor PC'), 'color': 'neutral'},
+        _node(id='nvr', col='A', row='2', w=40, h=20,
+              title='NVR', sub=_T('Enregistreur','Recorder'), color='low'),
+        _node(id='sw',  col='B', row='2', w=38, h=18,
+              title='Switch PoE',
+              sub=f"{cf.nb_cameras_int + cf.nb_cameras_ext} ports", color='low'),
+        _node(id='cint',col='C', row='1', w=40, h=14,
+              title=_T('Cameras int.', 'Indoor cams'),
+              sub=f"× {cf.nb_cameras_int}", color='low'),
+        _node(id='cext',col='C', row='3', w=40, h=14,
+              title=_T('Cameras ext.', 'Outdoor cams'),
+              sub=f"× {cf.nb_cameras_ext}", color='low'),
+        _node(id='mon', col='A', row='5', w=40, h=14,
+              title=_T('Poste super.', 'Workstation'),
+              sub='HDMI', color='neutral'),
     ]
     edges = [
-        {'src': 'nvr', 'dst': 'sw', 'color': VERT_DARK, 'label': 'LAN'},
-        {'src': 'sw',  'dst': 'cint', 'color': VERT_DARK, 'label': 'PoE'},
-        {'src': 'sw',  'dst': 'cext', 'color': VERT_DARK, 'label': 'PoE'},
-        {'src': 'nvr', 'dst': 'ecran', 'color': NOIR, 'src_side': 'b', 'dst_side': 't', 'label': 'HDMI'},
+        {'src': 'nvr', 'dst': 'sw',  'color': VERT_DARK, 'label': 'LAN'},
+        {'src': 'sw',  'dst': 'cint','color': VERT_DARK, 'label': 'PoE'},
+        {'src': 'sw',  'dst': 'cext','color': VERT_DARK, 'label': 'PoE'},
+        {'src': 'nvr', 'dst': 'mon', 'color': NOIR,       'label': 'HDMI'},
     ]
-    return _make_diagram(_T("5. CCTV — Videosurveillance IP",
-                            "5. CCTV — IP video surveillance"),
-                         nodes, edges)
+    return _make_diagram(
+        _T("5. CCTV — Videosurveillance IP",
+           "5. CCTV — IP video surveillance"),
+        nodes, edges,
+        legend=[('LAN/PoE', VERT_DARK), ('HDMI', NOIR)])
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -354,29 +445,32 @@ def _diag_cctv(rm):
 # ─────────────────────────────────────────────────────────────────────
 def _diag_sono(rm):
     nodes = [
-        {'id': 'src', 'x': 5,   'y': 80, 'w': 32, 'h': 14,
-         'title': _T('Sources', 'Sources'), 'sub': 'Mic / BGM', 'color': 'low'},
-        {'id': 'cons','x': 50,  'y': 80, 'w': 28, 'h': 14,
-         'title': _T('Console', 'Mixer'), 'color': 'low'},
-        {'id': 'amp', 'x': 90,  'y': 80, 'w': 28, 'h': 14,
-         'title': _T('Ampli matrice', 'Matrix amp'), 'color': 'low'},
-        {'id': 'z1',  'x': 130, 'y': 96, 'w': 32, 'h': 10,
-         'title': _T('Zone hall', 'Lobby'), 'color': 'low'},
-        {'id': 'z2',  'x': 130, 'y': 82, 'w': 32, 'h': 10,
-         'title': _T('Zone couloirs', 'Corridors'), 'color': 'low'},
-        {'id': 'z3',  'x': 130, 'y': 68, 'w': 32, 'h': 10,
-         'title': _T('Zone parking', 'Parking'), 'color': 'low'},
+        _node(id='src', col='A', row='2', w=40, h=16,
+              title=_T('Sources', 'Sources'), sub='Mic / BGM', color='low'),
+        _node(id='cons',col='B', row='2', w=38, h=16,
+              title=_T('Console', 'Mixer'), color='low'),
+        _node(id='amp', col='C', row='2', w=40, h=16,
+              title=_T('Ampli matrice', 'Matrix amp'),
+              sub='100V', color='low'),
+        _node(id='z1',  col='D', row='1', w=40, h=12,
+              title=_T('Zone hall', 'Lobby'), color='low'),
+        _node(id='z2',  col='D', row='3', w=40, h=12,
+              title=_T('Zone couloirs', 'Corridors'), color='low'),
+        _node(id='z3',  col='D', row='5', w=40, h=12,
+              title=_T('Zone parking', 'Parking'), color='low'),
     ]
     edges = [
-        {'src': 'src', 'dst': 'cons', 'color': VERT_DARK},
+        {'src': 'src', 'dst': 'cons','color': VERT_DARK, 'label': 'XLR'},
         {'src': 'cons','dst': 'amp', 'color': VERT_DARK},
         {'src': 'amp', 'dst': 'z1',  'color': VERT_DARK, 'label': '100V'},
         {'src': 'amp', 'dst': 'z2',  'color': VERT_DARK, 'label': '100V'},
         {'src': 'amp', 'dst': 'z3',  'color': VERT_DARK, 'label': '100V'},
     ]
-    return _make_diagram(_T("6. Sonorisation — Diffusion 100V multi-zones",
-                            "6. PA system — 100V multi-zone"),
-                         nodes, edges)
+    return _make_diagram(
+        _T("6. Sonorisation — Diffusion 100V multi-zones",
+           "6. PA system — 100V multi-zone"),
+        nodes, edges,
+        legend=[(_T('Signal audio','Audio'), VERT_DARK)])
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -385,31 +479,40 @@ def _diag_sono(rm):
 def _diag_di(rm):
     si = rm.securite_incendie
     nodes = [
-        {'id': 'ecs', 'x': 5,   'y': 75, 'w': 32, 'h': 22,
-         'title': 'ECS', 'sub': f"{si.centrale_zones} {_T('zones','zones')}", 'color': 'fire'},
-        {'id': 'det', 'x': 55,  'y': 92, 'w': 36, 'h': 12,
-         'title': _T('Detecteurs fumee', 'Smoke detectors'), 'sub': f"{si.nb_detecteurs_fumee}", 'color': 'fire'},
-        {'id': 'dm',  'x': 55,  'y': 76, 'w': 36, 'h': 12,
-         'title': _T('Decl. manuels', 'Manual call points'), 'sub': f"{si.nb_declencheurs_manuels}", 'color': 'fire'},
-        {'id': 'sir', 'x': 55,  'y': 60, 'w': 36, 'h': 12,
-         'title': _T('Sirenes UGA', 'Sounders UGA'), 'sub': f"{si.nb_sirenes}", 'color': 'fire'},
-        {'id': 'des', 'x': 110, 'y': 76, 'w': 36, 'h': 12,
-         'title': _T('Desenfumage', 'Smoke extraction'),
-         'sub': _T('Requis','Required') if si.desenfumage_requis else _T('Non requis','Not req.'),
-         'color': 'fire'},
-        {'id': 'gtb', 'x': 110, 'y': 40, 'w': 36, 'h': 12,
-         'title': _T('Report GTB', 'BMS report'), 'color': 'gtb'},
+        _node(id='ecs', col='B', row='3', w=40, h=22,
+              title='ECS', sub=f"{si.centrale_zones} {_T('zones','zones')}",
+              color='fire'),
+        _node(id='det', col='A', row='1', w=44, h=14,
+              title=_T('Detecteurs fumee', 'Smoke det.'),
+              sub=f"× {si.nb_detecteurs_fumee}", color='fire'),
+        _node(id='dm',  col='A', row='3', w=44, h=14,
+              title=_T('Decl. manuels', 'Manual CP'),
+              sub=f"× {si.nb_declencheurs_manuels}", color='fire'),
+        _node(id='sir', col='C', row='1', w=44, h=14,
+              title=_T('Sirenes UGA', 'Sounders UGA'),
+              sub=f"× {si.nb_sirenes}", color='fire'),
+        _node(id='des', col='C', row='3', w=44, h=14,
+              title=_T('Desenfumage', 'Smoke extr.'),
+              sub=_T('Requis','Required') if si.desenfumage_requis
+                  else _T('Non requis','Not req.'),
+              color='fire'),
+        _node(id='gtb', col='C', row='5', w=44, h=14,
+              title=_T('Report GTB', 'BMS report'),
+              sub='TCP/IP', color='gtb'),
     ]
     edges = [
-        {'src': 'det', 'dst': 'ecs', 'color': ROUGE, 'src_side': 'l', 'dst_side': 'r'},
-        {'src': 'dm',  'dst': 'ecs', 'color': ROUGE, 'src_side': 'l', 'dst_side': 'r'},
+        {'src': 'det', 'dst': 'ecs', 'color': ROUGE},
+        {'src': 'dm',  'dst': 'ecs', 'color': ROUGE},
         {'src': 'ecs', 'dst': 'sir', 'color': ROUGE, 'label': 'UGA'},
-        {'src': 'ecs', 'dst': 'des', 'color': ROUGE, 'label': _T('Comm. cmd.', 'Cmd')},
-        {'src': 'ecs', 'dst': 'gtb', 'color': VERT_DARK, 'style': 'dashed', 'label': 'TCP/IP'},
+        {'src': 'ecs', 'dst': 'des', 'color': ROUGE, 'label': _T('Cmd','Cmd')},
+        {'src': 'ecs', 'dst': 'gtb', 'color': VERT_DARK, 'style': 'dashed'},
     ]
-    return _make_diagram(_T("7. Detection incendie — SSI categorie A",
-                            "7. Fire detection — SSI Cat. A"),
-                         nodes, edges)
+    return _make_diagram(
+        _T("7. Detection incendie — SSI categorie A",
+           "7. Fire detection — SSI Cat. A"),
+        nodes, edges,
+        legend=[(_T('Boucle SSI','Fire loop'), ROUGE),
+                (_T('Report GTB','BMS report'), VERT_DARK)])
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -418,30 +521,36 @@ def _diag_di(rm):
 def _diag_ext(rm):
     si = rm.securite_incendie
     nodes = [
-        {'id': 'bac', 'x': 5,   'y': 75, 'w': 30, 'h': 22,
-         'title': _T('Bache feu', 'Fire tank'), 'sub': '120 m³', 'color': 'water'},
-        {'id': 'pmp', 'x': 50,  'y': 80, 'w': 28, 'h': 14,
-         'title': _T('Pompe incendie', 'Fire pump'), 'sub': 'Diesel + Elec', 'color': 'fire'},
-        {'id': 'cs',  'x': 90,  'y': 60, 'w': 22, 'h': 38,
-         'title': _T('Colonne seche', 'Dry riser'), 'color': 'fire'},
-        {'id': 'ria', 'x': 130, 'y': 92, 'w': 36, 'h': 10,
-         'title': 'RIA', 'sub': f"{si.longueur_ria_ml:.0f} ml", 'color': 'fire'},
-        {'id': 'spr', 'x': 130, 'y': 76, 'w': 36, 'h': 10,
-         'title': _T('Sprinklers', 'Sprinklers'), 'sub': f"{si.nb_tetes_sprinkler}", 'color': 'fire'},
-        {'id': 'ext', 'x': 130, 'y': 60, 'w': 36, 'h': 10,
-         'title': _T('Extincteurs', 'Extinguishers'),
-         'sub': f"CO2 {si.nb_extincteurs_co2} / P {si.nb_extincteurs_poudre}",
-         'color': 'fire'},
+        _node(id='bac', col='A', row='2', w=40, h=20,
+              title=_T('Bache feu', 'Fire tank'),
+              sub='120 m³', color='water'),
+        _node(id='pmp', col='B', row='2', w=38, h=16,
+              title=_T('Pompe incendie', 'Fire pump'),
+              sub=_T('Diesel + Elec','Diesel + Elec'), color='fire'),
+        _node(id='cs',  x=100, y=ROW['5'], w=22, h=ROW['1'] + 18 - ROW['5'],
+              title=_T('Colonne', 'Riser'),
+              sub=_T('seche','dry'), color='fire'),
+        _node(id='ria', col='D', row='1', w=40, h=14,
+              title='RIA', sub=f"{si.longueur_ria_ml:.0f} ml", color='fire'),
+        _node(id='spr', col='D', row='3', w=40, h=14,
+              title=_T('Sprinklers', 'Sprinklers'),
+              sub=f"× {si.nb_tetes_sprinkler}", color='fire'),
+        _node(id='ext', col='D', row='5', w=40, h=14,
+              title=_T('Extincteurs', 'Extinguishers'),
+              sub=f"CO2 {si.nb_extincteurs_co2} / P {si.nb_extincteurs_poudre}",
+              color='fire'),
     ]
     edges = [
-        {'src': 'bac', 'dst': 'pmp', 'color': BLEU},
-        {'src': 'pmp', 'dst': 'cs',  'color': BLEU, 'label': _T('Refoul.', 'Disch.')},
+        {'src': 'bac', 'dst': 'pmp', 'color': BLEU, 'label': _T('Aspir.','Suct.')},
+        {'src': 'pmp', 'dst': 'cs',  'color': BLEU, 'label': _T('Refoul.','Disch.')},
         {'src': 'cs',  'dst': 'ria', 'color': BLEU},
         {'src': 'cs',  'dst': 'spr', 'color': BLEU},
     ]
-    return _make_diagram(_T("8. Extinction incendie — RIA + Colonne seche + Sprinklers",
-                            "8. Fire suppression — Hose reels + Dry riser + Sprinklers"),
-                         nodes, edges)
+    return _make_diagram(
+        _T("8. Extinction incendie — RIA + Colonne seche + Sprinklers",
+           "8. Fire suppression — Hose reels + Dry riser + Sprinklers"),
+        nodes, edges,
+        legend=[(_T('Eau sous pression','Pressurized water'), BLEU)])
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -450,29 +559,40 @@ def _diag_ext(rm):
 def _diag_acc(rm):
     cf = rm.courants_faibles
     nodes = [
-        {'id': 'ctrl','x': 5,   'y': 75, 'w': 32, 'h': 18,
-         'title': _T('Controleur', 'Controller'), 'sub': 'IP', 'color': 'low'},
-        {'id': 'lec', 'x': 55,  'y': 90, 'w': 36, 'h': 12,
-         'title': _T('Lecteurs badge', 'Card readers'), 'sub': f"{cf.nb_portes_controle_acces}", 'color': 'low'},
-        {'id': 'ven', 'x': 55,  'y': 74, 'w': 36, 'h': 12,
-         'title': _T('Ventouses / gaches', 'Mag locks / strikes'), 'color': 'low'},
-        {'id': 'bds', 'x': 55,  'y': 58, 'w': 36, 'h': 12,
-         'title': _T('Boutons sortie', 'Exit buttons'), 'color': 'low'},
-        {'id': 'int', 'x': 110, 'y': 90, 'w': 36, 'h': 12,
-         'title': _T('Interphones', 'Intercoms'), 'sub': f"{cf.nb_interphones}", 'color': 'low'},
-        {'id': 'gtb', 'x': 110, 'y': 50, 'w': 36, 'h': 12,
-         'title': 'GTB', 'sub': _T('Supervision','Supervision'), 'color': 'gtb'},
+        _node(id='ctrl',col='A', row='2', w=40, h=20,
+              title=_T('Controleur', 'Controller'),
+              sub='IP', color='low'),
+        _node(id='lec', col='C', row='1', w=44, h=14,
+              title=_T('Lecteurs badge', 'Card readers'),
+              sub=f"× {cf.nb_portes_controle_acces}", color='low'),
+        _node(id='ven', col='C', row='3', w=44, h=14,
+              title=_T('Ventouses/gaches', 'Locks/strikes'),
+              sub='24V', color='low'),
+        _node(id='bds', col='C', row='5', w=44, h=14,
+              title=_T('Boutons sortie', 'Exit buttons'),
+              color='low'),
+        _node(id='int', col='D', row='2', w=40, h=14,
+              title=_T('Interphones', 'Intercoms'),
+              sub=f"× {cf.nb_interphones}", color='low'),
+        _node(id='gtb', col='A', row='5', w=40, h=14,
+              title='GTB',
+              sub=_T('Supervision','Supervision'), color='gtb'),
     ]
     edges = [
         {'src': 'ctrl','dst': 'lec', 'color': VERT_DARK, 'label': 'OSDP'},
-        {'src': 'ctrl','dst': 'ven', 'color': NOIR, 'label': '24V'},
+        {'src': 'ctrl','dst': 'ven', 'color': NOIR,       'label': '24V'},
         {'src': 'ctrl','dst': 'bds', 'color': NOIR},
-        {'src': 'ctrl','dst': 'int', 'color': VERT_DARK, 'label': 'SIP'},
-        {'src': 'ctrl','dst': 'gtb', 'color': VERT_DARK, 'style': 'dashed', 'label': 'BACnet'},
+        {'src': 'ctrl','dst': 'int', 'color': VERT_DARK, 'label': 'SIP',
+         'midx_mm': 140},
+        {'src': 'ctrl','dst': 'gtb', 'color': VERT_DARK, 'style': 'dashed',
+         'label': 'BACnet'},
     ]
-    return _make_diagram(_T("9. Controle d'acces / Interphone",
-                            "9. Access control / Intercom"),
-                         nodes, edges)
+    return _make_diagram(
+        _T("9. Controle d'acces / Interphone",
+           "9. Access control / Intercom"),
+        nodes, edges,
+        legend=[(_T('Bus IP','IP bus'), VERT_DARK),
+                (_T('24V','24V'), NOIR)])
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -481,35 +601,47 @@ def _diag_acc(rm):
 def _diag_gtb(rm):
     a = rm.automatisation
     nodes = [
-        {'id': 'sup', 'x': 70,  'y': 95, 'w': 36, 'h': 14,
-         'title': _T('Superviseur', 'Supervisor'), 'sub': f"{a.protocole}", 'color': 'gtb'},
-        {'id': 'bus', 'x': 70,  'y': 70, 'w': 36, 'h': 12,
-         'title': _T('Bus terrain', 'Field bus'), 'sub': f"{a.nb_points_controle} pts", 'color': 'gtb'},
-        {'id': 'ele', 'x': 5,   'y': 88, 'w': 32, 'h': 10,
-         'title': _T('Eclairage','Lighting'), 'color': 'low'},
-        {'id': 'cvc', 'x': 5,   'y': 74, 'w': 32, 'h': 10,
-         'title': 'CVC', 'color': 'hvac'},
-        {'id': 'ene', 'x': 5,   'y': 60, 'w': 32, 'h': 10,
-         'title': _T('Compteurs','Energy meters'), 'color': 'power'},
-        {'id': 'inc', 'x': 138, 'y': 88, 'w': 34, 'h': 10,
-         'title': _T('SSI','Fire'), 'color': 'fire'},
-        {'id': 'acc', 'x': 138, 'y': 74, 'w': 34, 'h': 10,
-         'title': _T('Acces','Access'), 'color': 'low'},
-        {'id': 'asc', 'x': 138, 'y': 60, 'w': 34, 'h': 10,
-         'title': _T('Ascenseurs','Lifts'), 'color': 'neutral'},
+        _node(id='sup', x=72, y=ROW['1'], w=44, h=16,
+              title=_T('Superviseur', 'Supervisor'),
+              sub=a.protocole, color='gtb'),
+        _node(id='bus', x=26, y=ROW['3'], w=136, h=12,
+              title=_T('Bus terrain', 'Field bus'),
+              sub=f"{a.nb_points_controle} pts", color='gtb'),
+        # Consommateurs en bas, repartis
+        _node(id='ele', x=6,  y=ROW['5'], w=36, h=14,
+              title=_T('Eclairage','Lighting'), color='low'),
+        _node(id='cvc', x=48, y=ROW['5'], w=36, h=14,
+              title='CVC', color='hvac'),
+        _node(id='ene', x=90, y=ROW['5'], w=36, h=14,
+              title=_T('Energie','Energy'), color='power'),
+        _node(id='inc', x=6,  y=ROW['6'] - 16, w=36, h=14,
+              title='SSI', color='fire'),
+        _node(id='acc', x=48, y=ROW['6'] - 16, w=36, h=14,
+              title=_T('Acces','Access'), color='low'),
+        _node(id='asc', x=90, y=ROW['6'] - 16, w=36, h=14,
+              title=_T('Ascenseurs','Lifts'), color='neutral'),
     ]
     edges = [
-        {'src': 'sup', 'dst': 'bus', 'color': VERT_DARK, 'src_side': 'b', 'dst_side': 't'},
-        {'src': 'bus', 'dst': 'ele', 'color': VERT_DARK},
-        {'src': 'bus', 'dst': 'cvc', 'color': VERT_DARK},
-        {'src': 'bus', 'dst': 'ene', 'color': VERT_DARK},
-        {'src': 'bus', 'dst': 'inc', 'color': VERT_DARK, 'style': 'dashed'},
-        {'src': 'bus', 'dst': 'acc', 'color': VERT_DARK, 'style': 'dashed'},
-        {'src': 'bus', 'dst': 'asc', 'color': VERT_DARK, 'style': 'dashed'},
+        {'src': 'sup', 'dst': 'bus',
+         'src_side': 'b', 'dst_side': 't'},
+        {'src': 'bus', 'dst': 'ele', 'src_side': 'b', 'dst_side': 't',
+         'color': VERT_DARK},
+        {'src': 'bus', 'dst': 'cvc', 'src_side': 'b', 'dst_side': 't',
+         'color': VERT_DARK},
+        {'src': 'bus', 'dst': 'ene', 'src_side': 'b', 'dst_side': 't',
+         'color': VERT_DARK},
+        {'src': 'bus', 'dst': 'inc', 'src_side': 'b', 'dst_side': 't',
+         'color': VERT_DARK, 'style': 'dashed'},
+        {'src': 'bus', 'dst': 'acc', 'src_side': 'b', 'dst_side': 't',
+         'color': VERT_DARK, 'style': 'dashed'},
+        {'src': 'bus', 'dst': 'asc', 'src_side': 'b', 'dst_side': 't',
+         'color': VERT_DARK, 'style': 'dashed'},
     ]
-    return _make_diagram(_T("10. GTB / BMS — Supervision centrale",
-                            "10. BMS — Central supervision"),
-                         nodes, edges)
+    return _make_diagram(
+        _T("10. GTB / BMS — Supervision centrale",
+           "10. BMS — Central supervision"),
+        nodes, edges,
+        legend=[(_T('Bus GTB','BMS bus'), VERT_DARK)])
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -592,14 +724,16 @@ def _t_gtb(rm):
 # ─────────────────────────────────────────────────────────────────────
 #  Entree principale
 # ─────────────────────────────────────────────────────────────────────
-def _section(story, num, title, table, drawing, caption_fr, caption_en):
-    story.extend(section_title(num, _T(title['fr'], title['en'])))
+def _section(story, num, title_fr, title_en, table, drawing,
+             caption_fr, caption_en, last=False):
+    story.extend(section_title(num, _T(title_fr, title_en)))
     story.append(table)
     story.append(Spacer(1, 3 * mm))
     story.append(drawing)
     story.append(Spacer(1, 2 * mm))
     story.append(Paragraph(_T(caption_fr, caption_en), S['body_j']))
-    story.append(PageBreak())
+    if not last:
+        story.append(PageBreak())
 
 
 def generer_schemas_mep_iso(rm, params: dict) -> bytes:
@@ -607,7 +741,8 @@ def generer_schemas_mep_iso(rm, params: dict) -> bytes:
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             leftMargin=ML, rightMargin=MR,
                             topMargin=22 * mm, bottomMargin=18 * mm,
-                            title=_T("Schemas de principe MEP", "MEP Schematic Diagrams"),
+                            title=_T("Schemas de principe MEP",
+                                     "MEP Schematic Diagrams"),
                             author='Tijan AI')
 
     project_name = params.get('nom') or _T("Projet", "Project")
@@ -623,46 +758,41 @@ def generer_schemas_mep_iso(rm, params: dict) -> bytes:
     story.append(Spacer(1, 4 * mm))
     story.append(Paragraph(_T(
         "Schemas blocs detailles pour les 10 lots techniques. Chaque diagramme "
-        "presente les composants principaux et leurs interactions, avec les valeurs "
-        "issues du moteur MEP Tijan AI.",
-        "Detailed block diagrams for the 10 technical packages. Each diagram shows "
-        "the main components and their interactions, with values produced by the "
-        "Tijan AI MEP engine."),
+        "presente les composants principaux et leurs interactions, avec les "
+        "valeurs issues du moteur MEP Tijan AI.",
+        "Detailed block diagrams for the 10 technical packages. Each diagram "
+        "shows the main components and their interactions, with values produced "
+        "by the Tijan AI MEP engine."),
         S['body_j']))
     story.append(Spacer(1, 4 * mm))
 
     sections = [
-        ('1', {'fr': 'Electricite', 'en': 'Electrical'},
-         _t_elec(rm), _diag_electricite(rm),
+        ('1', 'Electricite', 'Electrical', _t_elec(rm), _diag_electricite(rm),
          "Distribution principale TR + Genset via inverseur de source vers TGBT, "
          "puis colonne montante BT alimentant les tableaux divisionnaires d'etage.",
          "Main distribution TR + Genset via ATS to MSB, then LV riser feeding "
          "floor distribution boards."),
-        ('2', {'fr': 'Plomberie', 'en': 'Plumbing'},
-         _t_plomb(rm), _diag_plomberie(rm),
+        ('2', 'Plomberie', 'Plumbing', _t_plomb(rm), _diag_plomberie(rm),
          "Aspiration depuis citerne, surpresseur, colonne montante DN dimensionnee, "
          "nourrices d'etage et evacuation EU/EV en colonne separee.",
          "Suction from tank, booster pump, sized DN riser, floor manifolds and "
          "separate WW/SW drainage stack."),
-        ('3', {'fr': 'Climatisation', 'en': 'HVAC'},
-         _t_clim(rm), _diag_clim(rm),
+        ('3', 'Climatisation', 'HVAC', _t_clim(rm), _diag_clim(rm),
          "Systeme detente directe DRV : unites exterieures en toiture, liaisons "
          "frigorifiques cuivre, unites interieures par espace, evacuation condensats.",
          "VRF direct expansion system: rooftop outdoor units, copper refrigerant "
          "lines, indoor units per space, condensate drainage."),
-        ('4', {'fr': 'Ventilation', 'en': 'Ventilation'},
-         _t_vent(rm), _diag_vent(rm),
+        ('4', 'Ventilation', 'Ventilation', _t_vent(rm), _diag_vent(rm),
          "Caissons VMC, gaines galva isolees, bouches d'extraction cuisine et SdB, "
          "entrees d'air neuf et rejet en toiture.",
          "MVHR units, insulated galvanized ducts, kitchen and bath exhaust grilles, "
          "fresh air inlets and roof exhaust."),
-        ('5', {'fr': 'CCTV', 'en': 'CCTV'},
-         _t_cf(rm), _diag_cctv(rm),
-         "Architecture IP : NVR central, switch PoE alimentant les cameras int. et ext., "
-         "ecran de supervision PC.",
+        ('5', 'CCTV', 'CCTV', _t_cf(rm), _diag_cctv(rm),
+         "Architecture IP : NVR central, switch PoE alimentant les cameras int. et "
+         "ext., poste de supervision.",
          "IP architecture: central NVR, PoE switch feeding indoor and outdoor cams, "
-         "PC supervision monitor."),
-        ('6', {'fr': 'Sonorisation', 'en': 'PA system'},
+         "supervision workstation."),
+        ('6', 'Sonorisation', 'PA system',
          _kv_table([(_T("Architecture","Architecture"),"100V multi-zones"),
                     (_T("Source","Source"),"BGM + Mic")]),
          _diag_sono(rm),
@@ -670,40 +800,35 @@ def generer_schemas_mep_iso(rm, params: dict) -> bytes:
          "zones HP independantes (hall, couloirs, parking).",
          "100V multi-zone architecture: audio sources, mixer, matrix amplifier, "
          "independent speaker zones (lobby, corridors, parking)."),
-        ('7', {'fr': 'Detection incendie', 'en': 'Fire detection'},
-         _t_si(rm), _diag_di(rm),
-         "Centrale ECS, detecteurs fumee adressables, declencheurs manuels, sirenes UGA, "
-         "commande desenfumage et report d'alarmes vers GTB.",
+        ('7', 'Detection incendie', 'Fire detection', _t_si(rm), _diag_di(rm),
+         "Centrale ECS, detecteurs fumee adressables, declencheurs manuels, "
+         "sirenes UGA, commande desenfumage et report d'alarmes vers GTB.",
          "Addressable FACP, smoke detectors, manual call points, UGA sounders, "
          "smoke extraction command and BMS alarm reporting."),
-        ('8', {'fr': 'Extinction incendie', 'en': 'Fire suppression'},
-         _t_si(rm), _diag_ext(rm),
-         "Bache feu, pompe incendie diesel + electrique, colonne seche, RIA, sprinklers "
-         "et extincteurs portatifs CO2 / poudre.",
+        ('8', 'Extinction incendie', 'Fire suppression', _t_si(rm), _diag_ext(rm),
+         "Bache feu, pompe incendie diesel + electrique, colonne seche, RIA, "
+         "sprinklers et extincteurs portatifs CO2 / poudre.",
          "Fire tank, diesel + electric fire pump, dry riser, hose reels, sprinklers "
          "and portable CO2 / powder extinguishers."),
-        ('9', {'fr': "Controle d'acces / Interphone", 'en': 'Access / Intercom'},
+        ('9', "Controle d'acces / Interphone", 'Access / Intercom',
          _t_acc(rm), _diag_acc(rm),
          "Controleur IP, lecteurs badge OSDP, ventouses 24V, boutons de sortie, "
          "interphones SIP et report GTB en BACnet.",
          "IP controller, OSDP card readers, 24V mag locks, exit buttons, SIP "
          "intercoms and BMS reporting over BACnet."),
-        ('10', {'fr': 'GTB / BMS', 'en': 'BMS'},
-         _t_gtb(rm), _diag_gtb(rm),
+        ('10', 'GTB / BMS', 'BMS', _t_gtb(rm), _diag_gtb(rm),
          "Superviseur central, bus terrain, automates par lot. Interconnexion avec "
          "tous les autres lots (eclairage, CVC, energie, SSI, acces, ascenseurs).",
          "Central supervisor, field bus, package controllers. Interconnection with "
          "all other packages (lighting, HVAC, energy, fire, access, lifts)."),
     ]
 
-    for num, t, tab, drw, cfr, cen in sections:
-        _section(story, num, t, tab, drw, cfr, cen)
+    for i, (num, tfr, ten, tab, drw, cfr, cen) in enumerate(sections):
+        _section(story, num, tfr, ten, tab, drw, cfr, cen,
+                 last=(i == len(sections) - 1))
 
-    # Pas de page break apres la derniere section
-    if story and isinstance(story[-1], PageBreak):
-        story.pop()
-
-    hf = HeaderFooter(project_name, _T("Schemas de principe MEP", "MEP Schematic Diagrams"))
+    hf = HeaderFooter(project_name,
+                      _T("Schemas de principe MEP", "MEP Schematic Diagrams"))
     doc.build(story, onFirstPage=hf, onLaterPages=hf)
     pdf = buf.getvalue()
     buf.close()
