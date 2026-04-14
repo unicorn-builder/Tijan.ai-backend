@@ -683,14 +683,58 @@ def _draw_coffrage_annotations(c, tx, ty, axes_x, axes_y, pot_s, pp_b, pp_h,
                                 ps_b, ps_h, dalle_ep, px_m, py_m, beton, acier):
     """Draw lightweight structural annotations on top of a PDF background.
 
-    The PDF already shows the building plan — we only add:
+    The PDF already shows the building plan — we add:
     - Axis labels (numbered/lettered circles) OUTSIDE the plan
     - Dimension labels between axes
+    - Column markers at axis intersections (visible solid squares)
+    - Beam lines along axes (PP along Y-rows, PS along X-columns)
     - A small info box with beam/slab specs
-    NO grid lines, NO column markers, NO beams, NO hatching on the plan itself.
     """
     if not axes_x or not axes_y:
         return
+
+    # ── Poteaux at axis intersections (solid black squares, always visible) ──
+    # Size in points — based on actual column size projected through transform
+    x0p = tx(axes_x[0]); x1p = tx(axes_x[-1])
+    y0p = ty(axes_y[0]); y1p = ty(axes_y[-1])
+    # Average pitch in points
+    avg_pitch_pt = max(
+        abs(x1p - x0p) / max(len(axes_x) - 1, 1),
+        abs(y1p - y0p) / max(len(axes_y) - 1, 1)
+    )
+    pt_d = max(min(avg_pitch_pt * 0.06, 8.0), 3.5)  # 3.5-8pt visible
+    c.saveState()
+    c.setFillColor(NOIR); c.setStrokeColor(NOIR); c.setLineWidth(0.4)
+    for ax in axes_x:
+        for ay in axes_y:
+            xp = tx(ax); yp = ty(ay)
+            c.rect(xp - pt_d/2, yp - pt_d/2, pt_d, pt_d, fill=1, stroke=1)
+    c.restoreState()
+
+    # ── Poutres principales (PP) along Y-rows between columns ──
+    pd_pp = max(min(avg_pitch_pt * 0.025, 3.0), 1.2)
+    c.saveState()
+    c.setStrokeColor(NOIR); c.setLineWidth(0.6); c.setStrokeAlpha(0.75)
+    for ay in axes_y:
+        yp = ty(ay)
+        for i in range(len(axes_x) - 1):
+            x1 = tx(axes_x[i]); x2 = tx(axes_x[i+1])
+            c.line(x1, yp - pd_pp/2, x2, yp - pd_pp/2)
+            c.line(x1, yp + pd_pp/2, x2, yp + pd_pp/2)
+    c.restoreState()
+
+    # ── Poutres secondaires (PS) along X-columns between rows ──
+    pd_ps = max(min(avg_pitch_pt * 0.02, 2.5), 1.0)
+    c.saveState()
+    c.setStrokeColor(GRIS3); c.setLineWidth(0.35); c.setStrokeAlpha(0.6); c.setDash(3, 2)
+    for ax in axes_x:
+        xp = tx(ax)
+        for j in range(len(axes_y) - 1):
+            y1 = ty(axes_y[j]); y2 = ty(axes_y[j+1])
+            c.line(xp - pd_ps/2, y1, xp - pd_ps/2, y2)
+            c.line(xp + pd_ps/2, y1, xp + pd_ps/2, y2)
+    c.setDash()
+    c.restoreState()
 
     # Compute axis boundary positions
     y_lo = min(ty(axes_y[0]), ty(axes_y[-1])) - 10*mm
@@ -1801,7 +1845,19 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
 
         # DWG geometry for this level if available
         lvl_geom = dwg_levels.get(level_name) or dwg_levels.get('Étage courant')
-        has_geom = lvl_geom and len(lvl_geom.get('walls', [])) >= 5
+        # Terrasse: strip interior content — only structural slab + acrotère + grid
+        # (pool, rooms, interior walls don't belong on a roof-slab plan)
+        is_terrasse_level = level_name.lower().startswith('terrasse')
+        if is_terrasse_level and lvl_geom:
+            lvl_geom = {
+                'walls': [],            # no interior wall redraw
+                'windows': [], 'doors': [], 'rooms': [],
+                'axes_x': lvl_geom.get('axes_x', []),
+                'axes_y': lvl_geom.get('axes_y', []),
+                '_terrace_bounds': _dwg_bounds(lvl_geom),
+                '_cv_meta': lvl_geom.get('_cv_meta'),
+            }
+        has_geom = lvl_geom and (len(lvl_geom.get('walls', [])) >= 5 or is_terrasse_level)
 
         # Detect if geometry came from PDF (coordinates in points, small range)
         # vs DWG (coordinates in mm, large range)
@@ -1821,7 +1877,8 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
         # ── MODE 1: PDF BACKGROUND (primary for PDF uploads) ──
         # When we have the original PDF, use it as high-quality background
         # and overlay lightweight structural annotations only.
-        if archi_pdf_path and (is_from_pdf or not has_geom):
+        # Skip PDF background for terrasse — it must show slab/acrotère only.
+        if archi_pdf_path and (is_from_pdf or not has_geom) and not is_terrasse_level:
             pdf_page_idx = level_names.index(level_name) if level_name in level_names else 0
             ok, placement = _render_pdf_background(
                 c, archi_pdf_path, pdf_page_idx, w, h,
@@ -1854,16 +1911,39 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
 
         # ── MODE 2: DWG REDRAW (any geometry — works for DWG mm or DXF model units) ──
         if not rendered and has_geom:
-            dtx, dty, dsc, dgw, dgh = _dwg_layout(w, h, lvl_geom)
+            # Terrasse: synthesize a layout from stored bounds (walls=[] so _dwg_layout may fail)
+            # For terrasse, synthesize geom from stored bounds (no interior walls)
+            geom_for_layout = lvl_geom
+            if is_terrasse_level and lvl_geom.get('_terrace_bounds'):
+                tb = lvl_geom['_terrace_bounds']
+                geom_for_layout = {'walls': [{'type': 'polyline',
+                    'points': [(tb[0], tb[1]), (tb[2], tb[1]), (tb[2], tb[3]), (tb[0], tb[3])],
+                    'closed': True}]}
+            dtx, dty, dsc, dgw, dgh = _dwg_layout(w, h, geom_for_layout)
             if dtx:
-                # Draw architecture — thin clean lines (not thick black rectangles)
-                _draw_dwg(c, lvl_geom, dtx, dty, sc=dsc)
+                if is_terrasse_level and lvl_geom.get('_terrace_bounds'):
+                    # Dalle terrasse outline + acrotère (no interior architecture)
+                    bx0, by0, bx1, by1 = lvl_geom['_terrace_bounds']
+                    c.saveState()
+                    c.setStrokeColor(NOIR); c.setLineWidth(1.4)
+                    c.rect(dtx(bx0), dty(by0), dtx(bx1)-dtx(bx0), dty(by1)-dty(by0), fill=0, stroke=1)
+                    acr_off = 150
+                    c.setStrokeColor(colors.HexColor("#FFA726")); c.setLineWidth(0.8); c.setDash(4, 2)
+                    c.rect(dtx(bx0+acr_off), dty(by0+acr_off),
+                           dtx(bx1-acr_off)-dtx(bx0+acr_off),
+                           dty(by1-acr_off)-dty(by0+acr_off), fill=0, stroke=1)
+                    c.setDash()
+                    c.setFillColor(GRIS2); c.setFont("Helvetica-Oblique", 7)
+                    c.drawString(dtx(bx0)+3*mm, dty(by1)-6*mm,
+                                 "Toiture-Terrasse inaccessible — Dalle BA + Acrotère h=80cm + étanchéité multicouche")
+                    c.restoreState()
+                else:
+                    # Normal level: redraw architecture
+                    _draw_dwg(c, lvl_geom, dtx, dty, sc=dsc)
 
                 real_ax = lvl_geom.get('axes_x', [])
                 real_ay = lvl_geom.get('axes_y', [])
                 if real_ax and real_ay:
-                    # Axes, poteaux, poutres, dalle labels — same as before but using
-                    # the annotation function for consistency
                     _draw_coffrage_annotations(
                         c, dtx, dty, real_ax, real_ay,
                         pot_s, pp_b, pp_h, ps_b, ps_h, dalle_ep,
@@ -1871,15 +1951,17 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
                     )
                 else:
                     # No axes — fitted grid
-                    bx0, by0, bx1, by1 = _dwg_bounds(lvl_geom)
-                    bw = bx1 - bx0; bh = by1 - by0
-                    gx0 = bx0 + bw * 0.02; gy0 = by0 + bh * 0.02
-                    g_px = (bw * 0.96) / max(nx, 1)
-                    g_py = (bh * 0.96) / max(ny, 1)
-                    _draw_grid_axes_dwg(c, dtx, dty, gx0, gy0, nx, ny, g_px/1000, g_py/1000, bw*0.96, bh*0.96)
-                    _draw_poutres_pp_dwg(c, dtx, dty, gx0, gy0, nx, ny, g_px/1000, g_py/1000, pp_b)
-                    _draw_poutres_ps_dwg(c, dtx, dty, gx0, gy0, nx, ny, g_px/1000, g_py/1000)
-                    _draw_poteaux_dwg(c, dtx, dty, gx0, gy0, nx, ny, g_px/1000, g_py/1000, pot_s, dsc)
+                    bb = _dwg_bounds(geom_for_layout)
+                    if bb:
+                        bx0, by0, bx1, by1 = bb
+                        bw = bx1 - bx0; bh = by1 - by0
+                        gx0 = bx0 + bw * 0.02; gy0 = by0 + bh * 0.02
+                        g_px = (bw * 0.96) / max(nx, 1)
+                        g_py = (bh * 0.96) / max(ny, 1)
+                        _draw_grid_axes_dwg(c, dtx, dty, gx0, gy0, nx, ny, g_px/1000, g_py/1000, bw*0.96, bh*0.96)
+                        _draw_poutres_pp_dwg(c, dtx, dty, gx0, gy0, nx, ny, g_px/1000, g_py/1000, pp_b)
+                        _draw_poutres_ps_dwg(c, dtx, dty, gx0, gy0, nx, ny, g_px/1000, g_py/1000)
+                        _draw_poteaux_dwg(c, dtx, dty, gx0, gy0, nx, ny, g_px/1000, g_py/1000, pot_s, dsc)
                 rendered = True
 
         # ── MODE 3: PARAMETRIC GRID (no file uploaded) ──
