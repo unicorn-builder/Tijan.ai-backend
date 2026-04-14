@@ -1751,6 +1751,8 @@ async def generate_plans_structure(params: ParamsProjet):
             "plans_structure", pdf_bytes
         )
         return pdf_response(pdf_bytes, fname(params, "plans_structure"), archive_url=_archive_url)
+    except HTTPException:
+        raise  # Preserve 422 (DWG-only guard) and other explicit status codes
     except Exception as e:
         logger.error(f"/generate-plans-structure error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1805,6 +1807,8 @@ async def generate_plans_mep(params: ParamsProjet):
             "plans_mep", pdf_bytes
         )
         return pdf_response(pdf_bytes, fname(params, "plans_mep"), archive_url=_archive_url)
+    except HTTPException:
+        raise  # Preserve 422 (DWG-only guard) and other explicit status codes
     except Exception as e:
         logger.error(f"/generate-plans-mep error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
