@@ -1693,26 +1693,32 @@ async def generate_plu(params: ParamsProjet):
         gc.collect()
 
 
-def _is_dwg_sourced_geometry(geom) -> bool:
-    """True if geometry comes from a DWG/DXF source (not from PDF CV fallback)."""
+def _is_pdf_sourced_geometry(geom) -> bool:
+    """True if geometry is explicitly marked as PDF-CV-sourced (unreliable for plans)."""
     if not geom or not isinstance(geom, dict):
         return False
-    # A geometry dict may either be flat (walls at root) or nested by level.
-    def _check(d):
+    def _is_pdf(d):
         if not isinstance(d, dict):
             return False
         meta = d.get('_cv_meta') or {}
-        src = str(meta.get('source', '')).lower()
-        if src == 'pdf':
-            return False
-        # any walls at all count as DWG-sourced when no pdf marker
-        return bool(d.get('walls'))
-    if _check(geom):
+        return str(meta.get('source', '')).lower() == 'pdf'
+    if _is_pdf(geom):
         return True
-    for v in geom.values():
-        if _check(v):
-            return True
-    return False
+    return any(_is_pdf(v) for v in geom.values())
+
+
+def _params_signal_pdf_input(params) -> bool:
+    """True if the request carries archi_pdf_* markers WITHOUT a DWG signal (urn/geom_ref)."""
+    def _get(name):
+        return getattr(params, name, None) or (params.get(name) if isinstance(params, dict) else None)
+    has_pdf_marker = bool(_get('archi_pdf_url') or _get('archi_pdf_ref'))
+    has_dwg_marker = bool(_get('urn') or _get('geom_ref') or _get('dwg_geometry'))
+    return has_pdf_marker and not has_dwg_marker
+
+
+def _is_dwg_sourced_geometry(geom) -> bool:
+    """Deprecated name kept for compatibility — inverse of PDF-sourced check."""
+    return not _is_pdf_sourced_geometry(geom)
 
 
 @app.post("/generate-plans-structure")
@@ -1727,8 +1733,10 @@ async def generate_plans_structure(params: ParamsProjet):
         rs = calculer_structure(donnees)
         # Geometry priority: body > cache ref > APS URN > None (grid fallback)
         dwg_geometry = _resolve_geometry(params)
-        # DWG-only policy: refuse PDF-sourced or missing geometry for BA plans
-        if not _is_dwg_sourced_geometry(dwg_geometry):
+        # DWG-only policy: refuse only when explicitly PDF-sourced (CV pipeline
+        # marker) OR when request carries PDF markers without any DWG signal.
+        # If geom is missing and no PDF markers, fall through to parametric grid.
+        if _is_pdf_sourced_geometry(dwg_geometry) or _params_signal_pdf_input(params):
             raise HTTPException(
                 status_code=422,
                 detail="Les plans structure nécessitent un fichier DWG/DXF en entrée. "
@@ -1785,8 +1793,9 @@ async def generate_plans_mep(params: ParamsProjet):
         rm = calculer_mep(donnees, rs)
         # Geometry priority: body > cache ref > APS URN > None (grid fallback)
         dwg_geometry = _resolve_geometry(params)
-        # DWG-only policy: refuse PDF-sourced or missing geometry for MEP plans
-        if not _is_dwg_sourced_geometry(dwg_geometry):
+        # DWG-only policy: refuse only when explicitly PDF-sourced or when
+        # request carries PDF markers without any DWG signal.
+        if _is_pdf_sourced_geometry(dwg_geometry) or _params_signal_pdf_input(params):
             raise HTTPException(
                 status_code=422,
                 detail="Les plans MEP nécessitent un fichier DWG/DXF en entrée. "
