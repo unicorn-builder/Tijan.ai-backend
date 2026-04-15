@@ -1694,7 +1694,7 @@ def _pdf_bg_transforms(placement, pdf_h_pt):
 # PLANS STRUCTURE — même pattern que v4
 # ══════════════════════════════════════════
 
-def _draw_ferr_nomenclature_table(c, x, y, entries, page_w, filter_pos=None, max_rows=18):
+def _draw_ferr_nomenclature_table(c, x, y, entries, page_w, filter_pos=None, max_rows=8):
     """Draw BET-style nomenclature table at bottom of ferraillage sheet.
     entries = list of tuples (rep, count, diam, esp, L_m, position).
     filter_pos = 'inf' | 'sup' | None — only rows whose position contains this substring.
@@ -2286,7 +2286,9 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
     ], "FERRAILLAGE INFÉRIEUR")
 
     # Nomenclature table — repères accumulated from panels
-    _draw_ferr_nomenclature_table(c, 14*mm, 42*mm, _ferr_nomenclature, w)
+    # y=8mm so the capped (8-row) table sits in the bottom strip under the grid (mb=58mm)
+    # and under the cartouche top (y<=50mm). Width ~96mm stays left of cartouche (x>=230mm).
+    _draw_ferr_nomenclature_table(c, 14*mm, 8*mm, _ferr_nomenclature, w)
     _cartouche_pro(c, w, h, p, "FERRAILLAGE INF. DALLE", page, total_pages,
                    "LOT 01 — STRUCTURE / FERRAILLAGE B.A.",
                    drawing_no=f"TJN-STR-FER-INF-{page:03d}")
@@ -2406,7 +2408,7 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
         (VIOLET, 'fill', "Repères armatures supérieures"),
     ], "FERRAILLAGE SUPÉRIEUR")
 
-    _draw_ferr_nomenclature_table(c, 14*mm, 42*mm, _ferr_nomenclature, w,
+    _draw_ferr_nomenclature_table(c, 14*mm, 8*mm, _ferr_nomenclature, w,
                                    filter_pos="sup")
     _cartouche_pro(c, w, h, p, "FERRAILLAGE SUP. DALLE", page, total_pages,
                    "LOT 01 — STRUCTURE / FERRAILLAGE B.A.",
@@ -2780,16 +2782,17 @@ def _draw_mep_nomenclature_table(c, x, y, entries, title="NOMENCLATURE ÉQUIPEME
     from reportlab.lib import colors as rl_colors
 
     header = ["Rep.", "Désignation", "Qté", "Unité", "Norme/DTU"]
-    data = [header] + [[str(e[0]), str(e[1])[:42], str(e[2]), str(e[3]), str(e[4])[:18]] for e in entries[:14]]
+    # Cap at 7 rows so table fits inside the 42mm bottom strip (header 5mm + 7*4mm = 33mm)
+    data = [header] + [[str(e[0]), str(e[1])[:42], str(e[2]), str(e[3]), str(e[4])[:18]] for e in entries[:7]]
     col_w = [10*mm, 66*mm, 12*mm, 12*mm, 26*mm]
-    table = Table(data, colWidths=col_w, rowHeights=[6.5*mm] + [5*mm]*(len(data)-1))
+    table = Table(data, colWidths=col_w, rowHeights=[5*mm] + [4*mm]*(len(data)-1))
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor("#43A956")),
         ('TEXTCOLOR', (0, 0), (-1, 0), BLANC),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 7.5),
+        ('FONTSIZE', (0, 0), (-1, 0), 6),
         ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 6.8),
+        ('FONTSIZE', (0, 1), (-1, -1), 5),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('ALIGN', (1, 1), (1, -1), 'LEFT'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
@@ -2801,9 +2804,9 @@ def _draw_mep_nomenclature_table(c, x, y, entries, title="NOMENCLATURE ÉQUIPEME
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [BLANC, rl_colors.HexColor("#F5F7F5")]),
     ]))
     tw = sum(col_w)
-    th = 6.5*mm + 5*mm * (len(data)-1)
-    c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 8.5)
-    c.drawString(x, y + th + 2*mm, title)
+    th = 5*mm + 4*mm * (len(data)-1)
+    c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 7)
+    c.drawString(x, y + th + 1.5*mm, title)
     table.wrapOn(c, tw, th)
     table.drawOn(c, x, y)
 
@@ -4441,19 +4444,24 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                                       (ORANGE, 'fill', "Actionneur éclairage"),
                                       (colors.HexColor("#FFB74D"), 'fill', "Actionneur climatisation")], "LÉGENDE AUTOMATISATION GTB")
 
-        # Notes en bas
-        c.setFont("Helvetica", 5); c.setFillColor(GRIS3)
-        for k_n, note in enumerate(notes[:3]):
-            c.drawString(14*mm, 42*mm - k_n*5*mm, note)
-
-        # Nomenclature équipements (milieu-bas gauche)
+        # Nomenclature équipements — bottom strip, left of cartouche (cartouche x>=230mm).
+        # y=8mm: bottom 8, header 5mm + 7 rows*4mm = 33mm → top 41mm, title 42.5mm → under cartouche top (50mm).
         try:
             nomencl = _build_mep_nomenclature(key, pl, el, cv, cf, si, asc, aut)
             if nomencl:
-                _draw_mep_nomenclature_table(c, 14*mm, 60*mm, nomencl,
+                _draw_mep_nomenclature_table(c, 14*mm, 8*mm, nomencl,
                                              title=f"NOMENCLATURE — {title[:30]}")
         except Exception as _e_nom:
-            pass
+            logger.warning(f"[MEP] nomenclature table skipped: {_e_nom}")
+            _nomencl_err = True
+        else:
+            _nomencl_err = False
+
+        # Notes courtes — placed right of the nomenclature table, inside the bottom strip
+        c.setFont("Helvetica", 5); c.setFillColor(GRIS3)
+        _notes_x = 145*mm  # just right of the 126mm-wide nomenclature table
+        for k_n, note in enumerate(notes[:3]):
+            c.drawString(_notes_x, 12*mm + k_n*5*mm, note)
 
         _cartouche_pro(c, w, h, p, f"Plan {title}", page, total_pages, lot_label,
                        drawing_no=_mep_drawing_no(key, level_label, page))
