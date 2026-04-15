@@ -54,6 +54,48 @@ WINDOW_PARALLEL_TOL = 8  # px gap between parallel lines
 # Stage 1: PDF / Image → Preprocessed binary image
 # ===========================================================================
 
+def _pdf_page_text(pdf_path: str, page_idx: int) -> str:
+    """Return the extracted text of a specific PDF page (uppercased)."""
+    try:
+        import fitz
+    except ImportError:
+        return ""
+    try:
+        doc = fitz.open(pdf_path)
+        if page_idx >= len(doc):
+            doc.close()
+            return ""
+        txt = doc[page_idx].get_text() or ""
+        doc.close()
+        return txt.upper()
+    except Exception:
+        return ""
+
+
+def _pdf_render_page(pdf_path: str, page_idx: int, dpi: int = 200):
+    """Rasterize ONE specific PDF page → (img_bgr, page_w_pt, page_h_pt) or None."""
+    try:
+        import fitz
+    except ImportError:
+        return None
+    try:
+        doc = fitz.open(pdf_path)
+        if page_idx >= len(doc):
+            doc.close()
+            return None
+        page = doc[page_idx]
+        zoom = dpi / 72.0
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, 3)
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        page_rect = page.rect
+        doc.close()
+        return img, page_rect.width, page_rect.height
+    except Exception as e:
+        logger.warning(f"Failed to render PDF page {page_idx}: {e}")
+        return None
+
+
 def _pdf_to_image(pdf_path: str, dpi: int = 200) -> Optional[np.ndarray]:
     """Rasterize the best plan page from a PDF to a numpy image (BGR)."""
     try:
@@ -885,3 +927,175 @@ def extract_geometry_from_pdf_cv(pdf_path: str, use_vision: bool = True) -> Opti
         logger.info(f"Vector fallback not available: {e}")
 
     return cv_geom
+
+
+# ===========================================================================
+# Per-page extraction — one geometry per PDF page
+# ===========================================================================
+
+def _classify_level_from_page_text(text_upper: str) -> Optional[str]:
+    """Identify a building level from a PDF page's text content.
+
+    Returns one of: SOUS_SOL, RDC, ETAGE_<n>, ETAGE_COURANT, TERRASSE, or None.
+    """
+    if not text_upper:
+        return None
+    t = text_upper
+    # Sous-sol / parking
+    if any(k in t for k in ['SOUS-SOL', 'SOUS SOL', 'BASEMENT', 'PARKING', ' SS ', 'S.SOL']):
+        return 'SOUS_SOL'
+    # Terrasse / toiture
+    if any(k in t for k in ['TERRASSE', 'TOITURE', 'ROOFTOP', 'TERRACE', 'TOIT-TERRASSE']):
+        return 'TERRASSE'
+    # Étage courant (range or generic)
+    if 'ETAGE COURANT' in t or 'ÉTAGE COURANT' in t or 'COURANT' in t:
+        return 'ETAGE_COURANT'
+    # Specific étage number
+    import re as _re
+    m = _re.search(r'(?:R\s*\+\s*|R\+|ETAGE\s+|ÉTAGE\s+|NIVEAU\s+|LEVEL\s+|FLOOR\s+)(\d{1,2})', t)
+    if m:
+        n = int(m.group(1))
+        if 1 <= n <= 50:
+            return f'ETAGE_{n}'
+    # RDC last (often appears as decoration on other pages)
+    if any(k in t for k in ['REZ-DE-CHAUSSEE', 'REZ DE CHAUSSEE', 'R.D.C', ' RDC ', 'GROUND FLOOR', 'GROUND-FLOOR']):
+        return 'RDC'
+    return None
+
+
+def extract_geometry_per_page_cv(pdf_path: str, use_vision: bool = True,
+                                  max_pages: int = 12) -> Optional[dict]:
+    """Run the CV pipeline on EACH page of a PDF and return a level→geometry dict.
+
+    Pages are classified using their text content (level keywords). Pages that
+    can't be classified fall back to PAGE_<idx>. A level seen twice keeps the
+    page with the most walls (assumed to be the actual plan, not a title sheet).
+
+    Returns:
+        - dict {level_key: geometry, ...} if the PDF has 2+ usable pages
+        - flat geometry dict if only one page yields good walls
+        - None if no page produced usable geometry
+    """
+    try:
+        import fitz
+    except ImportError:
+        return None
+
+    try:
+        doc = fitz.open(pdf_path)
+    except Exception as e:
+        logger.warning(f"Cannot open PDF: {e}")
+        return None
+
+    n_pages = min(len(doc), max_pages)
+    if n_pages == 0:
+        doc.close()
+        return None
+
+    page_texts = []
+    for i in range(n_pages):
+        try:
+            page_texts.append((doc[i].get_text() or "").upper())
+        except Exception:
+            page_texts.append("")
+    doc.close()
+
+    results = {}  # level_key -> geometry
+
+    for i in range(n_pages):
+        rendered = _pdf_render_page(pdf_path, i, dpi=200)
+        if not rendered:
+            continue
+        img, pdf_w_pt, pdf_h_pt = rendered
+
+        # Run CV pipeline on this specific page image
+        try:
+            geom = extract_geometry_from_image_array(
+                img, use_vision=use_vision,
+                pdf_meta={'pdf_w_pt': pdf_w_pt, 'pdf_h_pt': pdf_h_pt, 'page_idx': i}
+            )
+        except Exception as e:
+            logger.warning(f"CV page {i} failed: {e}")
+            continue
+        if not geom or len(geom.get('walls', [])) < 5:
+            continue
+
+        # Classify by text first, then index
+        lvl = _classify_level_from_page_text(page_texts[i]) or f'PAGE_{i}'
+
+        # Tag with source page for traceability
+        geom.setdefault('_cv_meta', {})['source_page_idx'] = i
+        geom.setdefault('_cv_meta', {})['source_pdf'] = os.path.basename(pdf_path)
+
+        # Keep richer geometry if level seen twice
+        if lvl in results:
+            if len(geom.get('walls', [])) > len(results[lvl].get('walls', [])):
+                results[lvl] = geom
+        else:
+            results[lvl] = geom
+
+    if not results:
+        return None
+    if len(results) == 1:
+        # Return flat dict — caller treats as single level
+        return list(results.values())[0]
+    logger.info(f"Per-page CV: {len(results)} levels detected → {sorted(results.keys())}")
+    return results
+
+
+def extract_geometry_from_image_array(img: np.ndarray, use_vision: bool = True,
+                                       api_key: Optional[str] = None,
+                                       pdf_meta: Optional[dict] = None) -> Optional[dict]:
+    """Run the full CV → Vision → Fusion pipeline on a pre-loaded image array.
+
+    Mirrors extract_geometry_cv but without the file-loading stage, so it can
+    be reused per-page from a multi-page PDF.
+    """
+    if img is None:
+        return None
+    img_h, img_w = img.shape[:2]
+
+    binary, gray, edges = _preprocess(img)
+    raw_lines = _detect_lines(edges, binary)
+    classified = _classify_lines(raw_lines)
+    cv_rooms = _detect_rooms(binary, img_h, img_w)
+    cv_doors = _detect_doors_arcs(binary)
+
+    vision_labels = {'rooms': [], 'dimensions': [], 'scale': None}
+    if use_vision:
+        tmp_img = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
+                tmp_img = f.name
+                cv2.imwrite(tmp_img, img)
+            vision_labels = _extract_labels_with_vision(tmp_img, api_key=api_key)
+        except Exception as e:
+            logger.warning(f"Vision labels failed: {e}")
+        finally:
+            if tmp_img and os.path.exists(tmp_img):
+                try: os.unlink(tmp_img)
+                except OSError: pass
+
+    mm_per_px = _compute_scale(
+        vision_labels.get('dimensions', []),
+        classified['walls'], img_w, img_h,
+        declared_scale=vision_labels.get('scale')
+    )
+    geometry = _fuse_geometry(
+        classified, cv_rooms, cv_doors, vision_labels,
+        mm_per_px, img_w, img_h
+    )
+    geometry['_cv_meta'] = {
+        'source': 'pdf' if pdf_meta else 'image',
+        'img_w': img_w, 'img_h': img_h,
+        'mm_per_px': mm_per_px, 'dpi': 200,
+    }
+    if pdf_meta:
+        geometry['_cv_meta'].update(pdf_meta)
+
+    n_walls = len(geometry.get('walls', []))
+    if n_walls < 5:
+        geometry['_cv_meta']['quality'] = 'low'
+    else:
+        geometry['_cv_meta']['quality'] = 'good' if n_walls > 20 else 'medium'
+    return geometry

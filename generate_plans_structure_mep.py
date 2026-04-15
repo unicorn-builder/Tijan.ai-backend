@@ -1851,8 +1851,18 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
     # Normalize dwg_geometry to level dict — with axis inference
     LEVEL_LABELS = {
         'SOUS_SOL': 'Sous-Sol', 'RDC': 'Rez-de-Chaussée',
-        'ETAGES_1_7': 'Étage courant', 'ETAGE_8': 'Étage 8', 'TERRASSE': 'Terrasse',
+        'ETAGES_1_7': 'Étage courant', 'ETAGE_COURANT': 'Étage courant',
+        'ETAGE_8': 'Étage 8', 'TERRASSE': 'Terrasse',
     }
+    def _label_from_key(key: str) -> str:
+        if key in LEVEL_LABELS:
+            return LEVEL_LABELS[key]
+        import re as _re2
+        m = _re2.match(r'^ETAGE[_\-]?(\d+)$', str(key).upper())
+        if m:
+            return f"Étage {int(m.group(1))}"
+        return str(key)
+
     dwg_levels = {}
     if dwg_geometry:
         if 'walls' in dwg_geometry:
@@ -1862,15 +1872,26 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
             for key, geom in dwg_geometry.items():
                 if isinstance(geom, dict) and len(geom.get('walls', [])) >= 5:
                     enriched = _ensure_axes(geom, nx, ny, px_m, py_m)
-                    dwg_levels[LEVEL_LABELS.get(key, key)] = enriched
+                    dwg_levels[_label_from_key(key)] = enriched
 
-    # Build level list
+    # Build level list — auto-detect sous-sol from geometry if user didn't flag it
+    has_soussol_geom = any(
+        ('sous' in str(k).lower() or 'parking' in str(k).lower() or 'basement' in str(k).lower())
+        for k in dwg_levels.keys()
+    )
     level_names = []
-    if p.get("avec_sous_sol"):
+    if p.get("avec_sous_sol") or has_soussol_geom:
         level_names.append("Sous-Sol")
     level_names.append("RDC")
     nb_etages = nb_niv - len(level_names)
-    if nb_etages > 0:
+    # Insert per-level étage pages we actually have geometry for (Étage 1, Étage 2, …)
+    explicit_etage_levels = sorted(
+        [k for k in dwg_levels.keys() if k.startswith('Étage ') and k != 'Étage courant'],
+        key=lambda s: int(''.join(filter(str.isdigit, s)) or 0)
+    )
+    if explicit_etage_levels:
+        level_names.extend(explicit_etage_levels)
+    elif nb_etages > 0:
         level_names.append(f"Étage courant" if nb_etages > 1 else "Étage 1")
     level_names.append("Terrasse")
 
@@ -3217,14 +3238,22 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                 'SOUS_SOL': 'Sous-Sol / Parking',
                 'RDC': 'Rez-de-Chaussée',
                 'ETAGES_1_7': 'Étages 1 à 7',
+                'ETAGE_COURANT': 'Étage courant',
                 'ETAGE_8': 'Étage 8',
                 'TERRASSE': 'Terrasse',
             }
+            import re as _re_lab
+            def _label_from_key(key):
+                if key in LEVEL_LABELS:
+                    return LEVEL_LABELS[key]
+                m = _re_lab.match(r'^ETAGE[_\-]?(\d+)$', str(key).upper())
+                if m:
+                    return f"Étage {int(m.group(1))}"
+                return str(key)
             for key, geom in dwg_geometry.items():
                 if isinstance(geom, dict) and len(geom.get('walls', [])) >= 5:
                     enriched = _ensure_axes(geom, nx, ny, px_m, py_m)
-                    label = LEVEL_LABELS.get(key, geom.get('label', key))
-                    dwg_levels[label] = enriched
+                    dwg_levels[_label_from_key(key)] = enriched
 
     el = rm.electrique
     pl = rm.plomberie
@@ -3281,10 +3310,14 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
             else:                       living.append(entry)
         return wet, living, service
 
-    # Build level list from project params
+    # Build level list from project params (auto-include sous-sol if geometry has it)
     nb_niv = p.get('nb_niveaux', 5)
+    has_soussol_geom = any(
+        ('sous' in str(k).lower() or 'parking' in str(k).lower())
+        for k in dwg_levels.keys()
+    )
     project_levels = []
-    if p.get('avec_sous_sol'):
+    if p.get('avec_sous_sol') or has_soussol_geom:
         project_levels.append("Sous-Sol")
     project_levels.append("RDC")
     nb_et = nb_niv - len(project_levels) - 1  # -1 for terrasse
@@ -4491,8 +4524,18 @@ def generer_plans_structure_dxf(output_path, resultats=None, params=None, dwg_ge
     # Normalize DWG geometry to levels
     LEVEL_LABELS = {
         'SOUS_SOL': 'Sous-Sol', 'RDC': 'Rez-de-Chaussée',
-        'ETAGES_1_7': 'Étage courant', 'ETAGE_8': 'Étage 8', 'TERRASSE': 'Terrasse',
+        'ETAGES_1_7': 'Étage courant', 'ETAGE_COURANT': 'Étage courant',
+        'ETAGE_8': 'Étage 8', 'TERRASSE': 'Terrasse',
     }
+    import re as _re_lab2
+    def _label_from_key(key):
+        if key in LEVEL_LABELS:
+            return LEVEL_LABELS[key]
+        m = _re_lab2.match(r'^ETAGE[_\-]?(\d+)$', str(key).upper())
+        if m:
+            return f"Étage {int(m.group(1))}"
+        return str(key)
+
     dwg_levels = {}
     if dwg_geometry:
         if 'walls' in dwg_geometry:
@@ -4502,15 +4545,25 @@ def generer_plans_structure_dxf(output_path, resultats=None, params=None, dwg_ge
             for key, geom in dwg_geometry.items():
                 if isinstance(geom, dict) and len(geom.get('walls', [])) >= 5:
                     enriched = _ensure_axes(geom, nx, ny, px_m, py_m)
-                    dwg_levels[LEVEL_LABELS.get(key, key)] = enriched
+                    dwg_levels[_label_from_key(key)] = enriched
 
+    has_soussol_geom = any(
+        ('sous' in str(k).lower() or 'parking' in str(k).lower())
+        for k in dwg_levels.keys()
+    )
     level_names = []
-    if p.get("avec_sous_sol"):
+    if p.get("avec_sous_sol") or has_soussol_geom:
         level_names.append("Sous-Sol")
     level_names.append("RDC")
     nb_niv = p.get("nb_niveaux", len(r.poteaux))
     nb_etages = nb_niv - len(level_names)
-    if nb_etages > 0:
+    explicit_etage_levels = sorted(
+        [k for k in dwg_levels.keys() if k.startswith('Étage ') and k != 'Étage courant'],
+        key=lambda s: int(''.join(filter(str.isdigit, s)) or 0)
+    )
+    if explicit_etage_levels:
+        level_names.extend(explicit_etage_levels)
+    elif nb_etages > 0:
         level_names.append("Étage courant")
     level_names.append("Terrasse")
 
@@ -4708,20 +4761,39 @@ def generer_plans_mep_dxf(output_path, resultats_mep=None, resultats_structure=N
         else:
             LEVEL_LABELS = {
                 'SOUS_SOL': 'Sous-Sol', 'RDC': 'Rez-de-Chaussée',
-                'ETAGES_1_7': 'Étages 1 à 7', 'ETAGE_8': 'Étage 8', 'TERRASSE': 'Terrasse',
+                'ETAGES_1_7': 'Étages 1 à 7', 'ETAGE_COURANT': 'Étage courant',
+                'ETAGE_8': 'Étage 8', 'TERRASSE': 'Terrasse',
             }
+            import re as _re_lab3
+            def _label_from_key(key):
+                if key in LEVEL_LABELS:
+                    return LEVEL_LABELS[key]
+                m = _re_lab3.match(r'^ETAGE[_\-]?(\d+)$', str(key).upper())
+                if m:
+                    return f"Étage {int(m.group(1))}"
+                return str(key)
             for key, geom in dwg_geometry.items():
                 if isinstance(geom, dict) and len(geom.get('walls', [])) >= 5:
                     enriched = _ensure_axes(geom, nx, ny, px_m, py_m)
-                    dwg_levels[LEVEL_LABELS.get(key, key)] = enriched
+                    dwg_levels[_label_from_key(key)] = enriched
 
+    has_soussol_geom = any(
+        ('sous' in str(k).lower() or 'parking' in str(k).lower())
+        for k in dwg_levels.keys()
+    )
     level_names = []
-    if p.get('avec_sous_sol'):
+    if p.get('avec_sous_sol') or has_soussol_geom:
         level_names.append("Sous-Sol")
     level_names.append("RDC")
     nb_niv = p.get("nb_niveaux", 5)
     nb_et = nb_niv - len(level_names) - 1
-    if nb_et > 0:
+    explicit_etage_levels = sorted(
+        [k for k in dwg_levels.keys() if k.startswith('Étage ') and k != 'Étage courant'],
+        key=lambda s: int(''.join(filter(str.isdigit, s)) or 0)
+    )
+    if explicit_etage_levels:
+        level_names.extend(explicit_etage_levels)
+    elif nb_et > 0:
         level_names.append("Étage courant")
     level_names.append("Terrasse")
 

@@ -408,22 +408,41 @@ async def parse_fichier(
             except Exception as e:
                 logger.warning(f"Failed to cache archi PDF: {e}")
             # Try extracting geometry from PDF — cascade:
-            # 1. CV pipeline (OpenCV + Claude Vision) — best quality
+            # 0. PER-PAGE CV (best for multi-page PDFs — one geom per level)
+            # 1. CV pipeline single-page (OpenCV + Claude Vision)
             # 2. dwg_converter.pdf_to_geometry (vector extraction)
-            # 3. extract_pdf_geometry (fallback vector)
+            # 3. extract_pdf_geometry (fallback vector, supports multi-page)
             if not result.get("dwg_geometry"):
-                # Primary: CV pipeline (OpenCV + Vision)
+                # Primary: per-page CV (each page becomes a level)
                 try:
-                    from cv_geometry_extractor import extract_geometry_from_pdf_cv
-                    cv_geom = extract_geometry_from_pdf_cv(tmp_path, use_vision=True)
-                    if cv_geom and len(cv_geom.get('walls', [])) >= 5:
-                        result["dwg_geometry"] = cv_geom
-                        logger.info("PDF geometry (CV pipeline): %d walls, %d rooms, quality=%s",
-                                    len(cv_geom.get('walls', [])),
-                                    len(cv_geom.get('rooms', [])),
-                                    cv_geom.get('_cv_meta', {}).get('quality', '?'))
+                    from cv_geometry_extractor import extract_geometry_per_page_cv
+                    multi_geom = extract_geometry_per_page_cv(tmp_path, use_vision=True)
+                    if multi_geom:
+                        # If dict of levels (multi-page), use as-is
+                        if 'walls' not in multi_geom:
+                            result["dwg_geometry"] = multi_geom
+                            logger.info("PDF per-page CV: %d levels → %s",
+                                        len(multi_geom), sorted(multi_geom.keys()))
+                        elif len(multi_geom.get('walls', [])) >= 5:
+                            result["dwg_geometry"] = multi_geom
+                            logger.info("PDF per-page CV (single): %d walls",
+                                        len(multi_geom.get('walls', [])))
                 except Exception as e:
-                    logger.warning("CV geometry extraction failed: %s", e)
+                    logger.warning("Per-page CV extraction failed: %s", e)
+
+                # Fallback to single-page CV if per-page produced nothing
+                if not result.get("dwg_geometry"):
+                    try:
+                        from cv_geometry_extractor import extract_geometry_from_pdf_cv
+                        cv_geom = extract_geometry_from_pdf_cv(tmp_path, use_vision=True)
+                        if cv_geom and len(cv_geom.get('walls', [])) >= 5:
+                            result["dwg_geometry"] = cv_geom
+                            logger.info("PDF geometry (CV pipeline): %d walls, %d rooms, quality=%s",
+                                        len(cv_geom.get('walls', [])),
+                                        len(cv_geom.get('rooms', [])),
+                                        cv_geom.get('_cv_meta', {}).get('quality', '?'))
+                    except Exception as e:
+                        logger.warning("CV geometry extraction failed: %s", e)
 
                 # Fallback 1: dwg_converter.pdf_to_geometry (vector)
                 if not result.get("dwg_geometry"):
@@ -579,24 +598,55 @@ async def _parse_multi_fast(saved_files, nb_niveaux, ville, beton):
     for i, (filename, filepath, explicit_label) in enumerate(sorted_files):
         dxf_path = None
         try:
-            # Convert to DXF
+            ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+
+            # ── PDF path: per-page extraction so multi-page PDFs add multiple levels
+            if ext == 'pdf':
+                # Extract params from biggest PDF
+                if i == 0:
+                    from parse_plans import extraire_params
+                    main_result = extraire_params(filepath)
+                # Per-page CV → dict of levels (or flat geom)
+                try:
+                    from cv_geometry_extractor import extract_geometry_per_page_cv
+                    pdf_multi = extract_geometry_per_page_cv(filepath, use_vision=True)
+                except Exception as e:
+                    logger.warning(f"  {filename} per-page CV failed: {e}")
+                    pdf_multi = None
+                if pdf_multi:
+                    if 'walls' in pdf_multi:
+                        # Single page only — classify by filename or explicit label
+                        level_key = explicit_label or _classify_level_from_name(filename, len(dwg_geometry))
+                        pdf_multi['label'] = filename.rsplit('.', 1)[0]
+                        # Don't overwrite an existing better level
+                        if level_key not in dwg_geometry or len(pdf_multi.get('walls', [])) > len(dwg_geometry[level_key].get('walls', [])):
+                            dwg_geometry[level_key] = pdf_multi
+                            logger.info(f"  {level_key} (PDF): {len(pdf_multi.get('walls',[]))} walls")
+                    else:
+                        # Multi-level dict — merge each page
+                        for plvl, pgeom in pdf_multi.items():
+                            pgeom['label'] = f"{filename.rsplit('.',1)[0]} — {plvl}"
+                            if plvl not in dwg_geometry or len(pgeom.get('walls', [])) > len(dwg_geometry[plvl].get('walls', [])):
+                                dwg_geometry[plvl] = pgeom
+                                logger.info(f"  {plvl} (PDF p.{pgeom.get('_cv_meta',{}).get('source_page_idx','?')}): {len(pgeom.get('walls',[]))} walls")
+                continue
+
+            # ── DWG/DXF path: convert to DXF, extract via ezdxf
             dxf_path = convert_to_dxf(filepath, ville)
             if not dxf_path:
                 logger.warning(f"  {filename}: DXF conversion failed")
                 continue
-
-            # Extract geometry via ezdxf
             dxf_geom = _extract_dxf_geometry(dxf_path)
-
-            # First file (biggest) → extract params too
             if i == 0:
                 from parse_plans import extraire_params
                 main_result = extraire_params(dxf_path)
-
             if dxf_geom:
                 level_key = explicit_label or _classify_level_from_name(filename, i)
                 dxf_geom['label'] = filename.rsplit('.', 1)[0]
-                dwg_geometry[level_key] = dxf_geom
+                if level_key in dwg_geometry and len(dxf_geom.get('walls', [])) <= len(dwg_geometry[level_key].get('walls', [])):
+                    pass  # keep existing richer geom
+                else:
+                    dwg_geometry[level_key] = dxf_geom
                 walls = len(dxf_geom.get('walls', []))
                 rooms = len(dxf_geom.get('rooms', []))
                 logger.info(f"  {level_key}: {walls} walls, {rooms} rooms")
