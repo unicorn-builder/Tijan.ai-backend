@@ -420,10 +420,18 @@ async def parse_fichier(
                     if multi_geom:
                         # If dict of levels (multi-page), use as-is
                         if 'walls' not in multi_geom:
-                            result["dwg_geometry"] = multi_geom
-                            logger.info("PDF per-page CV: %d levels → %s",
-                                        len(multi_geom), sorted(multi_geom.keys()))
-                        elif len(multi_geom.get('walls', [])) >= 5:
+                            # Require at least one level with usable geometry,
+                            # else fall through to the older fallback chain.
+                            usable = sum(1 for v in multi_geom.values()
+                                         if isinstance(v, dict) and len(v.get('walls', [])) >= 3)
+                            if usable >= 1:
+                                result["dwg_geometry"] = multi_geom
+                                logger.info("PDF per-page CV: %d levels (%d usable) → %s",
+                                            len(multi_geom), usable, sorted(multi_geom.keys()))
+                            else:
+                                logger.info("Per-page CV produced %d levels but none usable — falling through",
+                                            len(multi_geom))
+                        elif len(multi_geom.get('walls', [])) >= 3:
                             result["dwg_geometry"] = multi_geom
                             logger.info("PDF per-page CV (single): %d walls",
                                         len(multi_geom.get('walls', [])))

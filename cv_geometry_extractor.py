@@ -1017,7 +1017,9 @@ def extract_geometry_per_page_cv(pdf_path: str, use_vision: bool = True,
         except Exception as e:
             logger.warning(f"CV page {i} failed: {e}")
             continue
-        if not geom or len(geom.get('walls', [])) < 5:
+        # Keep any page with at least a few walls — better than nothing.
+        # Tighter gates downstream (>=3) decide whether to render or skip.
+        if not geom or len(geom.get('walls', [])) < 3:
             continue
 
         # Classify by text first, then index

@@ -1848,9 +1848,12 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
     nb_niv = p.get("nb_niveaux", len(r.poteaux))
     he = p.get("hauteur_etage_m", 3.0)
 
-    # Normalize dwg_geometry to level dict — with axis inference
+    # Normalize dwg_geometry to level dict — with axis inference.
+    # IMPORTANT: keys here MUST match the strings used in `level_names` below
+    # (RDC, Étage courant, Étage N, Sous-Sol, Terrasse) — otherwise the per-page
+    # geometry is silently dropped and only the parametric grid is rendered.
     LEVEL_LABELS = {
-        'SOUS_SOL': 'Sous-Sol', 'RDC': 'Rez-de-Chaussée',
+        'SOUS_SOL': 'Sous-Sol', 'RDC': 'RDC',
         'ETAGES_1_7': 'Étage courant', 'ETAGE_COURANT': 'Étage courant',
         'ETAGE_8': 'Étage 8', 'TERRASSE': 'Terrasse',
     }
@@ -1864,15 +1867,25 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
         return str(key)
 
     dwg_levels = {}
+    _page_geoms = []  # PAGE_<i> fallback geometries (text classification failed)
     if dwg_geometry:
         if 'walls' in dwg_geometry:
             enriched = _ensure_axes(dwg_geometry, nx, ny, px_m, py_m)
             dwg_levels = {'Étage courant': enriched}
         else:
             for key, geom in dwg_geometry.items():
-                if isinstance(geom, dict) and len(geom.get('walls', [])) >= 5:
+                if isinstance(geom, dict) and len(geom.get('walls', [])) >= 3:
                     enriched = _ensure_axes(geom, nx, ny, px_m, py_m)
-                    dwg_levels[_label_from_key(key)] = enriched
+                    label = _label_from_key(key)
+                    if str(key).upper().startswith('PAGE_'):
+                        _page_geoms.append((str(key), enriched))
+                    else:
+                        dwg_levels[label] = enriched
+            # If text classification failed (only PAGE_* keys), seed Étage courant
+            # with the richest PAGE_* geometry so downstream lookups succeed.
+            if not dwg_levels and _page_geoms:
+                _page_geoms.sort(key=lambda kv: -len(kv[1].get('walls', [])))
+                dwg_levels['Étage courant'] = _page_geoms[0][1]
 
     # Build level list — auto-detect sous-sol from geometry if user didn't flag it
     has_soussol_geom = any(
@@ -3234,10 +3247,11 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
             dwg_levels = {'Étage courant': enriched}
         else:
             # Multi-level dict
+            # Keys must match level_names used downstream (RDC, Étage courant, …)
             LEVEL_LABELS = {
-                'SOUS_SOL': 'Sous-Sol / Parking',
-                'RDC': 'Rez-de-Chaussée',
-                'ETAGES_1_7': 'Étages 1 à 7',
+                'SOUS_SOL': 'Sous-Sol',
+                'RDC': 'RDC',
+                'ETAGES_1_7': 'Étage courant',
                 'ETAGE_COURANT': 'Étage courant',
                 'ETAGE_8': 'Étage 8',
                 'TERRASSE': 'Terrasse',
@@ -3250,10 +3264,17 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
                 if m:
                     return f"Étage {int(m.group(1))}"
                 return str(key)
+            _page_geoms = []
             for key, geom in dwg_geometry.items():
-                if isinstance(geom, dict) and len(geom.get('walls', [])) >= 5:
+                if isinstance(geom, dict) and len(geom.get('walls', [])) >= 3:
                     enriched = _ensure_axes(geom, nx, ny, px_m, py_m)
-                    dwg_levels[_label_from_key(key)] = enriched
+                    if str(key).upper().startswith('PAGE_'):
+                        _page_geoms.append((str(key), enriched))
+                    else:
+                        dwg_levels[_label_from_key(key)] = enriched
+            if not dwg_levels and _page_geoms:
+                _page_geoms.sort(key=lambda kv: -len(kv[1].get('walls', [])))
+                dwg_levels['Étage courant'] = _page_geoms[0][1]
 
     el = rm.electrique
     pl = rm.plomberie
