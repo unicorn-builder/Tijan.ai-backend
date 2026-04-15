@@ -79,54 +79,61 @@ def _cartouche(c, w, h, p, titre, pg, total, ech="1/100"):
 
 def _cartouche_pro(c, w, h, p, titre, pg, total, lot_label="", ech="1/100",
                    drawing_no=None, project_no=None, phase="APD"):
-    """Professional BET-style cartouche (Designed/Drawn/Checked + Project/Drawing No)."""
-    cw, ch_ = 180*mm, 55*mm
-    cx = w - cw - 8*mm; cy = 6*mm
+    """Professional BET-style cartouche (Designed/Drawn/Checked + Project/Drawing No).
+
+    Sized so it fits entirely within the reserved bottom strip (mb=58mm in
+    _grid_layout / _dwg_layout / _render_pdf_background). Do not make this
+    taller than ~50mm without bumping those margins — otherwise the
+    cartouche overlaps the plan drawing area."""
+    cw, ch_ = 180*mm, 42*mm
+    cx = w - cw - 10*mm; cy = 8*mm
     c.setFillColor(BLANC); c.setStrokeColor(NOIR); c.setLineWidth(0.8)
     c.rect(cx, cy, cw, ch_, fill=1, stroke=1)
 
-    # Outer thick rule + inner thin rule for a proper drawing-border feel
+    # Three horizontal bands — proportions tuned for the 42mm-tall cartouche.
+    # top band (branding + project name + scale)    → ~17mm tall
+    # middle band (sheet title + phase)             → ~14mm tall
+    # bottom band (designed/drawn/checked)          → ~11mm tall
     c.setLineWidth(0.3)
-    # Horizontal bands
-    hb1 = cy + ch_ * 0.70   # top band (branding / project name / scale row)
-    hb2 = cy + ch_ * 0.40   # title band
-    hb3 = cy + ch_ * 0.20   # designed/drawn/checked band
+    hb1 = cy + ch_ * 0.60
+    hb2 = cy + ch_ * 0.28
     c.line(cx, hb1, cx+cw, hb1)
     c.line(cx, hb2, cx+cw, hb2)
-    c.line(cx, hb3, cx+cw, hb3)
     # Column dividers
     c1 = cx + 42*mm        # after Tijan branding
-    c2 = cx + 112*mm       # before scale/sheet column
+    c2 = cx + 124*mm       # before scale/sheet column
     c.line(c1, cy, c1, cy+ch_)
     c.line(c2, cy, c2, cy+ch_)
     # Designed/Drawn/Checked sub-columns within bottom band
     sub_w = (c2 - c1) / 3.0
-    c.line(c1 + sub_w, cy, c1 + sub_w, hb3)
-    c.line(c1 + 2*sub_w, cy, c1 + 2*sub_w, hb3)
+    c.line(c1 + sub_w, cy, c1 + sub_w, hb2)
+    c.line(c1 + 2*sub_w, cy, c1 + 2*sub_w, hb2)
 
-    # ─ Top-left: Tijan branding ─
+    # ─ Top-left: Tijan branding + contact stacked in the left column ─
+    top_y = cy + ch_ - 6.5*mm
     c.setFillColor(VERT); c.setFont("Helvetica-Bold", 11)
-    c.drawString(cx+3*mm, cy+ch_-10*mm, "TIJAN AI")
-    c.setFillColor(GRIS3); c.setFont("Helvetica", 5.5)
-    c.drawString(cx+3*mm, cy+ch_-14.5*mm, "Automated Engineering Bureau")
-    c.setFillColor(NOIR); c.setFont("Helvetica", 5.5)
-    c.drawString(cx+3*mm, hb2+1.5*mm, "support@tijan.ai")
-    c.drawString(cx+3*mm, hb3+1.5*mm, "www.tijan.ai")
+    c.drawString(cx+3*mm, top_y, "TIJAN AI")
+    c.setFillColor(GRIS3); c.setFont("Helvetica", 5.2)
+    c.drawString(cx+3*mm, top_y - 5*mm, "Automated Engineering Bureau")
+    c.setFillColor(NOIR); c.setFont("Helvetica", 5.2)
+    c.drawString(cx+3*mm, hb1 - 5*mm, "support@tijan.ai")
+    c.drawString(cx+3*mm, hb2 - 4*mm, "www.tijan.ai")
     c.setFillColor(GRIS3); c.setFont("Helvetica", 5)
-    c.drawString(cx+3*mm, cy+2*mm, f"{datetime.now().strftime('%d/%m/%Y')}")
+    c.drawString(cx+3*mm, cy+2.5*mm, f"{datetime.now().strftime('%d/%m/%Y')}")
 
-    # ─ Middle-top: Project name + city ─
+    # ─ Middle-top: Project name + city (in top band, under the middle col) ─
     c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 9)
-    c.drawString(c1+3*mm, cy+ch_-10*mm, (p.get("nom") or "Projet")[:32])
+    c.drawString(c1+3*mm, top_y, (p.get("nom") or "Projet")[:32])
     c.setFillColor(GRIS2); c.setFont("Helvetica", 6)
-    c.drawString(c1+3*mm, cy+ch_-14.5*mm,
+    c.drawString(c1+3*mm, top_y - 5*mm,
                  f"{p.get('ville','Dakar')}, {p.get('pays','Sénégal')}")
 
-    # ─ Middle: Sheet title + lot label ─
+    # ─ Middle band: Sheet title + lot label ─
+    title_y = (hb1 + hb2) / 2 + 1*mm
     c.setFillColor(VERT); c.setFont("Helvetica-Bold", 8)
-    c.drawString(c1+3*mm, hb2+3*mm, (titre or "")[:60])
+    c.drawString(c1+3*mm, title_y, (titre or "")[:60])
     c.setFillColor(GRIS2); c.setFont("Helvetica", 5.5)
-    c.drawString(c1+3*mm, hb2-3*mm, (lot_label or "")[:70])
+    c.drawString(c1+3*mm, title_y - 5*mm, (lot_label or "")[:70])
 
     # ─ Bottom band: Designed / Drawn / Checked ─
     labels = [("DESIGNED", "TIJAN AI"),
@@ -135,33 +142,33 @@ def _cartouche_pro(c, w, h, p, titre, pg, total, lot_label="", ech="1/100",
     for i, (lbl, val) in enumerate(labels):
         xs = c1 + i * sub_w
         c.setFillColor(GRIS3); c.setFont("Helvetica", 4.5)
-        c.drawString(xs+2*mm, hb3-3*mm, lbl)
+        c.drawString(xs+2*mm, hb2 - 4*mm, lbl)
         c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 6.5)
         c.drawString(xs+2*mm, cy+2.5*mm, val)
 
-    # ─ Right column: Scale / Project No / Drawing No / Sheet ─
+    # ─ Right column: Scale / Phase / Project No / Drawing No / Sheet ─
     c.setFillColor(GRIS3); c.setFont("Helvetica", 4.5)
-    c.drawString(c2+2*mm, cy+ch_-5*mm, "SCALE")
+    c.drawString(c2+2*mm, top_y + 0.5*mm, "SCALE")
     c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 8)
-    c.drawString(c2+2*mm, cy+ch_-10*mm, ech)
+    c.drawString(c2+2*mm, top_y - 4*mm, ech)
     c.setFillColor(GRIS3); c.setFont("Helvetica", 4.5)
-    c.drawString(c2+2*mm, cy+ch_-14*mm, f"PHASE: {phase}")
+    c.drawString(c2+2*mm, hb1 - 3.5*mm, f"PHASE: {phase}")
 
     c.setFillColor(GRIS3); c.setFont("Helvetica", 4.5)
-    c.drawString(c2+2*mm, hb2-3*mm, "PROJECT No")
+    c.drawString(c2+2*mm, title_y + 1.5*mm, "PROJECT No")
     c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 7)
-    c.drawString(c2+2*mm, hb2-7.5*mm,
+    c.drawString(c2+2*mm, title_y - 3*mm,
                  (project_no or f"TJN-{(p.get('nom','PRJ') or 'PRJ')[:6].upper().replace(' ','_')}"))
 
     c.setFillColor(GRIS3); c.setFont("Helvetica", 4.5)
-    c.drawString(c2+2*mm, hb3-3*mm, "DRAWING No")
+    c.drawString(c2+2*mm, hb2 - 4*mm, "DRAWING No")
     c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 7)
-    c.drawString(c2+2*mm, hb3-7.5*mm, (drawing_no or f"PL-{pg:03d}"))
+    c.drawString(c2+2*mm, cy + 5*mm, (drawing_no or f"PL-{pg:03d}"))
 
-    c.setFillColor(GRIS3); c.setFont("Helvetica", 4.5)
-    c.drawString(c2+2*mm, cy+5*mm, "SHEET")
-    c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 8)
-    c.drawString(c2+2*mm, cy+1.5*mm, f"{pg} / {total}")
+    c.setFillColor(GRIS3); c.setFont("Helvetica", 4.3)
+    c.drawString(c2+28*mm, hb2 - 4*mm, "SHEET")
+    c.setFillColor(NOIR); c.setFont("Helvetica-Bold", 7.5)
+    c.drawString(c2+28*mm, cy + 5*mm, f"{pg} / {total}")
 
 
 def _build_grid(p):
@@ -175,7 +182,7 @@ def _build_grid(p):
     return nx, ny, px_m, py_m
 
 
-def _grid_layout(w, h, nx, ny, px_m, py_m, ml=28*mm, mb=48*mm, mr=58*mm, mt=22*mm):
+def _grid_layout(w, h, nx, ny, px_m, py_m, ml=28*mm, mb=58*mm, mr=58*mm, mt=22*mm):
     """Calculate grid position and scale — copie de v4."""
     dw = w - ml - mr
     dh = h - mb - mt
@@ -589,7 +596,7 @@ def _exterior_walls_only(dwg, bounds=None, edge_tol=None):
     return out
 
 
-def _dwg_layout(w, h, dwg, ml=28*mm, mb=48*mm, mr=58*mm, mt=22*mm):
+def _dwg_layout(w, h, dwg, ml=28*mm, mb=58*mm, mr=58*mm, mt=22*mm):
     """Calculate DWG transform to fit on page with generous margins."""
     bounds = _dwg_bounds(dwg)
     if not bounds:
@@ -1098,7 +1105,7 @@ def _legend_pro(c, w, h, items, title="LÉGENDE"):
     box_w_pt = 3*mm + 14 + 3 + max(max_label_w, title_w) + 4*mm
     box_w_pt = max(box_w_pt, 68*mm)   # keep a minimum so small lists still read well
     box_w_pt = min(box_w_pt, 118*mm)  # avoid overflowing the page
-    lx = w - box_w_pt - 2*mm; ly = h - 25*mm
+    lx = w - box_w_pt - 10*mm; ly = h - 25*mm
     leg_h = min(len(items) * LINE_STEP + 18, 200*mm)
     c.setFillColor(BLANC); c.setStrokeColor(NOIR); c.setLineWidth(0.5)
     c.rect(lx, ly - leg_h, box_w_pt, leg_h, fill=1, stroke=1)
@@ -1566,7 +1573,7 @@ def _draw_column_schedule(c, x, y, poteaux, nx, ny, px_m, py_m):
 # ══════════════════════════════════════════
 
 def _render_pdf_background(c, archi_pdf_path, page_idx, w, h,
-                            ml=28*mm, mb=48*mm, mr=58*mm, mt=22*mm,
+                            ml=28*mm, mb=58*mm, mr=58*mm, mt=22*mm,
                             opacity=0.18, dpi=150, grayscale=True):
     """Render a page from the architectural PDF as a background image.
 
@@ -2099,10 +2106,10 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
             (BLEU, 0.6, "COUPE B-B — Section colonne"),
         ], "ÉLÉMENTS STRUCTURELS")
 
-        # Notes techniques box
-        _draw_notes_techniques(c, 14*mm, 42*mm, beton, acier, r.fck_MPa, r.fyk_MPa,
+        # Notes techniques box — sits in bottom-left strip, clears grid (mb=58mm) and cartouche (y<=50mm)
+        _draw_notes_techniques(c, 14*mm, 10*mm, beton, acier, r.fck_MPa, r.fyk_MPa,
                               r.charge_G_kNm2, r.charge_Q_kNm2, r.sismique.zone)
-        # Column schedule nomenclature
+        # Column schedule nomenclature — left of cartouche (x<~185mm), below grid
         _draw_column_schedule(c, 85*mm, 42*mm, r.poteaux, nx, ny, px_m, py_m)
         _cartouche_pro(c, w, h, p, f"COFFRAGE — {level_name}", page, total_pages, "STRUCTURE BÉTON ARMÉ")
         c.showPage()
