@@ -544,6 +544,51 @@ def _dwg_bounds(dwg):
     return min(xs), min(ys), max(xs), max(ys)
 
 
+def _exterior_walls_only(dwg, bounds=None, edge_tol=None):
+    """Filter walls to keep only exterior/perimeter ones.
+
+    Interior partitions (rooms, corridors) have both endpoints far from the
+    building envelope. Exterior walls sit against the bounding box edges.
+
+    A wall is kept if at least one of its endpoints is within `edge_tol` of
+    any bbox edge. `edge_tol` defaults to ~8% of the smallest bbox dimension
+    (clamped between 500 and 3000 for mm coords), which empirically captures
+    the perimeter ring without swallowing interior walls.
+
+    Used for TERRASSE rendering — a roof-slab plan must show emprise only,
+    not interior residential partitions that don't exist on the roof.
+    """
+    b = bounds or _dwg_bounds(dwg)
+    if not b:
+        return list(dwg.get('walls', []))
+    x0, y0, x1, y1 = b
+    dx = max(1.0, x1 - x0); dy = max(1.0, y1 - y0)
+    if edge_tol is None:
+        edge_tol = min(dx, dy) * 0.08
+        # Clamp (coords could be mm, m, or PDF points)
+        if edge_tol > 3000: edge_tol = 3000.0
+        if edge_tol < 500 and min(dx, dy) > 10000:
+            edge_tol = 500.0
+
+    def _on_edge(px, py):
+        return (
+            abs(px - x0) <= edge_tol or abs(px - x1) <= edge_tol or
+            abs(py - y0) <= edge_tol or abs(py - y1) <= edge_tol
+        )
+
+    out = []
+    for w in dwg.get('walls', []):
+        if w.get('type') == 'line':
+            s = w.get('start'); e = w.get('end')
+            if s and e and (_on_edge(s[0], s[1]) or _on_edge(e[0], e[1])):
+                out.append(w)
+        elif w.get('type') == 'polyline':
+            pts = w.get('points') or []
+            if any(_on_edge(p[0], p[1]) for p in pts):
+                out.append(w)
+    return out
+
+
 def _dwg_layout(w, h, dwg, ml=28*mm, mb=48*mm, mr=58*mm, mt=22*mm):
     """Calculate DWG transform to fit on page with generous margins."""
     bounds = _dwg_bounds(dwg)
@@ -1863,13 +1908,19 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
                 '_synth_level': 'sous_sol',
             }
         if is_terrasse_level and lvl_geom:
+            _tb = _dwg_bounds(lvl_geom)
+            # Keep ONLY exterior/perimeter walls — a roof-slab has no interior
+            # partitions. Interior walls (rooms, corridors) would make the
+            # terrasse look identical to the RDC / étage courant.
+            _ext_walls = _exterior_walls_only(lvl_geom, bounds=_tb)
             lvl_geom = {
-                'walls': list(lvl_geom.get('walls', [])),  # keep real emprise
+                'walls': _ext_walls,
                 'windows': [], 'doors': [], 'rooms': [],
                 'axes_x': lvl_geom.get('axes_x', []),
                 'axes_y': lvl_geom.get('axes_y', []),
-                '_terrace_bounds': _dwg_bounds(lvl_geom),
+                '_terrace_bounds': _tb,
                 '_cv_meta': lvl_geom.get('_cv_meta'),
+                '_synth_level': 'terrasse',
             }
         has_geom = lvl_geom and (len(lvl_geom.get('walls', [])) >= 5 or is_terrasse_level)
 
@@ -3249,14 +3300,16 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
         if not base:
             return base
         lab = str(level_label).lower()
-        # Terrasse / toiture: real emprise + slab + acrotère (no interior rooms)
+        # Terrasse / toiture: exterior walls only (emprise) + slab + acrotère
+        # Interior partitions don't exist on a roof-terrasse.
         if lab.startswith(('terrasse','toiture','toit')):
+            _tb = _dwg_bounds(base)
             return {
-                'walls': list(base.get('walls', [])),
+                'walls': _exterior_walls_only(base, bounds=_tb),
                 'windows': [], 'doors': [], 'rooms': [],
                 'axes_x': base.get('axes_x', []),
                 'axes_y': base.get('axes_y', []),
-                '_terrace_bounds': _dwg_bounds(base),
+                '_terrace_bounds': _tb,
                 '_cv_meta': base.get('_cv_meta'),
                 '_synth_level': 'terrasse',
             }
