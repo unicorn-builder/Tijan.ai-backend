@@ -1933,14 +1933,24 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
                 geom_for_layout = {'walls': [{'type': 'polyline',
                     'points': [(tb[0], tb[1]), (tb[2], tb[1]), (tb[2], tb[3]), (tb[0], tb[3])],
                     'closed': True}]}
-            dtx, dty, dsc, dgw, dgh = _dwg_layout(w, h, geom_for_layout)
+            # For terrasse, layout off the real walls (not the synthetic bbox rect)
+            # so we keep the true emprise of the building under the slab.
+            layout_geom = lvl_geom if (is_terrasse_level and lvl_geom.get('walls')) else geom_for_layout
+            dtx, dty, dsc, dgw, dgh = _dwg_layout(w, h, layout_geom)
             if dtx:
                 if is_terrasse_level and lvl_geom.get('_terrace_bounds'):
-                    # Dalle terrasse outline + acrotère (no interior architecture)
+                    # 1) Vraie emprise du bâtiment en gris clair (contexte architectural)
+                    if lvl_geom.get('walls'):
+                        c.saveState()
+                        c.setStrokeAlpha(0.45); c.setFillAlpha(0.45)
+                        _draw_dwg(c, lvl_geom, dtx, dty, sc=dsc)
+                        c.restoreState()
+                    # 2) Contour dalle (bbox) en noir épais par-dessus
                     bx0, by0, bx1, by1 = lvl_geom['_terrace_bounds']
                     c.saveState()
                     c.setStrokeColor(NOIR); c.setLineWidth(1.4)
                     c.rect(dtx(bx0), dty(by0), dtx(bx1)-dtx(bx0), dty(by1)-dty(by0), fill=0, stroke=1)
+                    # 3) Acrotère en pointillés orange
                     acr_off = 150
                     c.setStrokeColor(colors.HexColor("#FFA726")); c.setLineWidth(0.8); c.setDash(4, 2)
                     c.rect(dtx(bx0+acr_off), dty(by0+acr_off),
