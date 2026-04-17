@@ -1901,7 +1901,13 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
     if explicit_etage_levels:
         level_names.extend(explicit_etage_levels)
     elif nb_etages > 0:
-        level_names.append(f"Étage courant" if nb_etages > 1 else "Étage 1")
+        # Generate one coffrage page per floor — professional output requires
+        # individual pages even when the architecture is identical, because
+        # column loads and nomenclature differ by level.
+        # The geometry lookup (dwg_levels.get(name) or dwg_levels.get('Étage courant'))
+        # will reuse the same plan on each page.
+        for i in range(1, nb_etages + 1):
+            level_names.append(f"R+{i}")
     level_names.append("Terrasse")
 
     # per-level coffrage + (ferr INF + ferr SUP + coupe type dalle) + fondations + coupe bât + ferr poutre + ferr poteau
@@ -3342,7 +3348,10 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
     project_levels.append("RDC")
     nb_et = nb_niv - len(project_levels) - 1  # -1 for terrasse
     if nb_et > 0:
-        project_levels.append(f"Étage courant (1-{nb_et})" if nb_et > 1 else "Étage 1")
+        # Generate one page per floor — same geometry reused via fallback
+        # to 'Étage courant' in dwg_levels lookup downstream.
+        for i in range(1, nb_et + 1):
+            project_levels.append(f"R+{i}")
     project_levels.append("Terrasse")
 
     def _synth_level_geom(base, level_label):
@@ -3380,14 +3389,18 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
         # RDC / étage courant: keep full plan
         return base
 
-    # Map each level to its geometry (multi-DWG or reuse single)
-    if dwg_levels and len(dwg_levels) > 1:
-        level_list = list(dwg_levels.items())
-    else:
-        # Single geometry: synthesize a differentiated view per level so
-        # we don't render the same plan 4 times.
-        single_geom = list(dwg_levels.values())[0] if dwg_levels else None
-        level_list = [(name, _synth_level_geom(single_geom, name)) for name in project_levels]
+    # Map each level to its geometry — always iterate project_levels so every
+    # floor gets its own page.  Geometry lookup: exact match first, then
+    # 'Étage courant' fallback, then first available geometry.
+    _fallback_geom = (
+        dwg_levels.get('Étage courant')
+        or dwg_levels.get('RDC')
+        or (list(dwg_levels.values())[0] if dwg_levels else None)
+    )
+    level_list = []
+    for name in project_levels:
+        geom = dwg_levels.get(name) or _fallback_geom
+        level_list.append((name, _synth_level_geom(geom, name)))
 
     # Sub-lots with grouping: sub-lots sharing lot_label are on SAME page
     # 12 sous-lots × N niveaux = 1 page par sous-lot par niveau (lisible)
@@ -4589,7 +4602,8 @@ def generer_plans_structure_dxf(output_path, resultats=None, params=None, dwg_ge
     if explicit_etage_levels:
         level_names.extend(explicit_etage_levels)
     elif nb_etages > 0:
-        level_names.append("Étage courant")
+        for i in range(1, nb_etages + 1):
+            level_names.append(f"R+{i}")
     level_names.append("Terrasse")
 
     # Create DXF document
@@ -4819,7 +4833,8 @@ def generer_plans_mep_dxf(output_path, resultats_mep=None, resultats_structure=N
     if explicit_etage_levels:
         level_names.extend(explicit_etage_levels)
     elif nb_et > 0:
-        level_names.append("Étage courant")
+        for i in range(1, nb_et + 1):
+            level_names.append(f"R+{i}")
     level_names.append("Terrasse")
 
     if dwg_levels and len(dwg_levels) > 1:
