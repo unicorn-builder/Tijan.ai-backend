@@ -1968,9 +1968,7 @@ async def generate_plans_structure_dwg(params: ParamsProjet):
         from generate_plans_structure_mep import generer_plans_structure_dxf
         donnees = params_to_donnees(params)
         rs = calculer_structure(donnees)
-        dwg_geometry = params.dwg_geometry
-        if not dwg_geometry and params.urn:
-            dwg_geometry = _load_project_geometry(params.urn)
+        dwg_geometry = _resolve_geometry(params)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".dxf") as tmp:
             out_path = tmp.name
         generer_plans_structure_dxf(out_path, resultats=rs, params=params.dict(),
@@ -2008,9 +2006,7 @@ async def generate_plans_mep_dwg(params: ParamsProjet):
         donnees = params_to_donnees(params)
         rs = calculer_structure(donnees)
         rm = calculer_mep(donnees, rs)
-        dwg_geometry = params.dwg_geometry
-        if not dwg_geometry and params.urn:
-            dwg_geometry = _load_project_geometry(params.urn)
+        dwg_geometry = _resolve_geometry(params)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".dxf") as tmp:
             out_path = tmp.name
         generer_plans_mep_dxf(out_path, resultats_mep=rm, resultats_structure=rs,
