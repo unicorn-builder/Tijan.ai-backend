@@ -3446,20 +3446,44 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
 
     # Map each level to its geometry — always iterate project_levels so every
     # floor gets its own page.  Geometry lookup: exact match first, then
-    # 'Étage courant' fallback, then first available geometry.
-    # Robust fallback: Étage courant → RDC → highest étage → any geometry
-    _fallback_geom = dwg_levels.get('Étage courant') or dwg_levels.get('RDC')
-    if not _fallback_geom:
-        _etage_keys = sorted(
-            [k for k in dwg_levels if k.startswith('Étage ') or k.startswith('R+')],
-            key=lambda s: int(''.join(filter(str.isdigit, s)) or 0)
-        )
-        _fallback_geom = dwg_levels[_etage_keys[-1]] if _etage_keys else None
-    if not _fallback_geom and dwg_levels:
-        _fallback_geom = list(dwg_levels.values())[0]
+    # level-appropriate fallback (étage floors should NOT use RDC geometry).
+    _etage_keys_sorted = sorted(
+        [k for k in dwg_levels if k.startswith('Étage ') or k.startswith('R+')],
+        key=lambda s: int(''.join(filter(str.isdigit, s)) or 0)
+    )
+    # Separate fallbacks: étage geometry for upper floors, RDC for ground level
+    _etage_fallback = (
+        dwg_levels.get('Étage courant')
+        or (dwg_levels[_etage_keys_sorted[0]] if _etage_keys_sorted else None)
+    )
+    _rdc_fallback = dwg_levels.get('RDC') or dwg_levels.get('Rez-de-Chaussée')
+    _any_fallback = _etage_fallback or _rdc_fallback or (
+        list(dwg_levels.values())[0] if dwg_levels else None
+    )
+
+    def _pick_geom_for_level(name):
+        """Choose the best geometry for a given level name.
+        Étage levels prefer étage geometry (not RDC — different layout).
+        Sous-Sol/RDC prefer RDC geometry. Terrasse prefers last étage."""
+        # 1) Exact match always wins
+        exact = dwg_levels.get(name)
+        if exact:
+            return exact
+        ln = name.lower()
+        # 2) Étage levels: prefer étage geometry (apartments, not RDC amenities)
+        if any(ln.startswith(p) for p in ('r+', 'étage', 'etage')):
+            return _etage_fallback or _any_fallback
+        # 3) Terrasse: prefer last étage (closest layout for slab contour)
+        if ln.startswith(('terrasse', 'toiture', 'toit')):
+            if _etage_keys_sorted:
+                return dwg_levels[_etage_keys_sorted[-1]]
+            return _etage_fallback or _any_fallback
+        # 4) Sous-Sol / RDC: prefer RDC
+        return _rdc_fallback or _any_fallback
+
     level_list = []
     for name in project_levels:
-        geom = dwg_levels.get(name) or _fallback_geom
+        geom = _pick_geom_for_level(name)
         level_list.append((name, _synth_level_geom(geom, name)))
 
     # Sub-lots with grouping: sub-lots sharing lot_label are on SAME page
@@ -4916,20 +4940,33 @@ def generer_plans_mep_dxf(output_path, resultats_mep=None, resultats_structure=N
             level_names.append(f"R+{i}")
     level_names.append("Terrasse")
 
-    # Robust fallback for MEP DXF (same as other generators)
-    _fallback_geom_dxf = dwg_levels.get('Étage courant') or dwg_levels.get('RDC')
-    if not _fallback_geom_dxf:
-        _etk = sorted(
-            [k for k in dwg_levels if k.startswith('Étage ') or k.startswith('R+')],
-            key=lambda s: int(''.join(filter(str.isdigit, s)) or 0)
-        )
-        _fallback_geom_dxf = dwg_levels[_etk[-1]] if _etk else None
-    if not _fallback_geom_dxf and dwg_levels:
-        _fallback_geom_dxf = list(dwg_levels.values())[0]
+    # Level-aware fallback for MEP DXF (étage floors use étage geometry, not RDC)
+    _etk_dxf = sorted(
+        [k for k in dwg_levels if k.startswith('Étage ') or k.startswith('R+')],
+        key=lambda s: int(''.join(filter(str.isdigit, s)) or 0)
+    )
+    _etage_fb_dxf = (
+        dwg_levels.get('Étage courant')
+        or (dwg_levels[_etk_dxf[0]] if _etk_dxf else None)
+    )
+    _rdc_fb_dxf = dwg_levels.get('RDC') or dwg_levels.get('Rez-de-Chaussée')
+    _any_fb_dxf = _etage_fb_dxf or _rdc_fb_dxf or (
+        list(dwg_levels.values())[0] if dwg_levels else None
+    )
     level_list = []
     for name in level_names:
-        geom = dwg_levels.get(name) or _fallback_geom_dxf
-        level_list.append((name, geom))
+        exact = dwg_levels.get(name)
+        if exact:
+            level_list.append((name, exact))
+        else:
+            ln = name.lower()
+            if any(ln.startswith(p) for p in ('r+', 'étage', 'etage')):
+                level_list.append((name, _etage_fb_dxf or _any_fb_dxf))
+            elif ln.startswith(('terrasse', 'toiture', 'toit')):
+                fb = (dwg_levels[_etk_dxf[-1]] if _etk_dxf else _etage_fb_dxf) or _any_fb_dxf
+                level_list.append((name, fb))
+            else:
+                level_list.append((name, _rdc_fb_dxf or _any_fb_dxf))
 
     def _classify_rooms(rooms):
         wet, living, service = [], [], []
