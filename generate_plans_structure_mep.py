@@ -1495,11 +1495,15 @@ def _draw_chapeau_indicators(c, ox, oy, sc, nx, ny, px_m, py_m):
             c.line(xp + 1.5, yp - chapel_len/2, xp + 1.5, yp + chapel_len/2)
 
 
-def _draw_column_schedule(c, x, y, poteaux, nx, ny, px_m, py_m):
+def _draw_column_schedule(c, x, y, poteaux, nx, ny, px_m, py_m, level_idx=0):
     """Draw column nomenclature schedule on coffrage plan.
 
     Shows a table with: Rep. | Section | Niveau | NEd (kN) | NRd (kN) | Taux | Armatures
-    This professional table helps builders and inspectors identify column requirements.
+    Displays the column data for the CURRENT level (descente de charges varies by floor)
+    plus adjacent levels for comparison — an engineer expects heavier columns lower down.
+
+    Args:
+        level_idx: index into poteaux[] for the current floor (0=RDC, higher=upper floors)
     """
     from reportlab.platypus import Table, TableStyle
     from reportlab.lib import colors as rl_colors
@@ -1507,35 +1511,42 @@ def _draw_column_schedule(c, x, y, poteaux, nx, ny, px_m, py_m):
     if not poteaux or len(poteaux) == 0:
         return
 
-    # Get first level column data (representative)
-    pot0 = poteaux[0]
-    sec_mm = pot0.section_mm
-    nred_kn = pot0.NEd_kN if hasattr(pot0, 'NEd_kN') else 0
-    nrrd_kn = pot0.NRd_kN if hasattr(pot0, 'NRd_kN') else 0
-    taux = pot0.taux_armature_pct if hasattr(pot0, 'taux_armature_pct') else 0
-    nb_barres = pot0.nb_barres if hasattr(pot0, 'nb_barres') else 0
-    diam_mm = pot0.diametre_mm if hasattr(pot0, 'diametre_mm') else 14
+    # Clamp level_idx to valid range
+    level_idx = max(0, min(level_idx, len(poteaux) - 1))
 
-    # Calculate ratio
+    # Current level column data
+    pot_cur = poteaux[level_idx]
+    sec_mm = pot_cur.section_mm
+    nred_kn = pot_cur.NEd_kN if hasattr(pot_cur, 'NEd_kN') else 0
+    nrrd_kn = pot_cur.NRd_kN if hasattr(pot_cur, 'NRd_kN') else 0
+    taux = pot_cur.taux_armature_pct if hasattr(pot_cur, 'taux_armature_pct') else 0
+    nb_barres = pot_cur.nb_barres if hasattr(pot_cur, 'nb_barres') else 0
+    diam_mm = pot_cur.diametre_mm if hasattr(pot_cur, 'diametre_mm') else 14
     ratio = (nred_kn / nrrd_kn * 100) if nrrd_kn > 0 else 0
+    cur_label = pot_cur.niveau if hasattr(pot_cur, 'niveau') else f"N{level_idx}"
 
-    # Build table data — showing representative column + typical from each level
+    # Build table — current level highlighted, plus 1-2 adjacent levels for context
     data = [
         ["Rep.", "Section", "Niveau", "NEd", "NRd", "Ratio", "Armatures"],
-        ["P1-P" + str((nx+1)*(ny+1)), f"{sec_mm}×{sec_mm}", "RDC", f"{nred_kn:.0f}", f"{nrrd_kn:.0f}",
-         f"{ratio:.0f}%", f"{nb_barres}HA{diam_mm}"],
+        [f"P1-P{(nx+1)*(ny+1)}", f"{sec_mm}×{sec_mm}", cur_label, f"{nred_kn:.0f}",
+         f"{nrrd_kn:.0f}", f"{ratio:.0f}%", f"{nb_barres}HA{diam_mm}"],
     ]
 
-    # Add rows for other levels if available
-    for idx, pot_level in enumerate(poteaux[1:3], 1):  # Show up to 2 more levels
-        nred_l = pot_level.NEd_kN if hasattr(pot_level, 'NEd_kN') else nred_kn
-        nrrd_l = pot_level.NRd_kN if hasattr(pot_level, 'NRd_kN') else nrrd_kn
-        ratio_l = (nred_l / nrrd_l * 100) if nrrd_l > 0 else ratio
-        level_name = f"R+{idx}"
-        data.append(
-            ["(identique)", f"{sec_mm}×{sec_mm}", level_name, f"{nred_l:.0f}", f"{nrrd_l:.0f}",
-             f"{ratio_l:.0f}%", f"{nb_barres}HA{diam_mm}"]
-        )
+    # Show adjacent levels (one above, one below) for descente de charges context
+    for adj_idx in [level_idx - 1, level_idx + 1]:
+        if 0 <= adj_idx < len(poteaux):
+            pot_adj = poteaux[adj_idx]
+            sec_adj = pot_adj.section_mm
+            nred_adj = pot_adj.NEd_kN if hasattr(pot_adj, 'NEd_kN') else 0
+            nrrd_adj = pot_adj.NRd_kN if hasattr(pot_adj, 'NRd_kN') else 0
+            ratio_adj = (nred_adj / nrrd_adj * 100) if nrrd_adj > 0 else 0
+            nb_b_adj = pot_adj.nb_barres if hasattr(pot_adj, 'nb_barres') else nb_barres
+            dia_adj = pot_adj.diametre_mm if hasattr(pot_adj, 'diametre_mm') else diam_mm
+            adj_label = pot_adj.niveau if hasattr(pot_adj, 'niveau') else f"N{adj_idx}"
+            data.append(
+                ["—", f"{sec_adj}×{sec_adj}", adj_label, f"{nred_adj:.0f}",
+                 f"{nrrd_adj:.0f}", f"{ratio_adj:.0f}%", f"{nb_b_adj}HA{dia_adj}"]
+            )
 
     # Create table
     table = Table(data, colWidths=[16*mm, 16*mm, 14*mm, 12*mm, 12*mm, 12*mm, 18*mm])
@@ -1550,6 +1561,9 @@ def _draw_column_schedule(c, x, y, poteaux, nx, ny, px_m, py_m):
         ('BOTTOMPADDING', (0, 0), (-1, 0), 2),
         ('GRID', (0, 0), (-1, -1), 0.3, GRIS3),
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [BLANC, rl_colors.HexColor("#F1F8F1")]),
+        # Highlight current level row (row 1) with bold + accent background
+        ('BACKGROUND', (0, 1), (-1, 1), rl_colors.HexColor("#E8F5E9")),
+        ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
     ]))
 
     # Draw the table
@@ -1883,6 +1897,33 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
                 _page_geoms.sort(key=lambda kv: -len(kv[1].get('walls', [])))
                 dwg_levels['Étage courant'] = _page_geoms[0][1]
 
+    # ── Helper: robust geometry lookup with fallback chain ──
+    # When CV extraction produces per-floor keys (Étage 1, Étage 4, ...)
+    # instead of 'Étage courant', the fallback must search available keys.
+    def _best_geom(name=None):
+        """Find the best available geometry for a given level name.
+        Fallback chain: exact name → 'Étage courant' → RDC → last étage → any."""
+        if name and dwg_levels.get(name):
+            return dwg_levels[name]
+        if dwg_levels.get('Étage courant'):
+            return dwg_levels['Étage courant']
+        if dwg_levels.get('RDC'):
+            return dwg_levels['RDC']
+        if dwg_levels.get('Rez-de-Chaussée'):
+            return dwg_levels['Rez-de-Chaussée']
+        # Try highest étage floor (last in sorted order)
+        etage_keys = sorted(
+            [k for k in dwg_levels if k.startswith('Étage ') or k.startswith('R+')],
+            key=lambda s: int(''.join(filter(str.isdigit, s)) or 0)
+        )
+        if etage_keys:
+            return dwg_levels[etage_keys[-1]]
+        # Absolute fallback: any geometry with walls
+        for v in dwg_levels.values():
+            if isinstance(v, dict) and len(v.get('walls', [])) >= 3:
+                return v
+        return None
+
     # Build level list — auto-detect sous-sol from geometry if user didn't flag it
     has_soussol_geom = any(
         ('sous' in str(k).lower() or 'parking' in str(k).lower() or 'basement' in str(k).lower())
@@ -1926,13 +1967,13 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
         c.drawString(14*mm, h - 17*mm, f"PLAN DE COFFRAGE — {level_name.upper()}")
 
         # DWG geometry for this level if available
-        lvl_geom = dwg_levels.get(level_name) or dwg_levels.get('Étage courant')
+        lvl_geom = dwg_levels.get(level_name) or _best_geom(level_name)
         # Terrasse: strip interior content — only structural slab + acrotère + grid
         # (pool, rooms, interior walls don't belong on a roof-slab plan)
         is_terrasse_level = level_name.lower().startswith(('terrasse','toiture','toit'))
         _ln = level_name.lower()
         is_soussol_level = 'sous-sol' in _ln or 'sous sol' in _ln or 'parking' in _ln
-        if is_soussol_level and lvl_geom and lvl_geom is dwg_levels.get('Étage courant'):
+        if is_soussol_level and lvl_geom and not dwg_levels.get(level_name):
             # Synth sous-sol: keep real emprise, strip residential rooms/openings
             lvl_geom = {
                 'walls': list(lvl_geom.get('walls', [])),
@@ -2105,7 +2146,21 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
         _draw_notes_techniques(c, 14*mm, 10*mm, beton, acier, r.fck_MPa, r.fyk_MPa,
                               r.charge_G_kNm2, r.charge_Q_kNm2, r.sismique.zone)
         # Column schedule nomenclature — left of cartouche (x<~185mm), below grid
-        _draw_column_schedule(c, 85*mm, 42*mm, r.poteaux, nx, ny, px_m, py_m)
+        # Map current level to the correct poteaux index (descente de charges)
+        # Engine poteaux: index 0 = RDC (highest load), last = Toiture (lowest load)
+        _ln_lower = level_name.lower()
+        if 'sous' in _ln_lower or 'parking' in _ln_lower:
+            _pot_idx = 0  # Sous-sol: same as RDC (heaviest load)
+        elif _ln_lower in ('rdc', 'rez-de-chaussée'):
+            _pot_idx = 0
+        elif _ln_lower.startswith(('terrasse', 'toiture', 'toit')):
+            _pot_idx = len(r.poteaux) - 1 if r.poteaux else 0
+        else:
+            # R+1 → index 1, R+2 → index 2, Étage 1 → index 1, etc.
+            _digits = ''.join(filter(str.isdigit, level_name))
+            _pot_idx = int(_digits) if _digits else 1
+            _pot_idx = min(_pot_idx, len(r.poteaux) - 1) if r.poteaux else 0
+        _draw_column_schedule(c, 85*mm, 42*mm, r.poteaux, nx, ny, px_m, py_m, level_idx=_pot_idx)
         _cartouche_pro(c, w, h, p, f"COFFRAGE — {level_name}", page, total_pages, "STRUCTURE BÉTON ARMÉ")
         c.showPage()
 
@@ -2118,7 +2173,7 @@ def generer_plans_structure(output_path, resultats=None, params=None, dwg_geomet
     _ferr_repere_counter = [0]
     _ferr_nomenclature = []  # list of tuples (rep, count, diam, esp, long_m, position)
 
-    lvl_geom = dwg_levels.get('Étage courant') or dwg_levels.get('Rez-de-Chaussée')
+    lvl_geom = _best_geom('Étage courant')
     has_geom_d = lvl_geom and len(lvl_geom.get('walls', [])) >= 5
     is_from_pdf_d = False
     is_from_cv_d = bool(lvl_geom.get('_cv_meta')) if has_geom_d else False
@@ -3392,11 +3447,16 @@ def generer_plans_mep(output_path, resultats_mep=None, resultats_structure=None,
     # Map each level to its geometry — always iterate project_levels so every
     # floor gets its own page.  Geometry lookup: exact match first, then
     # 'Étage courant' fallback, then first available geometry.
-    _fallback_geom = (
-        dwg_levels.get('Étage courant')
-        or dwg_levels.get('RDC')
-        or (list(dwg_levels.values())[0] if dwg_levels else None)
-    )
+    # Robust fallback: Étage courant → RDC → highest étage → any geometry
+    _fallback_geom = dwg_levels.get('Étage courant') or dwg_levels.get('RDC')
+    if not _fallback_geom:
+        _etage_keys = sorted(
+            [k for k in dwg_levels if k.startswith('Étage ') or k.startswith('R+')],
+            key=lambda s: int(''.join(filter(str.isdigit, s)) or 0)
+        )
+        _fallback_geom = dwg_levels[_etage_keys[-1]] if _etage_keys else None
+    if not _fallback_geom and dwg_levels:
+        _fallback_geom = list(dwg_levels.values())[0]
     level_list = []
     for name in project_levels:
         geom = dwg_levels.get(name) or _fallback_geom
@@ -4585,6 +4645,25 @@ def generer_plans_structure_dxf(output_path, resultats=None, params=None, dwg_ge
                     enriched = _ensure_axes(geom, nx, ny, px_m, py_m)
                     dwg_levels[_label_from_key(key)] = enriched
 
+    # Robust geometry lookup (same as PDF generator)
+    def _best_geom(name=None):
+        if name and dwg_levels.get(name):
+            return dwg_levels[name]
+        if dwg_levels.get('Étage courant'):
+            return dwg_levels['Étage courant']
+        if dwg_levels.get('RDC'):
+            return dwg_levels['RDC']
+        etage_keys = sorted(
+            [k for k in dwg_levels if k.startswith('Étage ') or k.startswith('R+')],
+            key=lambda s: int(''.join(filter(str.isdigit, s)) or 0)
+        )
+        if etage_keys:
+            return dwg_levels[etage_keys[-1]]
+        for v in dwg_levels.values():
+            if isinstance(v, dict) and len(v.get('walls', [])) >= 3:
+                return v
+        return None
+
     has_soussol_geom = any(
         ('sous' in str(k).lower() or 'parking' in str(k).lower())
         for k in dwg_levels.keys()
@@ -4626,7 +4705,7 @@ def generer_plans_structure_dxf(output_path, resultats=None, params=None, dwg_ge
     y_offset = 0
 
     for level_name in level_names:
-        lvl_geom = dwg_levels.get(level_name) or dwg_levels.get('Étage courant')
+        lvl_geom = dwg_levels.get(level_name) or _best_geom(level_name)
         has_dwg = lvl_geom and len(lvl_geom.get('walls', [])) >= 5
 
         if has_dwg:
@@ -4837,11 +4916,20 @@ def generer_plans_mep_dxf(output_path, resultats_mep=None, resultats_structure=N
             level_names.append(f"R+{i}")
     level_names.append("Terrasse")
 
-    if dwg_levels and len(dwg_levels) > 1:
-        level_list = list(dwg_levels.items())
-    else:
-        single_geom = list(dwg_levels.values())[0] if dwg_levels else None
-        level_list = [(name, single_geom) for name in level_names]
+    # Robust fallback for MEP DXF (same as other generators)
+    _fallback_geom_dxf = dwg_levels.get('Étage courant') or dwg_levels.get('RDC')
+    if not _fallback_geom_dxf:
+        _etk = sorted(
+            [k for k in dwg_levels if k.startswith('Étage ') or k.startswith('R+')],
+            key=lambda s: int(''.join(filter(str.isdigit, s)) or 0)
+        )
+        _fallback_geom_dxf = dwg_levels[_etk[-1]] if _etk else None
+    if not _fallback_geom_dxf and dwg_levels:
+        _fallback_geom_dxf = list(dwg_levels.values())[0]
+    level_list = []
+    for name in level_names:
+        geom = dwg_levels.get(name) or _fallback_geom_dxf
+        level_list.append((name, geom))
 
     def _classify_rooms(rooms):
         wet, living, service = [], [], []
