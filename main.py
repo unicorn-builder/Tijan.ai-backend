@@ -1760,6 +1760,44 @@ async def generate_boq_mep_xlsx(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/generate-boq-finitions")
+async def generate_boq_finitions(params: ParamsProjet):
+    """BOQ Finitions — 3 gammes Basic/High-End/Luxury — PDF"""
+    try:
+        from gen_boq_finitions import calculer_finitions, generer_boq_finitions_pdf
+        resultats = calculer_finitions(
+            surface_emprise_m2=params.surface_emprise_m2 or 300,
+            nb_niveaux=params.nb_niveaux or 4,
+            ville=params.ville or "Dakar"
+        )
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            out_path = tmp.name
+        generer_boq_finitions_pdf(out_path, resultats, vars(params))
+        with open(out_path, "rb") as f:
+            pdf_bytes = f.read()
+        os.unlink(out_path)
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, "boq_finitions"))
+    except Exception as e:
+        logger.error(f"/generate-boq-finitions error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/calculate-finitions")
+async def calculate_finitions_endpoint(params: ParamsProjet):
+    """Calcul finitions — retourne les 3 gammes en JSON"""
+    try:
+        from gen_boq_finitions import calculer_finitions
+        resultats = calculer_finitions(
+            surface_emprise_m2=params.surface_emprise_m2 or 300,
+            nb_niveaux=params.nb_niveaux or 4,
+            ville=params.ville or "Dakar"
+        )
+        return {"ok": True, "finitions": resultats}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/generate-note-docx")
 async def generate_note_docx(request: Request):
     """Note de calcul structure as Word (.docx) — Bilingual FR/EN."""
