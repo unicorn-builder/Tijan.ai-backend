@@ -92,6 +92,117 @@ async def _log_validation_error(request: _StRequest, exc: _RVErr):
 
 
 # ════════════════════════════════════════════════════════════
+# PROMO / SUBSCRIPTION CONSTANTS
+# ════════════════════════════════════════════════════════════
+DEFAULT_PRICE_FCFA = 500000
+PRIX_UNITE_FCFA = 200000
+ALLOWED_DURATIONS_MONTHS = [3, 6]
+ADMIN_EMAILS = ["malicktall@gmail.com"]
+
+
+# ════════════════════════════════════════════════════════════
+# SUPABASE REST HELPER (lightweight — no SDK dependency)
+# ════════════════════════════════════════════════════════════
+
+class _SupabaseResult:
+    def __init__(self, data):
+        self.data = data
+
+class _SupabaseQuery:
+    """Chainable builder that mirrors supabase-py .table().select().eq()… .execute()."""
+
+    def __init__(self, base_url: str, key: str, table: str):
+        self._base = f"{base_url}/rest/v1/{table}"
+        self._headers = {
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Prefer": "",
+        }
+        self._params: dict = {}
+        self._method = "GET"
+        self._body = None
+        self._single = False
+        self._filters: list = []
+        self._order_col = None
+        self._order_desc = False
+
+    # ── verbs ──
+    def select(self, cols="*"):
+        self._method = "GET"
+        self._params["select"] = cols
+        return self
+
+    def insert(self, data: dict):
+        self._method = "POST"
+        self._body = data
+        self._headers["Prefer"] = "return=representation"
+        return self
+
+    def update(self, data: dict):
+        self._method = "PATCH"
+        self._body = data
+        self._headers["Prefer"] = "return=representation"
+        return self
+
+    # ── filters ──
+    def eq(self, col: str, val):
+        self._filters.append((col, f"eq.{val}"))
+        return self
+
+    def order(self, col: str, *, desc: bool = False):
+        self._order_col = col
+        self._order_desc = desc
+        return self
+
+    def maybeSingle(self):
+        self._single = True
+        return self
+
+    # ── execute ──
+    def execute(self) -> _SupabaseResult:
+        import urllib.parse
+        url = self._base
+        params = dict(self._params)
+        for col, filt in self._filters:
+            params[col] = filt
+        if self._order_col:
+            direction = "desc" if self._order_desc else "asc"
+            params["order"] = f"{self._order_col}.{direction}"
+        qs = urllib.parse.urlencode(params)
+        if qs:
+            url = f"{url}?{qs}"
+
+        with httpx.Client(timeout=15) as c:
+            if self._method == "GET":
+                r = c.get(url, headers=self._headers)
+            elif self._method == "POST":
+                r = c.post(url, json=self._body, headers=self._headers)
+            elif self._method == "PATCH":
+                r = c.patch(url, json=self._body, headers=self._headers)
+            else:
+                raise ValueError(f"Unsupported method {self._method}")
+
+        r.raise_for_status()
+        data = r.json()
+        if self._single:
+            if isinstance(data, list):
+                data = data[0] if data else None
+        return _SupabaseResult(data)
+
+
+class _SupabaseClient:
+    def __init__(self):
+        self._url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        self._key = os.environ.get("SUPABASE_SERVICE_ROLE") or os.environ.get("SUPABASE_SERVICE_KEY") or ""
+
+    def table(self, name: str) -> _SupabaseQuery:
+        return _SupabaseQuery(self._url, self._key, name)
+
+supabase = _SupabaseClient()
+
+
+# ════════════════════════════════════════════════════════════
 # IMPORTS LAZY
 # ════════════════════════════════════════════════════════════
 
@@ -2755,3 +2866,158 @@ async def download_f2d(urn: str, f2d_path: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # manifest fix Sun Mar 29 01:38:44 GMT 2026
+
+
+# ════════════════════════════════════════════════════════════
+# PROMO CODES & SUBSCRIPTIONS
+# ════════════════════════════════════════════════════════════
+
+@app.post("/admin/promo-codes")
+async def create_promo_code(request: Request):
+    """Create a promo code for a prospect. Admin only."""
+    body = await request.json()
+
+    prospect_name = body.get("prospect_name", "").strip()
+    prospect_email = body.get("prospect_email", "").strip()
+    prospect_company = body.get("prospect_company", "").strip() or None
+    discount_percent = int(body.get("discount_percent", 0))
+    duration_months = int(body.get("duration_months", 3))
+    expires_at = body.get("expires_at")  # ISO string
+    notes = body.get("notes", "").strip() or None
+
+    if not prospect_name or not prospect_email:
+        return JSONResponse({"ok": False, "error": "prospect_name et prospect_email requis"}, 400)
+    if discount_percent < 1 or discount_percent > 99:
+        return JSONResponse({"ok": False, "error": "discount_percent doit \u00eatre entre 1 et 99"}, 400)
+    if duration_months not in ALLOWED_DURATIONS_MONTHS:
+        return JSONResponse({"ok": False, "error": f"duration_months doit \u00eatre {ALLOWED_DURATIONS_MONTHS}"}, 400)
+
+    import random
+    import string as _string_mod
+    name_part = ''.join(c for c in prospect_name.upper() if c.isalpha())[:3].ljust(3, 'X')
+    rand_part = ''.join(random.choices(_string_mod.ascii_uppercase + _string_mod.digits, k=4))
+    code = f"TIJAN-{name_part}-{rand_part}"
+
+    data = {
+        "code": code,
+        "prospect_name": prospect_name,
+        "prospect_email": prospect_email,
+        "prospect_company": prospect_company,
+        "discount_percent": discount_percent,
+        "duration_months": duration_months,
+        "expires_at": expires_at,
+        "notes": notes,
+    }
+
+    result = supabase.table("promo_codes").insert(data).execute()
+
+    share_url = f"https://tijan.ai/pricing?promo={code}"
+
+    return {"ok": True, "code": code, "share_url": share_url, "data": result.data[0] if result.data else data}
+
+
+@app.get("/admin/promo-codes")
+async def list_promo_codes(request: Request):
+    """List all promo codes with computed status. Admin only."""
+    result = supabase.table("promo_codes_with_status").select("*").order("created_at", desc=True).execute()
+    return {"ok": True, "codes": result.data or []}
+
+
+@app.post("/promo-codes/validate")
+async def validate_promo_code(request: Request):
+    """Validate a promo code. Public endpoint."""
+    body = await request.json()
+    code = body.get("code", "").strip().upper()
+
+    if not code:
+        return {"valid": False, "reason": "Code requis"}
+
+    result = supabase.table("promo_codes_with_status").select("*").eq("code", code).maybeSingle().execute()
+
+    if not result.data:
+        return {"valid": False, "reason": "Code invalide"}
+
+    pc = result.data
+
+    if pc.get("statut") == "expired":
+        return {"valid": False, "reason": "Ce code a expir\u00e9"}
+    if pc.get("statut") == "used":
+        return {"valid": False, "reason": "Ce code a d\u00e9j\u00e0 \u00e9t\u00e9 utilis\u00e9"}
+
+    discount = pc["discount_percent"]
+    discounted_price = int(DEFAULT_PRICE_FCFA * (100 - discount) / 100)
+
+    return {
+        "valid": True,
+        "discount_percent": discount,
+        "monthly_price": discounted_price,
+        "original_price": DEFAULT_PRICE_FCFA,
+        "duration_months": pc["duration_months"],
+        "expires_at": pc["expires_at"],
+        "prospect_name": pc["prospect_name"],
+    }
+
+
+@app.post("/subscriptions/create")
+async def create_subscription(request: Request):
+    """Create a subscription, optionally with a promo code. Auth required."""
+    body = await request.json()
+    user_id = body.get("user_id")
+    promo_code = body.get("promo_code", "").strip().upper() or None
+
+    if not user_id:
+        return JSONResponse({"ok": False, "error": "user_id requis"}, 400)
+
+    price = DEFAULT_PRICE_FCFA
+    discount_percent = 0
+    duration_months = 0
+    promo_code_id = None
+
+    if promo_code:
+        pc_result = supabase.table("promo_codes_with_status").select("*").eq("code", promo_code).maybeSingle().execute()
+        if not pc_result.data:
+            return JSONResponse({"ok": False, "error": "Code promo invalide"}, 400)
+        pc = pc_result.data
+        if pc.get("statut") != "active":
+            return JSONResponse({"ok": False, "error": f"Code promo {pc.get('statut', 'invalide')}"}, 400)
+
+        discount_percent = pc["discount_percent"]
+        duration_months = pc["duration_months"]
+        price = int(DEFAULT_PRICE_FCFA * (100 - discount_percent) / 100)
+        promo_code_id = pc["id"]
+
+        supabase.table("promo_codes").update({
+            "used_at": datetime.utcnow().isoformat(),
+            "used_by_user_id": user_id,
+        }).eq("id", promo_code_id).execute()
+
+    from datetime import timedelta
+    now = datetime.utcnow()
+    period_end = now + timedelta(days=30)
+    discount_end = (now + timedelta(days=30 * duration_months)) if duration_months > 0 else None
+
+    sub_data = {
+        "user_id": user_id,
+        "plan": "cabinet_mensuel",
+        "status": "active",
+        "base_price_fcfa": DEFAULT_PRICE_FCFA,
+        "current_price_fcfa": price,
+        "promo_code_id": promo_code_id,
+        "discount_percent": discount_percent,
+        "discount_start_at": now.isoformat() if discount_percent > 0 else None,
+        "discount_end_at": discount_end.isoformat() if discount_end else None,
+        "credits_per_month": 3,
+        "current_period_start": now.isoformat(),
+        "current_period_end": period_end.isoformat(),
+    }
+
+    sub_result = supabase.table("subscriptions").insert(sub_data).execute()
+
+    return {
+        "ok": True,
+        "subscription": sub_result.data[0] if sub_result.data else sub_data,
+        "price": price,
+        "original_price": DEFAULT_PRICE_FCFA,
+        "discount_percent": discount_percent,
+        "discount_months": duration_months,
+    }
