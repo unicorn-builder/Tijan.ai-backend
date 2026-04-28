@@ -97,6 +97,69 @@ async def _log_validation_error(request: _StRequest, exc: _RVErr):
 DEFAULT_PRICE_FCFA = 500000
 PRIX_UNITE_FCFA = 200000
 ALLOWED_DURATIONS_MONTHS = [3, 6]
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+TIJAN_FROM_EMAIL = "Tijan AI <noreply@tijan.ai>"
+
+
+def _send_welcome_email(to_email: str, name: str, price: int, discount_percent: int = 0,
+                        duration_months: int = 0, revert_date: str = ""):
+    """Send welcome email after subscription. Non-blocking — failures logged, never raised."""
+    if not RESEND_API_KEY:
+        logger.warning("[email] RESEND_API_KEY not set — skipping welcome email")
+        return
+    try:
+        import resend
+        resend.api_key = RESEND_API_KEY
+
+        if discount_percent > 0:
+            subject = f"Bienvenue sur Tijan AI — Offre {discount_percent}% pendant {duration_months} mois"
+            promo_block = f"""
+            <div style="background:#F0FFF4;border-left:4px solid #43A956;padding:16px;margin:20px 0;border-radius:8px">
+              <strong>Votre offre partenaire</strong><br>
+              Tarif : <strong>{price:,} FCFA/mois</strong> (au lieu de {DEFAULT_PRICE_FCFA:,} FCFA)<br>
+              Durée : <strong>{duration_months} mois</strong><br>
+              Bascule automatique : <strong>{revert_date}</strong> → {DEFAULT_PRICE_FCFA:,} FCFA/mois
+            </div>
+            <p style="color:#888;font-size:13px">
+              À l'issue de la période promotionnelle, votre abonnement passe automatiquement
+              à {DEFAULT_PRICE_FCFA:,} FCFA/mois. Aucune action requise de votre part.
+              Vous pouvez résilier à tout moment sans frais.
+            </p>"""
+        else:
+            subject = "Bienvenue sur Tijan AI — Votre abonnement est actif"
+            promo_block = ""
+
+        html = f"""
+        <div style="font-family:-apple-system,sans-serif;max-width:560px;margin:0 auto;padding:24px">
+          <div style="text-align:center;margin-bottom:24px">
+            <span style="font-size:24px;font-weight:800;color:#43A956">TIJAN AI</span>
+            <div style="font-size:12px;color:#888">Automated Engineering Bureau</div>
+          </div>
+          <h2 style="color:#1B2A4A;font-size:20px">Bonjour {name},</h2>
+          <p>Votre abonnement Tijan AI est maintenant actif. Vous disposez de
+          <strong>3 études complètes par mois</strong> — structure, MEP, BOQ, EDGE,
+          plans d'exécution et schémas inclus.</p>
+          {promo_block}
+          <div style="text-align:center;margin:28px 0">
+            <a href="https://tijan.ai/projects/new" style="background:#43A956;color:#fff;
+               padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:700;
+               font-size:15px">Lancer ma première étude →</a>
+          </div>
+          <p style="font-size:13px;color:#888">
+            Support prioritaire : <a href="mailto:malicktall@gmail.com">malicktall@gmail.com</a><br>
+            <a href="https://tijan.ai">tijan.ai</a>
+          </p>
+        </div>"""
+
+        resend.Emails.send({
+            "from": TIJAN_FROM_EMAIL,
+            "to": [to_email],
+            "subject": subject,
+            "html": html,
+        })
+        logger.info(f"[email] Welcome email sent to {to_email}")
+    except Exception as e:
+        logger.warning(f"[email] Failed to send welcome email to {to_email}: {e}")
 ADMIN_EMAILS = ["malicktall@gmail.com"]
 
 
@@ -3012,6 +3075,20 @@ async def create_subscription(request: Request):
     }
 
     sub_result = supabase.table("subscriptions").insert(sub_data).execute()
+
+    # Send welcome email (non-blocking)
+    user_email = body.get("user_email", "")
+    user_name = body.get("user_name", "").strip() or "Client"
+    revert_date_str = discount_end.strftime("%d/%m/%Y") if discount_end else ""
+    if user_email:
+        _send_welcome_email(
+            to_email=user_email,
+            name=user_name,
+            price=price,
+            discount_percent=discount_percent,
+            duration_months=duration_months,
+            revert_date=revert_date_str,
+        )
 
     return {
         "ok": True,
