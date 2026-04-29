@@ -94,7 +94,7 @@ async def _log_validation_error(request: _StRequest, exc: _RVErr):
 # ════════════════════════════════════════════════════════════
 # PROMO / SUBSCRIPTION CONSTANTS
 # ════════════════════════════════════════════════════════════
-DEFAULT_PRICE_FCFA = 500000
+DEFAULT_PRICE_FCFA = 250000  # tarif beta lancement
 PRIX_UNITE_FCFA = 200000
 ALLOWED_DURATIONS_MONTHS = [3, 6]
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
