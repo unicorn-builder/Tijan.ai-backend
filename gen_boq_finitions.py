@@ -11,14 +11,17 @@ FINITIONS_DB = {
     "carrelage": {
         "basic": {
             "description": "Grès cérame local 30x30, pose incluse",
+            "marques": "Kédia Céramique (SN), Carrelages CI (CI), Super Cérame (MA), Goodwill (NG)",
             "prix_m2": {"Dakar": 18000, "Abidjan": 16000, "Casablanca": 20000, "Lagos": 22000, "default": 18000}
         },
         "high_end": {
             "description": "Grès cérame importé 60x60, pose incluse",
+            "marques": "Porcelanosa, RAK Ceramics, Marazzi, Kajaria",
             "prix_m2": {"Dakar": 45000, "Abidjan": 42000, "Casablanca": 50000, "Lagos": 55000, "default": 45000}
         },
         "luxury": {
             "description": "Marbre ou grands formats 80x80+, pose incluse",
+            "marques": "Cosentino, Iris Ceramica, ABK, marbre Carrare/Calacatta",
             "prix_m2": {"Dakar": 95000, "Abidjan": 90000, "Casablanca": 110000, "Lagos": 120000, "default": 95000}
         },
         "ratio_plancher": 1.0
@@ -26,14 +29,17 @@ FINITIONS_DB = {
     "menuiserie_interieure": {
         "basic": {
             "description": "Portes bois MDF, huisseries métalliques",
+            "marques": "Menuiseries locales, Fabrimetal (SN), SIPAM (CI), Vitfoam (NG)",
             "prix_porte": {"Dakar": 85000, "Abidjan": 80000, "Casablanca": 95000, "Lagos": 100000, "default": 85000}
         },
         "high_end": {
             "description": "Portes bois massif prépeint, huisseries alu",
+            "marques": "Lapeyre, Jeld-Wen, Righini, Garofoli",
             "prix_porte": {"Dakar": 180000, "Abidjan": 170000, "Casablanca": 200000, "Lagos": 220000, "default": 180000}
         },
         "luxury": {
             "description": "Portes bois noble teck/iroko, huisseries alu anodisé",
+            "marques": "Oikos, Lualdi, Rimadesio, ébénistes sur mesure",
             "prix_porte": {"Dakar": 380000, "Abidjan": 360000, "Casablanca": 420000, "Lagos": 450000, "default": 380000}
         },
         "nb_portes_par_100m2": 4.5
@@ -41,14 +47,17 @@ FINITIONS_DB = {
     "menuiserie_exterieure": {
         "basic": {
             "description": "Aluminium laqué standard, simple vitrage",
+            "marques": "Technal Afrique, SNVA (SN), Aluminium CI, First Aluminium (NG)",
             "prix_m2": {"Dakar": 95000, "Abidjan": 90000, "Casablanca": 105000, "Lagos": 110000, "default": 95000}
         },
         "high_end": {
             "description": "Aluminium thermolaqué, double vitrage",
+            "marques": "Schüco, Reynaers, SAPA/Hydro, Aluk",
             "prix_m2": {"Dakar": 185000, "Abidjan": 175000, "Casablanca": 210000, "Lagos": 220000, "default": 185000}
         },
         "luxury": {
             "description": "Aluminium sur mesure, double vitrage feuilleté, stores intégrés",
+            "marques": "Schüco AWS, Wicona, Kawneer, Cortizo — stores Somfy",
             "prix_m2": {"Dakar": 380000, "Abidjan": 360000, "Casablanca": 420000, "Lagos": 450000, "default": 380000}
         },
         "ratio_facade": 0.18
@@ -56,14 +65,17 @@ FINITIONS_DB = {
     "faux_plafond": {
         "basic": {
             "description": "Dalles BA13 sur ossature métallique",
+            "marques": "Knauf, Placo/Saint-Gobain, Siniat, Gyproc",
             "prix_m2": {"Dakar": 22000, "Abidjan": 20000, "Casablanca": 25000, "Lagos": 28000, "default": 22000}
         },
         "high_end": {
             "description": "Plâtre staff décoratif, corniche, spots encastrés",
+            "marques": "Armstrong, Hunter Douglas, Barrisol — spots Philips/Osram",
             "prix_m2": {"Dakar": 48000, "Abidjan": 45000, "Casablanca": 55000, "Lagos": 60000, "default": 48000}
         },
         "luxury": {
             "description": "Bois ou métal sur mesure, éclairage LED intégré",
+            "marques": "Hunter Douglas (bois), Lindner, Fantoni — LED iGuzzini/Flos",
             "prix_m2": {"Dakar": 110000, "Abidjan": 105000, "Casablanca": 125000, "Lagos": 135000, "default": 110000}
         },
         "ratio_plancher": 0.75
@@ -71,14 +83,17 @@ FINITIONS_DB = {
     "peinture": {
         "basic": {
             "description": "Peinture vinylique mate standard, 2 couches",
+            "marques": "Seigneurie, Prestige Peintures (SN), Colpaint (CI), CAP (NG)",
             "prix_m2": {"Dakar": 4500, "Abidjan": 4000, "Casablanca": 5000, "Lagos": 5500, "default": 4500}
         },
         "high_end": {
             "description": "Peinture acrylique premium lessivable, 3 couches",
+            "marques": "Tollens, Dulux Valentine, Jotun, Sigma Coatings",
             "prix_m2": {"Dakar": 9000, "Abidjan": 8500, "Casablanca": 10000, "Lagos": 11000, "default": 9000}
         },
         "luxury": {
             "description": "Enduit décoratif, béton ciré ou stucco vénitien",
+            "marques": "Oikos, Novacolor, Viero, Beal — micro-ciment Topciment",
             "prix_m2": {"Dakar": 22000, "Abidjan": 20000, "Casablanca": 25000, "Lagos": 28000, "default": 22000}
         },
         "ratio_murs": 2.8,
@@ -87,14 +102,17 @@ FINITIONS_DB = {
     "cuisine": {
         "basic": {
             "description": "Meubles mélaminé, plan stratifié, évier inox",
+            "marques": "Menuisiers locaux, IKEA (MA), Kitea (MA), Mobalpa entrée de gamme",
             "prix_ml": {"Dakar": 180000, "Abidjan": 170000, "Casablanca": 200000, "Lagos": 220000, "default": 180000}
         },
         "high_end": {
             "description": "Meubles MDF laqué, plan granit, électroménager inclus",
+            "marques": "Schmidt, SieMatic, Nobilia — élec. Bosch/Siemens",
             "prix_ml": {"Dakar": 450000, "Abidjan": 420000, "Casablanca": 500000, "Lagos": 550000, "default": 450000}
         },
         "luxury": {
             "description": "Meubles sur mesure bois massif, plan quartz, électroménager premium",
+            "marques": "Boffi, Poggenpohl, Poliform — élec. Miele/Sub-Zero/Gaggenau",
             "prix_ml": {"Dakar": 1200000, "Abidjan": 1100000, "Casablanca": 1400000, "Lagos": 1500000, "default": 1200000}
         },
         "ml_par_100m2": 2.5
@@ -116,31 +134,31 @@ def calculer_finitions(surface_emprise_m2: float, nb_niveaux: int, ville: str) -
 
         # Carrelage
         carrelage = surface_totale * db["carrelage"]["ratio_plancher"] * db["carrelage"][gamme]["prix_m2"][v]
-        detail["carrelage"] = {"montant": round(carrelage), "description": db["carrelage"][gamme]["description"]}
+        detail["carrelage"] = {"montant": round(carrelage), "description": db["carrelage"][gamme]["description"], "marques": db["carrelage"][gamme]["marques"]}
 
         # Menuiserie intérieure
         nb_portes = (surface_totale / 100) * db["menuiserie_interieure"]["nb_portes_par_100m2"]
         menu_int = nb_portes * db["menuiserie_interieure"][gamme]["prix_porte"][v]
-        detail["menuiserie_interieure"] = {"montant": round(menu_int), "description": db["menuiserie_interieure"][gamme]["description"]}
+        detail["menuiserie_interieure"] = {"montant": round(menu_int), "description": db["menuiserie_interieure"][gamme]["description"], "marques": db["menuiserie_interieure"][gamme]["marques"]}
 
         # Menuiserie extérieure
         surface_vitrages = surface_facade * db["menuiserie_exterieure"]["ratio_facade"]
         menu_ext = surface_vitrages * db["menuiserie_exterieure"][gamme]["prix_m2"][v]
-        detail["menuiserie_exterieure"] = {"montant": round(menu_ext), "description": db["menuiserie_exterieure"][gamme]["description"]}
+        detail["menuiserie_exterieure"] = {"montant": round(menu_ext), "description": db["menuiserie_exterieure"][gamme]["description"], "marques": db["menuiserie_exterieure"][gamme]["marques"]}
 
         # Faux-plafond
         fp = surface_totale * db["faux_plafond"]["ratio_plancher"] * db["faux_plafond"][gamme]["prix_m2"][v]
-        detail["faux_plafond"] = {"montant": round(fp), "description": db["faux_plafond"][gamme]["description"]}
+        detail["faux_plafond"] = {"montant": round(fp), "description": db["faux_plafond"][gamme]["description"], "marques": db["faux_plafond"][gamme]["marques"]}
 
         # Peinture
         surface_peinte = surface_totale * (db["peinture"]["ratio_murs"] + db["peinture"]["ratio_plafond"])
         peinture = surface_peinte * db["peinture"][gamme]["prix_m2"][v]
-        detail["peinture"] = {"montant": round(peinture), "description": db["peinture"][gamme]["description"]}
+        detail["peinture"] = {"montant": round(peinture), "description": db["peinture"][gamme]["description"], "marques": db["peinture"][gamme]["marques"]}
 
         # Cuisine
         ml_cuisine = (surface_totale / 100) * db["cuisine"]["ml_par_100m2"]
         cuisine = ml_cuisine * db["cuisine"][gamme]["prix_ml"][v]
-        detail["cuisine"] = {"montant": round(cuisine), "description": db["cuisine"][gamme]["description"]}
+        detail["cuisine"] = {"montant": round(cuisine), "description": db["cuisine"][gamme]["description"], "marques": db["cuisine"][gamme]["marques"]}
 
         total = sum(d["montant"] for d in detail.values())
         results[gamme] = {"total": round(total), "detail": detail}
