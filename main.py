@@ -1131,15 +1131,43 @@ def _classify_level_from_name(filename, fallback_index):
 
 
 def _extract_dxf_geometry(filepath: str) -> dict:
-    """Extract full geometry from a DXF file using ezdxf — same format as sakho_*_geom.json."""
+    """Extract full geometry from a DXF file using ezdxf — same format as sakho_*_geom.json.
+
+    Strategy:
+    1) Try named layers (MUR, WALL, A-WALL, etc.)
+    2) If <5 walls found, try fuzzy layer matching (any layer containing 'mur', 'wall', etc.)
+    3) If still <5 walls, fallback: treat ALL LINE/LWPOLYLINE as potential walls (universal mode)
+    This ensures geometry extraction works regardless of layer naming conventions.
+    """
     import ezdxf, re
     doc = ezdxf.readfile(filepath)
     msp = doc.modelspace()
 
-    wall_layers = {'MUR', 'MURS', 'A-MUR', '0_MURS', 'WALL', 'WALLS', 'A-WALL', 'I-WALL'}
-    window_layers = {'A-ALUMINIUM', 'ALUMINIUM', 'A-GLAZ', 'A-VERRE', 'A-HACH VERRE', 'A-GLAZ'}
-    door_layers = {'DOOR', 'S_Doors', 'BOIS', 'PORTE', 'A-DOOR'}
-    sanitary_layers = {'SANITAIRE', 'A-SANITAIRES', 'AM FITTING-SANITARY', 'STR_SANITARY'}
+    # Exact match layers
+    wall_layers = {'MUR', 'MURS', 'A-MUR', '0_MURS', 'WALL', 'WALLS', 'A-WALL', 'I-WALL',
+                   'A-WALL-FULL', 'A-WALL-INTR', 'A-WALL-EXTR', 'S_Walls', 'Walls',
+                   'MURS_EXT', 'MURS_INT', 'MURS EXTERIEURS', 'MURS INTERIEURS',
+                   'STR_WALLS', 'STRUCTURE_WALLS', 'CLOISONS'}
+    window_layers = {'A-ALUMINIUM', 'ALUMINIUM', 'A-GLAZ', 'A-VERRE', 'A-HACH VERRE', 'A-GLAZ',
+                     'WINDOW', 'WINDOWS', 'A-WINDOW', 'FENETRES', 'FENETRE', 'VITRAGE',
+                     'S_Windows', 'Windows', 'A-GLAZ-SILL'}
+    door_layers = {'DOOR', 'S_Doors', 'BOIS', 'PORTE', 'A-DOOR', 'PORTES', 'DOORS',
+                   'A-DOOR-FULL', 'A-DOOR-INTR', 'Doors', 'MENUISERIES'}
+    sanitary_layers = {'SANITAIRE', 'A-SANITAIRES', 'AM FITTING-SANITARY', 'STR_SANITARY',
+                       'PLUMBING', 'A-PLUMBING', 'SANITARY'}
+
+    # Fuzzy keywords for layer name detection
+    _wall_keywords = ['mur', 'wall', 'cloison', 'paroi', 'partition']
+    _window_keywords = ['window', 'fenêtre', 'fenetre', 'glaz', 'vitrage', 'alumin']
+    _door_keywords = ['door', 'porte', 'menuiser']
+
+    def _layer_matches(layer_name, keywords):
+        ln = layer_name.lower().strip()
+        return any(k in ln for k in keywords)
+
+    # Log all layers for diagnostics
+    all_layers = sorted(set(e.dxf.layer for e in msp))
+    logger.info(f"[DXF] File: {filepath} — {len(all_layers)} layers: {all_layers[:30]}")
 
     geometry = {'walls': [], 'windows': [], 'doors': [], 'sanitary': [], 'rooms': [], 'axes_x': [], 'axes_y': []}
 
@@ -1162,6 +1190,7 @@ def _extract_dxf_geometry(filepath: str) -> dict:
                            'start_angle': round(entity.dxf.start_angle, 1),
                            'end_angle': round(entity.dxf.end_angle, 1)})
 
+    # ── PASS 1: Exact layer name matching ──
     for e in msp:
         layer = e.dxf.layer
         if layer in wall_layers:
@@ -1172,7 +1201,6 @@ def _extract_dxf_geometry(filepath: str) -> dict:
             _add_entity(e, geometry['doors'])
         elif layer in sanitary_layers:
             _add_entity(e, geometry['sanitary'])
-        # Room labels: scan many possible layer names (French + English + generic)
         elif e.dxftype() in ('TEXT', 'MTEXT'):
             room_label_layers = {
                 'etiquettes de pièces', 'etiquettes de pieces', 'etiquettes',
@@ -1192,6 +1220,78 @@ def _extract_dxf_geometry(filepath: str) -> dict:
                         geometry['rooms'].append({'name': txt, 'x': round(pos.x, 1), 'y': round(pos.y, 1)})
                 except Exception:
                     pass
+
+    logger.info(f"[DXF] Pass 1 (exact layers): {len(geometry['walls'])} walls, "
+                f"{len(geometry['windows'])} windows, {len(geometry['doors'])} doors, "
+                f"{len(geometry['rooms'])} rooms")
+
+    # ── PASS 2: Fuzzy layer name matching (if pass 1 found <5 walls) ──
+    if len(geometry['walls']) < 5:
+        logger.info("[DXF] Pass 1 insufficient — trying fuzzy layer matching")
+        for e in msp:
+            layer = e.dxf.layer
+            if e.dxftype() in ('LINE', 'LWPOLYLINE', 'POLYLINE'):
+                if _layer_matches(layer, _wall_keywords) and layer not in wall_layers:
+                    _add_entity(e, geometry['walls'])
+                elif _layer_matches(layer, _window_keywords) and layer not in window_layers:
+                    _add_entity(e, geometry['windows'])
+                elif _layer_matches(layer, _door_keywords) and layer not in door_layers:
+                    _add_entity(e, geometry['doors'])
+        logger.info(f"[DXF] Pass 2 (fuzzy): {len(geometry['walls'])} walls")
+
+    # ── PASS 3: Universal fallback — ALL geometric entities as walls ──
+    if len(geometry['walls']) < 5:
+        logger.warning("[DXF] Pass 2 insufficient — universal fallback: scanning ALL entities")
+        # Collect ALL LINE/LWPOLYLINE from ALL layers (except known non-wall layers)
+        skip_layers = {'DEFPOINTS', 'DIMENSIONS', 'DIM', 'HATCH', 'VIEWPORT', 'TITLE',
+                       'TITLEBLOCK', 'CARTOUCHE', 'BORDER', 'CADRE', 'LOGO'}
+        all_entities = []
+        for e in msp:
+            layer_up = e.dxf.layer.upper()
+            if layer_up in skip_layers or 'DIM' in layer_up or 'HATCH' in layer_up:
+                continue
+            if e.dxftype() in ('LINE', 'LWPOLYLINE', 'POLYLINE'):
+                _add_entity(e, all_entities)
+
+        if len(all_entities) >= 5:
+            # Filter: keep only entities with significant length (>500mm)
+            # to exclude dimension ticks, leader lines, etc.
+            def _entity_length(ent):
+                if ent['type'] == 'line':
+                    dx = ent['end'][0] - ent['start'][0]
+                    dy = ent['end'][1] - ent['start'][1]
+                    return (dx**2 + dy**2) ** 0.5
+                elif ent['type'] == 'polyline' and len(ent.get('points', [])) >= 2:
+                    total = 0
+                    pts = ent['points']
+                    for i in range(len(pts) - 1):
+                        dx = pts[i+1][0] - pts[i][0]
+                        dy = pts[i+1][1] - pts[i][1]
+                        total += (dx**2 + dy**2) ** 0.5
+                    return total
+                return 0
+
+            significant = [e for e in all_entities if _entity_length(e) > 500]
+            if len(significant) >= 5:
+                geometry['walls'] = significant
+                geometry['_fallback_mode'] = 'universal'
+                logger.info(f"[DXF] Universal fallback: {len(significant)} wall-like entities "
+                            f"(from {len(all_entities)} total, filtered >500mm)")
+
+        # Also scan ALL text entities for room labels
+        if not geometry['rooms']:
+            for e in msp:
+                if e.dxftype() in ('TEXT', 'MTEXT'):
+                    try:
+                        txt = e.text if e.dxftype() == 'MTEXT' else e.dxf.text
+                        txt = re.sub(r'\\[^;]*;', '', txt).strip()
+                        if txt and 2 <= len(txt) <= 50:
+                            pos = e.dxf.insert
+                            geometry['rooms'].append({'name': txt, 'x': round(pos.x, 1), 'y': round(pos.y, 1)})
+                    except Exception:
+                        pass
+            if geometry['rooms']:
+                logger.info(f"[DXF] Universal fallback: {len(geometry['rooms'])} room labels from all text")
 
     # Extract structural axes from dedicated layers
     axis_layers = {'AXES', 'A-AXES', 'GRILLE', 'S-GRID', 'GRID', 'AXE', 'STRUCTURE_AXES'}
@@ -1234,7 +1334,17 @@ def _extract_dxf_geometry(filepath: str) -> dict:
         except Exception as e:
             logger.warning(f"Room inference failed (non-fatal): {e}")
 
-    return geometry if len(geometry['walls']) > 5 else None
+    n_walls = len(geometry['walls'])
+    n_axes = len(geometry.get('axes_x', [])) + len(geometry.get('axes_y', []))
+    # Accept if we have enough walls OR if we have axes + some walls
+    if n_walls >= 5 or (n_walls >= 3 and n_axes >= 4):
+        logger.info(f"[DXF] Geometry accepted: {n_walls} walls, {n_axes} axes, "
+                    f"{len(geometry.get('rooms', []))} rooms, "
+                    f"mode={'universal' if geometry.get('_fallback_mode') else 'named_layers'}")
+        return geometry
+    logger.warning(f"[DXF] Geometry REJECTED: only {n_walls} walls, {n_axes} axes — "
+                   f"layers in file: {all_layers[:20]}")
+    return None
 
 
 def _infer_rooms_from_walls(geom: dict) -> list:
