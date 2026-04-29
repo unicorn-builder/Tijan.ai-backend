@@ -200,6 +200,9 @@ def generer_boq_finitions_pdf(output_path: str, resultats_finitions: dict, param
         "cuisine": "Cuisine équipée"
     }
 
+    from reportlab.lib.styles import ParagraphStyle
+    cell_style = ParagraphStyle('cell', fontName='Helvetica', fontSize=8, leading=10)
+
     for gamme, label in gamme_labels.items():
         data = resultats_finitions.get(gamme, {})
         story.append(Paragraph(f"<b>Gamme {label}</b>", styles["Heading2"]))
@@ -207,11 +210,14 @@ def generer_boq_finitions_pdf(output_path: str, resultats_finitions: dict, param
         for poste, pl in poste_labels.items():
             d = data.get("detail", {}).get(poste, {})
             montant_str = f"{d.get('montant', 0):,.0f}".replace(",", " ")
-            rows.append([pl, d.get("description", ""), montant_str])
+            desc = d.get("description", "")
+            marques = d.get("marques", "")
+            desc_text = f"{desc}<br/><i><font size='7' color='#999'>{marques}</font></i>" if marques else desc
+            rows.append([pl, Paragraph(desc_text, cell_style), montant_str])
         total_str = f"{data.get('total', 0):,.0f}".replace(",", " ")
         rows.append(["TOTAL", "", total_str])
 
-        t = Table(rows, colWidths=[4*cm, 9*cm, 4*cm])
+        t = Table(rows, colWidths=[3.5*cm, 9.5*cm, 4*cm])
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), NAVY),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
