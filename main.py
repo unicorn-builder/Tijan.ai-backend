@@ -3019,22 +3019,16 @@ async def get_review_info(project_id: str):
     }
 
 
-# ── PAYDUNYA ──────────────────────────────────────────────
-PAYDUNYA_URL = "https://app.paydunya.com/api/v1/checkout-invoice/create"
-PAYDUNYA_HEADERS = {
-    "Content-Type": "application/json",
-    "PAYDUNYA-MASTER-KEY": os.environ.get("PAYDUNYA_MASTER_KEY", ""),
-    "PAYDUNYA-PRIVATE-KEY": os.environ.get("PAYDUNYA_PRIVATE_KEY", ""),
-    "PAYDUNYA-TOKEN": os.environ.get("PAYDUNYA_TOKEN", ""),
-}
+# ── WAVE CHECKOUT ─────────────────────────────────────────
+WAVE_API_URL = "https://api.wave.com/v1/checkout/sessions"
+WAVE_API_KEY = os.environ.get("WAVE_API_KEY", "")
+WAVE_WEBHOOK_SECRET = os.environ.get("WAVE_WEBHOOK_SECRET", "")
 
-# Check for PayDunya configuration at startup
-if not PAYDUNYA_HEADERS.get("PAYDUNYA-MASTER-KEY"):
-    logger.warning("PayDunya PAYDUNYA_MASTER_KEY not set")
-if not PAYDUNYA_HEADERS.get("PAYDUNYA-PRIVATE-KEY"):
-    logger.warning("PayDunya PAYDUNYA_PRIVATE_KEY not set")
-if not PAYDUNYA_HEADERS.get("PAYDUNYA-TOKEN"):
-    logger.warning("PayDunya PAYDUNYA_TOKEN not set")
+if not WAVE_API_KEY:
+    logger.warning("WAVE_API_KEY not set — payments will fail")
+if not WAVE_WEBHOOK_SECRET:
+    logger.warning("WAVE_WEBHOOK_SECRET not set — webhook verification disabled")
+
 
 @app.post("/create-payment")
 async def create_payment(request: Request):
@@ -3042,35 +3036,96 @@ async def create_payment(request: Request):
     credits = body.get("credits", 1)
     prix = body.get("prix", 200000)
     user_id = body.get("user_id", "")
+    plan = body.get("plan", "etude_unitaire")
+    promo_code = body.get("promo_code", "")
+
+    if not WAVE_API_KEY:
+        return {"ok": False, "error": "Paiement non configuré — contactez le support"}
+
+    description = f"Tijan AI — {credits} crédit{'s' if credits > 1 else ''}"
 
     payload = {
-        "invoice": {
-            "total_amount": prix,
-            "description": f"Tijan AI — {credits} crédit{'s' if credits > 1 else ''} technique{'s' if credits > 1 else ''}",
-        },
-        "store": {
-            "name": "Tijan AI",
-            "tagline": "Engineering Intelligence for Africa",
-            "website_url": "https://tijan-frontend.vercel.app",
-        },
-        "custom_data": {
-            "user_id": user_id,
-            "nb_credits": credits,
-        },
-        "actions": {
-            "return_url": f"https://tijan-frontend.vercel.app/payment-success?credits={credits}",
-            "cancel_url": "https://tijan-frontend.vercel.app/pricing",
-        },
+        "amount": str(prix),
+        "currency": "XOF",
+        "success_url": f"https://tijan.ai/payment-success?credits={credits}&user_id={user_id}&plan={plan}",
+        "error_url": "https://tijan.ai/pricing",
+        "client_reference": f"tijan_{user_id}_{credits}_{int(__import__('time').time())}",
     }
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(PAYDUNYA_URL, json=payload, headers=PAYDUNYA_HEADERS)
-        data = resp.json()
+    headers = {
+        "Authorization": f"Bearer {WAVE_API_KEY}",
+        "Content-Type": "application/json",
+    }
 
-    if data.get("response_code") == "00":
-        return {"ok": True, "url": data.get("response_text"), "token": data.get("token")}
-    else:
-        return {"ok": False, "error": data.get("response_text", "Erreur PayDunya")}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(WAVE_API_URL, json=payload, headers=headers)
+            data = resp.json()
+
+        if resp.status_code == 200 and data.get("wave_launch_url"):
+            logger.info(f"[WAVE] Checkout created: {data.get('id')} — {prix} XOF — user={user_id}")
+            return {"ok": True, "url": data["wave_launch_url"], "session_id": data.get("id")}
+        else:
+            error_msg = data.get("message") or data.get("details") or f"Erreur Wave (HTTP {resp.status_code})"
+            logger.error(f"[WAVE] Checkout failed: {error_msg} — payload={payload}")
+            return {"ok": False, "error": error_msg}
+    except Exception as e:
+        logger.error(f"[WAVE] Exception: {e}")
+        return {"ok": False, "error": "Erreur de connexion au service de paiement"}
+
+
+@app.post("/wave-webhook")
+async def wave_webhook(request: Request):
+    """Webhook appelé par Wave quand un paiement est complété."""
+    import hmac
+    import hashlib
+
+    body_bytes = await request.body()
+    body = _json.loads(body_bytes)
+
+    # Verify webhook signature if secret is configured
+    if WAVE_WEBHOOK_SECRET:
+        signature_header = request.headers.get("Wave-Signature", "")
+        parts = dict(p.split("=", 1) for p in signature_header.split(",") if "=" in p)
+        timestamp = parts.get("t", "")
+        received_sig = parts.get("v1", "")
+
+        expected_sig = hmac.new(
+            WAVE_WEBHOOK_SECRET.encode(),
+            f"{timestamp}.{body_bytes.decode()}".encode(),
+            hashlib.sha256,
+        ).hexdigest()
+
+        if not hmac.compare_digest(received_sig, expected_sig):
+            logger.warning("[WAVE WEBHOOK] Invalid signature — rejected")
+            raise HTTPException(status_code=401, detail="Invalid signature")
+
+    event_type = body.get("type", "")
+    data = body.get("data", {})
+
+    if event_type == "checkout.session.completed":
+        payment_status = data.get("payment_status", "")
+        client_ref = data.get("client_reference", "")
+        amount = data.get("amount", "")
+        session_id = data.get("id", "")
+
+        logger.info(f"[WAVE WEBHOOK] {event_type} — status={payment_status} ref={client_ref} amount={amount} id={session_id}")
+
+        if payment_status == "succeeded":
+            # Parse client_reference: tijan_{user_id}_{credits}_{timestamp}
+            ref_parts = client_ref.split("_") if client_ref else []
+            if len(ref_parts) >= 3:
+                user_id = ref_parts[1]
+                nb_credits = int(ref_parts[2]) if ref_parts[2].isdigit() else 0
+                logger.info(f"[WAVE WEBHOOK] Payment confirmed: user={user_id} credits={nb_credits}")
+                # Credits are added client-side via PaymentSuccess page
+                # Webhook serves as server-side confirmation log
+            else:
+                logger.warning(f"[WAVE WEBHOOK] Could not parse client_reference: {client_ref}")
+        else:
+            logger.warning(f"[WAVE WEBHOOK] Payment not succeeded: {payment_status}")
+
+    return {"ok": True}
 
 
 # ── TRADUCTION VIA CLAUDE API ─────────────────────────────
