@@ -3059,8 +3059,8 @@ async def create_payment(request: Request):
     body_str = _json.dumps(payload)
     timestamp = str(int(_time.time()))
     signature = _hmac.new(
-        WAVE_WEBHOOK_SECRET.encode(),
-        f"{timestamp}.{body_str}".encode(),
+        WAVE_WEBHOOK_SECRET.encode("utf-8"),
+        (timestamp + body_str).encode("utf-8"),
         _hashlib.sha256,
     ).hexdigest()
 
@@ -3104,8 +3104,8 @@ async def wave_webhook(request: Request):
         received_sig = parts.get("v1", "")
 
         expected_sig = hmac.new(
-            WAVE_WEBHOOK_SECRET.encode(),
-            f"{timestamp}.{body_bytes.decode()}".encode(),
+            WAVE_WEBHOOK_SECRET.encode("utf-8"),
+            (timestamp + body_bytes.decode("utf-8")).encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
 
