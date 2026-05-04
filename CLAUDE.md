@@ -17,7 +17,7 @@ Tijan AI is an **automated engineering bureau (bureau d'etudes automatise)** for
 - **AI:** Anthropic Claude SDK + OpenAI (for parsing and chat)
 - **PDF:** ReportLab + PyPDF + PyMuPDF
 - **Office:** python-docx (Word), openpyxl (Excel)
-- **CAD:** ezdxf (DXF), ODA + LibreDWG (DWG conversion)
+- **CAD:** ezdxf (DXF), ODA + LibreDWG (DWG conversion), APS Design Automation (pro DWG output)
 - **GitHub:** unicorn-builder/Tijan.ai-backend
 
 ## Architecture
@@ -36,6 +36,7 @@ Tijan AI is an **automated engineering bureau (bureau d'etudes automatise)** for
 | `generate_plans_*.py` | BA drawings, plumbing plans, architecture plans |
 | `parse_plans.py` | DWG/DXF/PDF parameter extraction |
 | `dwg_converter.py` | DWG to DXF conversion (ODA/LibreDWG/APS) |
+| `aps_design_automation.py` | Professional DWG output via APS Design Automation |
 | `prix_marche.py` | Market pricing database (5 countries) |
 | `chat_engine.py` | LLM-based design assistant |
 | `tijan_theme.py` | PDF branding/styling |
@@ -107,6 +108,11 @@ Tijan AI is an **automated engineering bureau (bureau d'etudes automatise)** for
 - **gen_mep.py/en:** EDGE attribute safety, cost ratio div/zero
 - **gen_boq_xlsx.py:** C40/50 price lookup
 - **generate_fiches_structure_v3.py:** Safe concrete class parsing
+
+## Backlog (3 chantiers — rien d'autre)
+1. **Plans professionnels via Autodesk Design Automation API** — DONE. `aps_design_automation.py` created. Endpoints `/generate-plans-structure-pro` and `/generate-plans-mep-pro` send ezdxf DXF to AutoCAD cloud for hatching, blocks, dimensions, cartouche, A3 layout. Falls back to basic DXF if DA unavailable. Parsing pipeline also improved: APS Model Derivative enriches geometry when ezdxf finds thin data (few walls/axes).
+2. **Modification d'étude depuis le chat** — DONE. Already fully implemented in chat_engine.py + main.py /chat endpoint.
+3. **Amélioration du design de la landing page** — DONE. Complete redesign with SVG icons, normes bar, premium visual polish.
 
 ## Preferences
 - Malick veut etre performant partout — keep code clean, fast, and safe

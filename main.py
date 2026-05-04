@@ -29,6 +29,9 @@ Endpoints :
   POST /generate-planches         → planches BA PDF
   POST /generate-plans-structure  → plans structure PDF (coffrage, ferraillage, voiles) — géo DXF + EC2
   POST /generate-plans-mep        → plans MEP PDF (7 lots × niveaux) — géo DXF + moteur MEP
+  POST /generate-plans-structure-pro → plans structure PRO DWG via APS Design Automation
+  POST /generate-plans-mep-pro    → plans MEP PRO DWG via APS Design Automation
+  GET  /da-status                 → check Design Automation API availability
 """
 
 import gc
@@ -50,6 +53,10 @@ from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("tijan")
+
+# Default parse_plans values — used to detect when APS enrichment should override
+DEFAULTS_PARSE = {"nb_niveaux": 5, "hauteur_etage_m": 3.0, "surface_emprise_m2": 500.0,
+                  "portee_max_m": 6.0, "portee_min_m": 4.5, "nb_travees_x": 4, "nb_travees_y": 3}
 
 app = FastAPI(
     title="Tijan AI API",
@@ -597,6 +604,40 @@ async def parse_fichier(
                         logger.warning("DWG→DXF succeeded but geometry extraction returned None (no walls found in named layers)")
                 except Exception as e:
                     logger.warning("DXF geometry extraction failed: %s", e)
+
+                # APS ENRICHMENT: if ezdxf found geometry but it's thin
+                # (few walls, no axes), use APS Model Derivative to get
+                # better params (axes, portées, dimensions, emprise)
+                if dwg_geom_found:
+                    n_walls = len(dxf_geom.get('walls', []))
+                    n_axes = len(dxf_geom.get('axes_x', [])) + len(dxf_geom.get('axes_y', []))
+                    if n_walls < 20 or n_axes < 4:
+                        logger.info("[DWG] Geometry thin (%d walls, %d axes) — enriching via APS Model Derivative",
+                                    n_walls, n_axes)
+                        try:
+                            from aps_parser_v2 import parser_dwg_aps
+                            aps_result = parser_dwg_aps(tmp_path, nb_niveaux=nb_niveaux, ville=ville or "Dakar")
+                            if aps_result.get("ok"):
+                                aps_geo = aps_result.get("geometrie", {})
+                                aps_params = aps_result.get("donnees_moteur", {})
+                                # Enrich result params with APS-derived values (more reliable for axes/portées)
+                                for key in ("nb_travees_x", "nb_travees_y", "portee_max_m", "portee_min_m",
+                                            "surface_emprise_m2"):
+                                    aps_val = aps_params.get(key) or aps_geo.get(key)
+                                    if aps_val and (result.get(key) is None or result.get(key) == DEFAULTS_PARSE.get(key)):
+                                        result[key] = aps_val
+                                # Store APS metadata for diagnostics
+                                result["aps_enrichment"] = {
+                                    "source": "model_derivative",
+                                    "nb_objects": aps_geo.get("nb_total_objects", 0),
+                                    "layers": aps_geo.get("layers", {}),
+                                    "portees_cm": aps_geo.get("portees_cm", []),
+                                }
+                                logger.info("[DWG] APS enrichment applied: travees=%dx%d portees=%.1f-%.1fm",
+                                            result.get("nb_travees_x", 0), result.get("nb_travees_y", 0),
+                                            result.get("portee_min_m", 0), result.get("portee_max_m", 0))
+                        except Exception as e:
+                            logger.warning("[DWG] APS enrichment failed (non-fatal): %s", e)
             else:
                 logger.warning("DWG→DXF conversion failed entirely — no local converter produced output")
                 # Parse params via APS (no geometry)
@@ -2419,6 +2460,165 @@ async def generate_plans_mep_dwg(params: ParamsProjet):
                 os.unlink(out_path)
             except OSError:
                 pass
+        gc.collect()
+
+
+@app.get("/da-status")
+async def da_status_endpoint():
+    """Check Design Automation API availability."""
+    try:
+        from aps_design_automation import da_status
+        return da_status()
+    except Exception as e:
+        return {"available": False, "reason": str(e)}
+
+
+@app.post("/generate-plans-structure-pro")
+async def generate_plans_structure_pro(params: ParamsProjet):
+    """Professional structure plans: ezdxf DXF → AutoCAD cloud → DWG with hatching, blocks, cartouche.
+    Falls back to basic DXF if Design Automation is unavailable."""
+    dxf_path = None
+    dwg_path = None
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        from generate_plans_structure_mep import generer_plans_structure_dxf
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        dwg_geometry = _resolve_geometry(params)
+
+        # Step 1: Generate base DXF via ezdxf
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".dxf") as tmp:
+            dxf_path = tmp.name
+        generer_plans_structure_dxf(dxf_path, resultats=rs, params=params.dict(),
+                                    dwg_geometry=dwg_geometry)
+        logger.info("/generate-plans-structure-pro: base DXF ready (%d KB)",
+                    os.path.getsize(dxf_path) // 1024)
+
+        # Step 2: Send to APS Design Automation for professional styling
+        try:
+            from aps_design_automation import professionalize_dxf
+            da_result = professionalize_dxf(dxf_path)
+            if da_result.get("ok"):
+                dwg_path = da_result["dwg_path"]
+                with open(dwg_path, "rb") as f:
+                    dwg_bytes = f.read()
+                _supabase_archive_plan(
+                    getattr(params, 'project_id', None) or params.dict().get('project_id'),
+                    "plans_structure_pro_dwg", dwg_bytes, content_type="application/dwg")
+                dwg_name = f"tijan_plans_structure_pro_{params.nom.replace(' ','_')[:20]}.dwg"
+                logger.info("/generate-plans-structure-pro: professional DWG ready (%d KB)", len(dwg_bytes) // 1024)
+                return StreamingResponse(
+                    io.BytesIO(dwg_bytes),
+                    media_type="application/octet-stream",
+                    headers={"Content-Disposition": f"attachment; filename={dwg_name}",
+                             "X-Tijan-Source": "design-automation"},
+                )
+            else:
+                logger.warning("/generate-plans-structure-pro: DA failed (%s) — falling back to DXF",
+                              da_result.get("message", ""))
+        except ImportError:
+            logger.warning("/generate-plans-structure-pro: aps_design_automation not available — falling back")
+        except Exception as e:
+            logger.warning("/generate-plans-structure-pro: DA error (%s) — falling back to DXF", e)
+
+        # Fallback: return basic DXF
+        with open(dxf_path, "rb") as f:
+            dxf_bytes = f.read()
+        _supabase_archive_plan(
+            getattr(params, 'project_id', None) or params.dict().get('project_id'),
+            "plans_structure_dxf", dxf_bytes, content_type="application/dxf")
+        dxf_name = f"tijan_plans_structure_{params.nom.replace(' ','_')[:20]}.dxf"
+        return StreamingResponse(
+            io.BytesIO(dxf_bytes),
+            media_type="application/dxf",
+            headers={"Content-Disposition": f"attachment; filename={dxf_name}",
+                     "X-Tijan-Source": "ezdxf-fallback"},
+        )
+    except Exception as e:
+        logger.error(f"/generate-plans-structure-pro error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        for p in (dxf_path, dwg_path):
+            if p:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+        gc.collect()
+
+
+@app.post("/generate-plans-mep-pro")
+async def generate_plans_mep_pro(params: ParamsProjet):
+    """Professional MEP plans: ezdxf DXF → AutoCAD cloud → DWG with hatching, blocks, cartouche.
+    Falls back to basic DXF if Design Automation is unavailable."""
+    dxf_path = None
+    dwg_path = None
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        from generate_plans_structure_mep import generer_plans_mep_dxf
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+        dwg_geometry = _resolve_geometry(params)
+
+        # Step 1: Generate base DXF
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".dxf") as tmp:
+            dxf_path = tmp.name
+        generer_plans_mep_dxf(dxf_path, resultats_mep=rm, resultats_structure=rs,
+                              params=params.dict(), dwg_geometry=dwg_geometry)
+        logger.info("/generate-plans-mep-pro: base DXF ready (%d KB)",
+                    os.path.getsize(dxf_path) // 1024)
+
+        # Step 2: APS Design Automation
+        try:
+            from aps_design_automation import professionalize_dxf
+            da_result = professionalize_dxf(dxf_path)
+            if da_result.get("ok"):
+                dwg_path = da_result["dwg_path"]
+                with open(dwg_path, "rb") as f:
+                    dwg_bytes = f.read()
+                _supabase_archive_plan(
+                    getattr(params, 'project_id', None) or params.dict().get('project_id'),
+                    "plans_mep_pro_dwg", dwg_bytes, content_type="application/dwg")
+                dwg_name = f"tijan_plans_mep_pro_{params.nom.replace(' ','_')[:20]}.dwg"
+                logger.info("/generate-plans-mep-pro: professional DWG ready (%d KB)", len(dwg_bytes) // 1024)
+                return StreamingResponse(
+                    io.BytesIO(dwg_bytes),
+                    media_type="application/octet-stream",
+                    headers={"Content-Disposition": f"attachment; filename={dwg_name}",
+                             "X-Tijan-Source": "design-automation"},
+                )
+            else:
+                logger.warning("/generate-plans-mep-pro: DA failed — falling back to DXF")
+        except ImportError:
+            logger.warning("/generate-plans-mep-pro: aps_design_automation not available — falling back")
+        except Exception as e:
+            logger.warning("/generate-plans-mep-pro: DA error (%s) — falling back to DXF", e)
+
+        # Fallback: return basic DXF
+        with open(dxf_path, "rb") as f:
+            dxf_bytes = f.read()
+        _supabase_archive_plan(
+            getattr(params, 'project_id', None) or params.dict().get('project_id'),
+            "plans_mep_dxf", dxf_bytes, content_type="application/dxf")
+        dxf_name = f"tijan_plans_mep_{params.nom.replace(' ','_')[:20]}.dxf"
+        return StreamingResponse(
+            io.BytesIO(dxf_bytes),
+            media_type="application/dxf",
+            headers={"Content-Disposition": f"attachment; filename={dxf_name}",
+                     "X-Tijan-Source": "ezdxf-fallback"},
+        )
+    except Exception as e:
+        logger.error(f"/generate-plans-mep-pro error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        for p in (dxf_path, dwg_path):
+            if p:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
         gc.collect()
 
 

@@ -127,12 +127,34 @@ def _extract_ezdxf(doc, client, label):
         return {"ok":False,"message":f"Claude {label}: {e}"}
 
 def _parse_dwg(path, client):
+    # Try ezdxf first (fastest, works for simple DWGs)
     try:
         from ezdxf.recover import readfile
         doc,_=readfile(path)
-        return _extract_ezdxf(doc,client,"dwg_ezdxf")
+        result = _extract_ezdxf(doc,client,"dwg_ezdxf")
+        if result.get("ok"):
+            return result
     except Exception as e:
-        return {"ok":False,"message":f"DWG non lu: {e}. Exportez en PDF depuis AutoCAD pour une extraction optimale."}
+        logger.info(f"ezdxf cannot read DWG: {e} — trying APS Model Derivative")
+
+    # Fallback: APS Model Derivative for complex/newer DWGs
+    try:
+        from aps_parser_v2 import parser_dwg_aps
+        aps = parser_dwg_aps(path)
+        if aps.get("ok"):
+            # Convert APS donnees_moteur to parse_plans format
+            dm = aps.get("donnees_moteur", {})
+            result = {k: dm.get(k) for k in DEFAULTS}
+            result["nom"] = dm.get("nom", "")
+            result["ville"] = dm.get("ville", "Dakar")
+            result = _defaults(result)
+            result["ok"] = True
+            result["source"] = "dwg_aps_model_derivative"
+            return result
+    except Exception as e2:
+        logger.warning(f"APS Model Derivative also failed: {e2}")
+
+    return {"ok":False,"message":f"DWG non lu par ezdxf ni APS. Exportez en PDF depuis AutoCAD pour une extraction optimale."}
 
 def _parse_dxf(path, client):
     try:
