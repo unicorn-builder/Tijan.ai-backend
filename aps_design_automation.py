@@ -623,10 +623,15 @@ def da_status() -> Dict[str, Any]:
         )
         if r.status_code == 200:
             engines = r.json().get("data", [])
-            autocad_engines = [e for e in engines if "AutoCAD" in e.get("id", "")]
+            # engines can be list of strings or list of dicts depending on APS version
+            autocad_engines = []
+            for e in engines:
+                eid = e.get("id", "") if isinstance(e, dict) else str(e)
+                if "AutoCAD" in eid:
+                    autocad_engines.append(eid)
             return {
                 "available": True,
-                "engines": [e["id"] for e in autocad_engines[:5]],
+                "engines": autocad_engines[:5],
                 "setup_done": _da_setup_done,
             }
         elif r.status_code == 403:
