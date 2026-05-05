@@ -29,8 +29,8 @@ Endpoints :
   POST /generate-planches         → planches BA PDF
   POST /generate-plans-structure  → plans structure PDF (coffrage, ferraillage, voiles) — géo DXF + EC2
   POST /generate-plans-mep        → plans MEP PDF (7 lots × niveaux) — géo DXF + moteur MEP
-  POST /generate-plans-structure-pro → plans structure PRO DWG via APS Design Automation
-  POST /generate-plans-mep-pro    → plans MEP PRO DWG via APS Design Automation
+  POST /generate-plans-structure-pro → plans structure PDF (default) ou DWG (?format=dwg) — sans restriction DWG-only
+  POST /generate-plans-mep-pro    → plans MEP PDF (default) ou DWG (?format=dwg) — sans restriction DWG-only
   GET  /da-status                 → check Design Automation API availability
 """
 
@@ -2474,71 +2474,82 @@ async def da_status_endpoint():
 
 
 @app.post("/generate-plans-structure-pro")
-async def generate_plans_structure_pro(params: ParamsProjet):
-    """Professional structure plans: ezdxf DXF → AutoCAD cloud → DWG with hatching, blocks, cartouche.
-    Falls back to basic DXF if Design Automation is unavailable."""
+async def generate_plans_structure_pro(params: ParamsProjet, format: Optional[str] = "pdf"):
+    """Professional structure plans — PDF by default, DWG via ?format=dwg.
+    Unlike /generate-plans-structure, this endpoint works with parametric grid (no DWG-only restriction).
+    When APS Design Automation is available, DWG output includes hatching, blocks, cartouche."""
+    out_path = None
     dxf_path = None
     dwg_path = None
     try:
         _, _, calculer_structure = get_moteur_structure()
-        from generate_plans_structure_mep import generer_plans_structure_dxf
         donnees = params_to_donnees(params)
         rs = calculer_structure(donnees)
         dwg_geometry = _resolve_geometry(params)
 
-        # Step 1: Generate base DXF via ezdxf
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".dxf") as tmp:
-            dxf_path = tmp.name
-        generer_plans_structure_dxf(dxf_path, resultats=rs, params=params.dict(),
-                                    dwg_geometry=dwg_geometry)
-        logger.info("/generate-plans-structure-pro: base DXF ready (%d KB)",
-                    os.path.getsize(dxf_path) // 1024)
+        if format == "dwg":
+            # DWG/DXF output for technicians
+            from generate_plans_structure_mep import generer_plans_structure_dxf
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".dxf") as tmp:
+                dxf_path = tmp.name
+            generer_plans_structure_dxf(dxf_path, resultats=rs, params=params.dict(),
+                                        dwg_geometry=dwg_geometry)
+            logger.info("/generate-plans-structure-pro[dwg]: base DXF ready (%d KB)",
+                        os.path.getsize(dxf_path) // 1024)
 
-        # Step 2: Send to APS Design Automation for professional styling
-        try:
-            from aps_design_automation import professionalize_dxf
-            da_result = professionalize_dxf(dxf_path)
-            if da_result.get("ok"):
-                dwg_path = da_result["dwg_path"]
-                with open(dwg_path, "rb") as f:
-                    dwg_bytes = f.read()
-                _supabase_archive_plan(
-                    getattr(params, 'project_id', None) or params.dict().get('project_id'),
-                    "plans_structure_pro_dwg", dwg_bytes, content_type="application/dwg")
-                dwg_name = f"tijan_plans_structure_pro_{params.nom.replace(' ','_')[:20]}.dwg"
-                logger.info("/generate-plans-structure-pro: professional DWG ready (%d KB)", len(dwg_bytes) // 1024)
-                return StreamingResponse(
-                    io.BytesIO(dwg_bytes),
-                    media_type="application/octet-stream",
-                    headers={"Content-Disposition": f"attachment; filename={dwg_name}",
-                             "X-Tijan-Source": "design-automation"},
-                )
-            else:
-                logger.warning("/generate-plans-structure-pro: DA failed (%s) — falling back to DXF",
-                              da_result.get("message", ""))
-        except ImportError:
-            logger.warning("/generate-plans-structure-pro: aps_design_automation not available — falling back")
-        except Exception as e:
-            logger.warning("/generate-plans-structure-pro: DA error (%s) — falling back to DXF", e)
+            # Try APS Design Automation for professional DWG
+            try:
+                from aps_design_automation import professionalize_dxf
+                da_result = professionalize_dxf(dxf_path)
+                if da_result.get("ok"):
+                    dwg_path = da_result["dwg_path"]
+                    with open(dwg_path, "rb") as f:
+                        dwg_bytes = f.read()
+                    _supabase_archive_plan(
+                        getattr(params, 'project_id', None) or params.dict().get('project_id'),
+                        "plans_structure_pro_dwg", dwg_bytes, content_type="application/dwg")
+                    dwg_name = f"tijan_plans_structure_pro_{params.nom.replace(' ','_')[:20]}.dwg"
+                    return StreamingResponse(
+                        io.BytesIO(dwg_bytes),
+                        media_type="application/octet-stream",
+                        headers={"Content-Disposition": f"attachment; filename={dwg_name}",
+                                 "X-Tijan-Source": "design-automation"},
+                    )
+            except Exception as e:
+                logger.warning("/generate-plans-structure-pro[dwg]: DA failed (%s) — returning DXF", e)
 
-        # Fallback: return basic DXF
-        with open(dxf_path, "rb") as f:
-            dxf_bytes = f.read()
-        _supabase_archive_plan(
-            getattr(params, 'project_id', None) or params.dict().get('project_id'),
-            "plans_structure_dxf", dxf_bytes, content_type="application/dxf")
-        dxf_name = f"tijan_plans_structure_{params.nom.replace(' ','_')[:20]}.dxf"
-        return StreamingResponse(
-            io.BytesIO(dxf_bytes),
-            media_type="application/dxf",
-            headers={"Content-Disposition": f"attachment; filename={dxf_name}",
-                     "X-Tijan-Source": "ezdxf-fallback"},
-        )
+            # Fallback: return DXF
+            with open(dxf_path, "rb") as f:
+                dxf_bytes = f.read()
+            dxf_name = f"tijan_plans_structure_{params.nom.replace(' ','_')[:20]}.dxf"
+            return StreamingResponse(
+                io.BytesIO(dxf_bytes),
+                media_type="application/dxf",
+                headers={"Content-Disposition": f"attachment; filename={dxf_name}",
+                         "X-Tijan-Source": "ezdxf-fallback"},
+            )
+        else:
+            # PDF output (default) — for clients, promoteurs, maîtres d'ouvrage
+            from generate_plans_structure_mep import generer_plans_structure
+            archi_pdf_path = _resolve_archi_pdf(params)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                out_path = tmp.name
+            generer_plans_structure(out_path, resultats=rs, params=params.dict(),
+                                    dwg_geometry=dwg_geometry,
+                                    archi_pdf_path=archi_pdf_path)
+            with open(out_path, "rb") as f:
+                pdf_bytes = f.read()
+            _archive_url = _supabase_archive_plan(
+                getattr(params, 'project_id', None) or params.dict().get('project_id'),
+                "plans_structure_pro", pdf_bytes)
+            logger.info("/generate-plans-structure-pro[pdf]: %d KB", len(pdf_bytes) // 1024)
+            return pdf_response(pdf_bytes, fname(params, "plans_structure_pro"), archive_url=_archive_url)
+
     except Exception as e:
         logger.error(f"/generate-plans-structure-pro error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        for p in (dxf_path, dwg_path):
+        for p in (out_path, dxf_path, dwg_path):
             if p:
                 try:
                     os.unlink(p)
@@ -2548,72 +2559,84 @@ async def generate_plans_structure_pro(params: ParamsProjet):
 
 
 @app.post("/generate-plans-mep-pro")
-async def generate_plans_mep_pro(params: ParamsProjet):
-    """Professional MEP plans: ezdxf DXF → AutoCAD cloud → DWG with hatching, blocks, cartouche.
-    Falls back to basic DXF if Design Automation is unavailable."""
+async def generate_plans_mep_pro(params: ParamsProjet, format: Optional[str] = "pdf"):
+    """Professional MEP plans — PDF by default, DWG via ?format=dwg.
+    Unlike /generate-plans-mep, this endpoint works with parametric grid (no DWG-only restriction).
+    When APS Design Automation is available, DWG output includes hatching, blocks, cartouche."""
+    out_path = None
     dxf_path = None
     dwg_path = None
     try:
         _, _, calculer_structure = get_moteur_structure()
         calculer_mep = get_moteur_mep()
-        from generate_plans_structure_mep import generer_plans_mep_dxf
         donnees = params_to_donnees(params)
         rs = calculer_structure(donnees)
         rm = calculer_mep(donnees, rs)
         dwg_geometry = _resolve_geometry(params)
 
-        # Step 1: Generate base DXF
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".dxf") as tmp:
-            dxf_path = tmp.name
-        generer_plans_mep_dxf(dxf_path, resultats_mep=rm, resultats_structure=rs,
-                              params=params.dict(), dwg_geometry=dwg_geometry)
-        logger.info("/generate-plans-mep-pro: base DXF ready (%d KB)",
-                    os.path.getsize(dxf_path) // 1024)
+        if format == "dwg":
+            # DWG/DXF output for technicians
+            from generate_plans_structure_mep import generer_plans_mep_dxf
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".dxf") as tmp:
+                dxf_path = tmp.name
+            generer_plans_mep_dxf(dxf_path, resultats_mep=rm, resultats_structure=rs,
+                                  params=params.dict(), dwg_geometry=dwg_geometry)
+            logger.info("/generate-plans-mep-pro[dwg]: base DXF ready (%d KB)",
+                        os.path.getsize(dxf_path) // 1024)
 
-        # Step 2: APS Design Automation
-        try:
-            from aps_design_automation import professionalize_dxf
-            da_result = professionalize_dxf(dxf_path)
-            if da_result.get("ok"):
-                dwg_path = da_result["dwg_path"]
-                with open(dwg_path, "rb") as f:
-                    dwg_bytes = f.read()
-                _supabase_archive_plan(
-                    getattr(params, 'project_id', None) or params.dict().get('project_id'),
-                    "plans_mep_pro_dwg", dwg_bytes, content_type="application/dwg")
-                dwg_name = f"tijan_plans_mep_pro_{params.nom.replace(' ','_')[:20]}.dwg"
-                logger.info("/generate-plans-mep-pro: professional DWG ready (%d KB)", len(dwg_bytes) // 1024)
-                return StreamingResponse(
-                    io.BytesIO(dwg_bytes),
-                    media_type="application/octet-stream",
-                    headers={"Content-Disposition": f"attachment; filename={dwg_name}",
-                             "X-Tijan-Source": "design-automation"},
-                )
-            else:
-                logger.warning("/generate-plans-mep-pro: DA failed — falling back to DXF")
-        except ImportError:
-            logger.warning("/generate-plans-mep-pro: aps_design_automation not available — falling back")
-        except Exception as e:
-            logger.warning("/generate-plans-mep-pro: DA error (%s) — falling back to DXF", e)
+            # Try APS Design Automation
+            try:
+                from aps_design_automation import professionalize_dxf
+                da_result = professionalize_dxf(dxf_path)
+                if da_result.get("ok"):
+                    dwg_path = da_result["dwg_path"]
+                    with open(dwg_path, "rb") as f:
+                        dwg_bytes = f.read()
+                    _supabase_archive_plan(
+                        getattr(params, 'project_id', None) or params.dict().get('project_id'),
+                        "plans_mep_pro_dwg", dwg_bytes, content_type="application/dwg")
+                    dwg_name = f"tijan_plans_mep_pro_{params.nom.replace(' ','_')[:20]}.dwg"
+                    return StreamingResponse(
+                        io.BytesIO(dwg_bytes),
+                        media_type="application/octet-stream",
+                        headers={"Content-Disposition": f"attachment; filename={dwg_name}",
+                                 "X-Tijan-Source": "design-automation"},
+                    )
+            except Exception as e:
+                logger.warning("/generate-plans-mep-pro[dwg]: DA failed (%s) — returning DXF", e)
 
-        # Fallback: return basic DXF
-        with open(dxf_path, "rb") as f:
-            dxf_bytes = f.read()
-        _supabase_archive_plan(
-            getattr(params, 'project_id', None) or params.dict().get('project_id'),
-            "plans_mep_dxf", dxf_bytes, content_type="application/dxf")
-        dxf_name = f"tijan_plans_mep_{params.nom.replace(' ','_')[:20]}.dxf"
-        return StreamingResponse(
-            io.BytesIO(dxf_bytes),
-            media_type="application/dxf",
-            headers={"Content-Disposition": f"attachment; filename={dxf_name}",
-                     "X-Tijan-Source": "ezdxf-fallback"},
-        )
+            # Fallback: return DXF
+            with open(dxf_path, "rb") as f:
+                dxf_bytes = f.read()
+            dxf_name = f"tijan_plans_mep_{params.nom.replace(' ','_')[:20]}.dxf"
+            return StreamingResponse(
+                io.BytesIO(dxf_bytes),
+                media_type="application/dxf",
+                headers={"Content-Disposition": f"attachment; filename={dxf_name}",
+                         "X-Tijan-Source": "ezdxf-fallback"},
+            )
+        else:
+            # PDF output (default) — for clients
+            from generate_plans_structure_mep import generer_plans_mep
+            archi_pdf_path = _resolve_archi_pdf(params)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                out_path = tmp.name
+            generer_plans_mep(out_path, resultats_mep=rm, resultats_structure=rs,
+                              params=params.dict(), dwg_geometry=dwg_geometry,
+                              archi_pdf_path=archi_pdf_path)
+            with open(out_path, "rb") as f:
+                pdf_bytes = f.read()
+            _archive_url = _supabase_archive_plan(
+                getattr(params, 'project_id', None) or params.dict().get('project_id'),
+                "plans_mep_pro", pdf_bytes)
+            logger.info("/generate-plans-mep-pro[pdf]: %d KB", len(pdf_bytes) // 1024)
+            return pdf_response(pdf_bytes, fname(params, "plans_mep_pro"), archive_url=_archive_url)
+
     except Exception as e:
         logger.error(f"/generate-plans-mep-pro error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        for p in (dxf_path, dwg_path):
+        for p in (out_path, dxf_path, dwg_path):
             if p:
                 try:
                     os.unlink(p)
