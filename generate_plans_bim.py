@@ -663,7 +663,7 @@ def _render_sublot_page(c, level: Level, building: Building,
 
     elif trade_code == "SYN":
         _draw_room_labels(c, level, ox, oy, scale)
-        _draw_all_equipment(c, level, ox, oy, scale)
+        # SYN shows only networks (no equipment) to stay readable
         _draw_all_networks(c, level, ox, oy, scale)
         _draw_legend_synthesis(c, w, h)
         # Draw clash markers if provided

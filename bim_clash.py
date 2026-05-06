@@ -383,6 +383,14 @@ def _detect_segment_clashes(segments: List[NetworkSegment],
             seg_b = segments[j]
             trade_b = _get_trade(seg_b.type)
 
+            # Skip same-trade segments in the same room — these are
+            # designed together and produce thousands of false positives
+            if trade_a == trade_b:
+                room_a = seg_room.get(seg_a.id, "")
+                room_b = seg_room.get(seg_b.id, "")
+                if room_a and room_a == room_b:
+                    continue
+
             # Skip if both are vertical risers (they're stacked, not clashing)
             if seg_a.is_vertical and seg_b.is_vertical:
                 continue
@@ -749,6 +757,31 @@ def detect_clashes(building: Building,
                      len(segments),
                      len(seg_clashes) + len(eq_clashes) +
                      len(str_clashes) + len(elec_plu))
+
+    # ── Deduplicate by spatial proximity (within 0.5m = same spot) ──
+    deduped: List[Clash] = []
+    seen_locations: List[Tuple[float, float, str]] = []
+    for c in all_clashes:
+        loc_key = (round(c.location.x * 2) / 2,
+                   round(c.location.y * 2) / 2,
+                   c.level_name)
+        if loc_key not in seen_locations:
+            seen_locations.append(loc_key)
+            deduped.append(c)
+    all_clashes = deduped
+
+    # ── Prioritize: HARD first, then CROSSING, then SOFT ──
+    severity_order = {ClashSeverity.HARD: 0, ClashSeverity.CROSSING: 1,
+                      ClashSeverity.SOFT: 2}
+    all_clashes.sort(key=lambda c: severity_order.get(c.severity, 9))
+
+    # ── Cap at 200 most critical clashes for report readability ──
+    MAX_CLASHES = 200
+    total_before_cap = len(all_clashes)
+    if len(all_clashes) > MAX_CLASHES:
+        all_clashes = all_clashes[:MAX_CLASHES]
+        logger.info("Capped clashes from %d to %d (showing most critical)",
+                     total_before_cap, MAX_CLASHES)
 
     # Build report
     report = ClashReport(
