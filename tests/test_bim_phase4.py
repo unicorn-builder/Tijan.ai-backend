@@ -277,6 +277,41 @@ def build_sakho() -> Building:
 
 
 # ══════════════════════════════════════════════════════════════
+# HELPERS
+# ══════════════════════════════════════════════════════════════
+
+def _walls_from_polygon(room: Room) -> list:
+    """Create Wall objects from a room's polygon edges.
+
+    This is needed because the test constructs rooms independently from
+    level walls. In production, Building.from_params_dict links walls
+    to rooms by ID, but here we generate walls on the fly.
+    """
+    if not room.polygon or len(room.polygon) < 3:
+        return []
+
+    walls = []
+    pts = room.polygon
+    n = len(pts)
+    for i in range(n):
+        start = pts[i]
+        end = pts[(i + 1) % n]
+        # Determine wall type heuristically
+        is_exterior = (start.x == 0 or start.x == 28 or
+                       start.y == 0 or start.y == 50 or
+                       end.x == 0 or end.x == 28 or
+                       end.y == 0 or end.y == 50)
+        w = Wall(
+            start=start, end=end,
+            thickness_m=0.25 if is_exterior else 0.15,
+            type=WallType.FACADE if is_exterior else WallType.CLOISON,
+            room_left_id=room.id,
+        )
+        walls.append(w)
+    return walls
+
+
+# ══════════════════════════════════════════════════════════════
 # MAIN — RUN FULL PIPELINE
 # ══════════════════════════════════════════════════════════════
 
@@ -295,12 +330,11 @@ def main():
     print(f"    (dont 6 appartements × 7 étages = 42 unités)")
 
     # Step 2: Equipment placement
+    # Build per-room walls from polygon edges (since test walls aren't linked by ID)
     print("\n▶ [2/5] Placement des équipements...")
     for level in building.levels:
         for room in level.rooms:
-            room_walls = [w for w in level.walls
-                          if w.room_left_id == room.id
-                          or w.room_right_id == room.id]
+            room_walls = _walls_from_polygon(room)
             room.equipment = place_equipment_in_room(room, room_walls)
     total_equip = sum(len(r.equipment)
                       for l in building.levels for r in l.rooms)
