@@ -26,6 +26,10 @@ Endpoints :
   POST /generate-rapport-executif → rapport synthèse maître d'ouvrage PDF (FR/EN)
   POST /generate-fiches-structure → fiches techniques structure PDF
   POST /generate-fiches-mep       → fiches techniques MEP PDF
+  POST /generate-fiches-all       → fiches techniques complètes (structure + MEP)
+  POST /generate-planning         → planning d'exécution + trésorerie PDF (Gantt)
+  POST /generate-planning-xlsx    → planning d'exécution + trésorerie Excel
+  POST /generate-dao              → dossier d'appel d'offres par lot (BOQ + CCTP)
   POST /generate-planches         → planches BA PDF
   POST /generate-plans-structure  → plans structure PDF (coffrage, ferraillage, voiles) — DWG/DXF obligatoire
   POST /generate-plans-mep        → plans MEP PDF (7 lots × niveaux) — DWG/DXF obligatoire
@@ -2152,6 +2156,107 @@ async def generate_fiches_mep(params: ParamsProjet):
         return pdf_response(pdf_bytes, fname(params, "fiches_mep"))
     except Exception as e:
         logger.error(f"/generate-fiches-mep error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-planning")
+async def generate_planning(params: ParamsProjet):
+    """Planning d'exécution + plan de trésorerie (PDF Gantt)."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+        set_pdf_lang(getattr(params, 'lang', 'fr'))
+        set_pdf_devise(get_devise_info(params.ville))
+
+        from engine_planning import generer_planning
+        from gen_planning_pdf import generer_planning_pdf
+
+        planning = generer_planning(rs, rm, params.dict())
+        pdf_bytes = generer_planning_pdf(planning, lang=getattr(params, 'lang', 'fr'))
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, "planning_execution"))
+    except Exception as e:
+        logger.error(f"/generate-planning error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-planning-xlsx")
+async def generate_planning_xlsx(request: Request):
+    """Planning d'exécution + plan de trésorerie (Excel)."""
+    try:
+        body = await request.json()
+        lang = body.pop("lang", "fr")
+        params = ParamsProjet(**body)
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+
+        from engine_planning import generer_planning
+        from gen_planning_xlsx import generer_planning_xlsx
+
+        planning = generer_planning(rs, rm, params.dict())
+        xlsx_bytes = generer_planning_xlsx(planning, lang=lang)
+        gc.collect()
+        xlsx_name = f"tijan_planning_{params.nom.replace(' ', '_')[:20]}.xlsx"
+        return StreamingResponse(
+            io.BytesIO(xlsx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={xlsx_name}"},
+        )
+    except Exception as e:
+        logger.error(f"/generate-planning-xlsx error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-dao")
+async def generate_dao(params: ParamsProjet, lot: str = "structure"):
+    """Dossier d'Appel d'Offres par lot (BOQ + CCTP)."""
+    allowed_lots = {"structure", "mep", "finitions"}
+    if lot not in allowed_lots:
+        raise HTTPException(status_code=422, detail=f"lot must be one of: {', '.join(sorted(allowed_lots))}")
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+        set_pdf_lang(getattr(params, 'lang', 'fr'))
+        set_pdf_devise(get_devise_info(params.ville))
+
+        from gen_dao import generer_dao
+
+        pdf_bytes = generer_dao(rs, rm, params.dict(), lot=lot, lang=getattr(params, 'lang', 'fr'))
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, f"dao_{lot}"))
+    except Exception as e:
+        logger.error(f"/generate-dao error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-fiches-all")
+async def generate_fiches_all(params: ParamsProjet):
+    """Fiches techniques complètes — tous items BOQ (structure + MEP)."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+        set_pdf_lang(getattr(params, 'lang', 'fr'))
+        set_pdf_devise(get_devise_info(params.ville))
+
+        from generate_fiches_all import generer_fiches_techniques
+
+        pdf_bytes = generer_fiches_techniques(rs, rm, params.dict(), lang=getattr(params, 'lang', 'fr'))
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, "fiches_techniques_all"))
+    except Exception as e:
+        logger.error(f"/generate-fiches-all error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

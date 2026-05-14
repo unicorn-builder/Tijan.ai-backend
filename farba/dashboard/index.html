@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FARBA — Lead Generation Dashboard | Tijan AI</title>
+<style>
+  :root {
+    --vert: #43A956;
+    --vert-dark: #2D7A3A;
+    --vert-light: #EBF7ED;
+    --orange: #E07B00;
+    --orange-lt: #FFF3E0;
+    --gris1: #F5F5F5;
+    --gris2: #E5E5E5;
+    --gris3: #888888;
+    --red: #E53935;
+    --red-lt: #FFEBEE;
+    --blue: #1976D2;
+    --blue-lt: #E3F2FD;
+    --purple: #7B1FA2;
+    --purple-lt: #F3E5F5;
+    --radius: 12px;
+    --shadow: 0 2px 12px rgba(0,0,0,0.08);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--gris1); color: #1a1a1a; }
+
+  /* Header */
+  .header { background: linear-gradient(135deg, var(--vert-dark), var(--vert)); color: white; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; }
+  .header h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+  .header h1 span { font-weight: 300; opacity: 0.85; }
+  .header-right { display: flex; align-items: center; gap: 16px; font-size: 14px; opacity: 0.9; }
+
+  /* Nav tabs */
+  .nav { background: white; border-bottom: 1px solid var(--gris2); padding: 0 32px; display: flex; gap: 0; }
+  .nav-tab { padding: 14px 20px; font-size: 14px; font-weight: 500; color: var(--gris3); cursor: pointer; border-bottom: 3px solid transparent; transition: all 0.2s; }
+  .nav-tab:hover { color: var(--vert-dark); }
+  .nav-tab.active { color: var(--vert-dark); border-bottom-color: var(--vert); }
+
+  /* Stats bar */
+  .stats-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; padding: 24px 32px; }
+  .stat-card { background: white; border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); }
+  .stat-card .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--gris3); margin-bottom: 8px; }
+  .stat-card .value { font-size: 28px; font-weight: 700; }
+  .stat-card .value.green { color: var(--vert); }
+  .stat-card .value.orange { color: var(--orange); }
+  .stat-card .value.blue { color: var(--blue); }
+  .stat-card .value.purple { color: var(--purple); }
+
+  /* Main content */
+  .content { padding: 0 32px 32px; }
+
+  /* Filters */
+  .filters { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+  .filter-btn { padding: 8px 16px; border-radius: 20px; border: 1px solid var(--gris2); background: white; font-size: 13px; cursor: pointer; transition: all 0.2s; }
+  .filter-btn:hover { border-color: var(--vert); color: var(--vert); }
+  .filter-btn.active { background: var(--vert); color: white; border-color: var(--vert); }
+  .search-input { padding: 8px 16px; border-radius: 20px; border: 1px solid var(--gris2); font-size: 13px; width: 240px; outline: none; }
+  .search-input:focus { border-color: var(--vert); }
+
+  /* Lead cards */
+  .leads-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; }
+  .lead-card { background: white; border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; transition: transform 0.2s, box-shadow 0.2s; }
+  .lead-card:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(0,0,0,0.12); }
+  .lead-card-header { padding: 16px 20px 12px; display: flex; justify-content: space-between; align-items: flex-start; }
+  .lead-name { font-size: 16px; font-weight: 600; color: #1a1a1a; }
+  .lead-type-badge { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+  .badge-architecte { background: var(--blue-lt); color: var(--blue); }
+  .badge-bet { background: var(--purple-lt); color: var(--purple); }
+  .badge-entrepreneur { background: var(--orange-lt); color: var(--orange); }
+  .badge-promoteur { background: var(--vert-light); color: var(--vert-dark); }
+  .badge-banque { background: var(--red-lt); color: var(--red); }
+  .badge-fournisseur { background: #EFEBE9; color: #5D4037; }
+  .lead-card-body { padding: 0 20px 16px; }
+  .lead-meta { display: flex; gap: 16px; margin-bottom: 10px; font-size: 13px; color: var(--gris3); }
+  .lead-meta span { display: flex; align-items: center; gap: 4px; }
+  .lead-desc { font-size: 13px; line-height: 1.5; color: #555; margin-bottom: 12px; }
+  .lead-contact-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .contact-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: var(--gris1); border-radius: 8px; font-size: 12px; color: #555; text-decoration: none; transition: background 0.2s; }
+  .contact-chip:hover { background: var(--gris2); }
+  .contact-chip a { color: inherit; text-decoration: none; }
+
+  /* Score bar */
+  .score-section { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--gris1); }
+  .score-bar-bg { flex: 1; height: 8px; background: var(--gris2); border-radius: 4px; overflow: hidden; }
+  .score-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
+  .score-label { font-size: 14px; font-weight: 700; min-width: 36px; text-align: right; }
+  .priority-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+  .priority-high { background: var(--vert); }
+  .priority-medium { background: var(--orange); }
+  .priority-low { background: var(--gris3); }
+
+  /* Social links */
+  .social-links { display: flex; gap: 8px; margin-top: 8px; }
+  .social-link { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; font-size: 12px; font-weight: 700; text-decoration: none; color: white; transition: opacity 0.2s; }
+  .social-link:hover { opacity: 0.8; }
+  .social-link.web { background: var(--vert); }
+  .social-link.linkedin { background: #0A66C2; }
+  .social-link.facebook { background: #1877F2; }
+  .social-link.instagram { background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888); }
+  .social-link.email { background: var(--gris3); }
+  .social-link.phone { background: var(--vert-dark); }
+
+  /* Status selector */
+  .status-select { padding: 4px 8px; border-radius: 6px; border: 1px solid var(--gris2); font-size: 12px; cursor: pointer; }
+
+  /* Table view */
+  .leads-table { width: 100%; border-collapse: separate; border-spacing: 0; background: white; border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+  .leads-table th { background: var(--gris1); padding: 12px 16px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--gris3); border-bottom: 1px solid var(--gris2); }
+  .leads-table td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid var(--gris1); }
+  .leads-table tr:hover td { background: var(--gris1); }
+
+  /* View toggle */
+  .view-toggle { display: flex; gap: 4px; background: var(--gris1); border-radius: 8px; padding: 3px; }
+  .view-btn { padding: 6px 14px; border-radius: 6px; border: none; background: none; font-size: 13px; cursor: pointer; transition: all 0.2s; }
+  .view-btn.active { background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+
+  /* Pipeline view */
+  .pipeline { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .pipeline-col { background: var(--gris1); border-radius: var(--radius); padding: 16px; min-height: 300px; }
+  .pipeline-col h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--gris3); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+  .pipeline-col h3 .count { background: var(--gris2); padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .pipeline-card { background: white; border-radius: 8px; padding: 12px; margin-bottom: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); cursor: pointer; }
+  .pipeline-card .p-name { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .pipeline-card .p-type { font-size: 11px; color: var(--gris3); }
+
+  .hidden { display: none; }
+
+  @media (max-width: 768px) {
+    .header { padding: 16px; flex-direction: column; gap: 8px; }
+    .nav { overflow-x: auto; padding: 0 16px; }
+    .stats-bar { padding: 16px; grid-template-columns: repeat(2, 1fr); }
+    .content { padding: 0 16px 16px; }
+    .leads-grid { grid-template-columns: 1fr; }
+    .pipeline { grid-template-columns: 1fr 1fr; }
+    .filters { flex-direction: column; }
+    .search-input { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>FARBA <span>— Lead Generation</span></h1>
+  <div class="header-right">
+    <span>Tijan AI</span>
+    <span>•</span>
+    <span id="date-display"></span>
+    <span>•</span>
+    <span id="lead-count"></span>
+  </div>
+</div>
+
+<div class="nav">
+  <div class="nav-tab active" data-view="briefing">Briefing</div>
+  <div class="nav-tab" data-view="leads">Tous les leads</div>
+  <div class="nav-tab" data-view="pipeline">Pipeline</div>
+  <div class="nav-tab" data-view="analytics">Analytics</div>
+</div>
+
+<!-- BRIEFING VIEW -->
+<div id="view-briefing">
+  <div class="stats-bar" id="stats-bar"></div>
+  <div class="content">
+    <h2 style="font-size:18px; margin-bottom:16px; color:#1a1a1a;">Top leads — Priorité haute</h2>
+    <div class="leads-grid" id="top-leads"></div>
+  </div>
+</div>
+
+<!-- ALL LEADS VIEW -->
+<div id="view-leads" class="hidden">
+  <div style="padding: 24px 32px 0;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <div class="filters" id="filters"></div>
+      <div class="view-toggle">
+        <button class="view-btn active" data-mode="cards">Cartes</button>
+        <button class="view-btn" data-mode="table">Table</button>
+      </div>
+    </div>
+  </div>
+  <div class="content">
+    <div class="leads-grid" id="all-leads-cards"></div>
+    <div id="all-leads-table-wrap" class="hidden"></div>
+  </div>
+</div>
+
+<!-- PIPELINE VIEW -->
+<div id="view-pipeline" class="hidden">
+  <div class="content" style="padding-top: 24px;">
+    <div class="pipeline" id="pipeline-board"></div>
+  </div>
+</div>
+
+<!-- ANALYTICS VIEW -->
+<div id="view-analytics" class="hidden">
+  <div class="stats-bar" id="analytics-stats"></div>
+  <div class="content">
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+      <div style="background:white; border-radius:var(--radius); padding:24px; box-shadow:var(--shadow);">
+        <h3 style="font-size:16px; margin-bottom:16px;">Répartition par type</h3>
+        <div id="chart-type"></div>
+      </div>
+      <div style="background:white; border-radius:var(--radius); padding:24px; box-shadow:var(--shadow);">
+        <h3 style="font-size:16px; margin-bottom:16px;">Répartition par ville</h3>
+        <div id="chart-city"></div>
+      </div>
+      <div style="background:white; border-radius:var(--radius); padding:24px; box-shadow:var(--shadow);">
+        <h3 style="font-size:16px; margin-bottom:16px;">Distribution des scores</h3>
+        <div id="chart-scores"></div>
+      </div>
+      <div style="background:white; border-radius:var(--radius); padding:24px; box-shadow:var(--shadow);">
+        <h3 style="font-size:16px; margin-bottom:16px;">Répartition par tier</h3>
+        <div id="chart-tier"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── DATA ───
+// Tier 1 = Grands cabinets établis, Tier 2 = Cabinets moyens, Tier 3 = Petits indépendants, Tier 4 = Micro-entrepreneurs / tâcherons formalisés
+const LEADS = [
+  // ══════════ TIER 1 — Grands cabinets (gardés comme référence) ══════════
+  {id:1,name:"ARCHI CONCEPT INT (ACI)",type:"architecte",tier:1,contact:"Malick Mbow",title:"Architecte DPLG-F, Fondateur",city:"Dakar",zone:"Hann Bel-Air",phone:"+221 77 819 70 80",phone2:"+221 33 832 07 01",email:"secretariat@archiconceptint.sn",email2:"mbow2001@yahoo.fr",website:"https://www.archiconceptint.sn",linkedin:"",facebook:"",instagram:"",desc:"Cabinet fondé en 2003. BET intégré. Projets résidentiels + tertiaire.",score:92,reasons:["BET intégré","Site web actif","Tier 1 — référence"],status:"new",priority:"high"},
+  {id:2,name:"SENESTUDIO",type:"architecte",tier:1,contact:"Marlène Sene / Abdou M. Sene",title:"Co-fondateurs",city:"Dakar",zone:"Fann",phone:"",phone2:"",email:"",email2:"",website:"https://www.senestudio.net",linkedin:"https://www.linkedin.com/in/marl%C3%A8ne-sene-architecte/",facebook:"https://www.facebook.com/Senestudio.Archi/",instagram:"",desc:"Fondée à Londres 2006. Multidisciplinaire: routes, transport, résidentiel.",score:88,reasons:["International + local","LinkedIn actif","Tier 1"],status:"new",priority:"medium"},
+  {id:3,name:"Sahel Ingénierie",type:"bet",tier:1,contact:"",title:"",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://sahel-ing.com",linkedin:"https://www.linkedin.com/company/sahel-ing%C3%A9nierie",facebook:"https://www.facebook.com/officielsahelingenierie/",instagram:"",desc:"Spécialiste structures BA, bois, métal. 11-50 employés.",score:93,reasons:["Structure BA = cœur Tijan","LinkedIn + Facebook actifs","Tier 1"],status:"new",priority:"medium"},
+  {id:4,name:"BETPLUS SAS",type:"bet",tier:1,contact:"",title:"",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://betplus-sn.com",linkedin:"",facebook:"",instagram:"",desc:"BET multidisciplinaire: géotechnique, géomatique, électricité, hydraulique.",score:90,reasons:["Multidisciplinaire","Clients publics/privés","Tier 1"],status:"new",priority:"medium"},
+  {id:5,name:"SIPRES SA",type:"promoteur",tier:1,contact:"",title:"",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://sipres.sn",linkedin:"",facebook:"https://www.facebook.com/SipresSn/",instagram:"",desc:"1er promoteur immobilier privé du Sénégal depuis 1990.",score:88,reasons:["Volume élevé d'études","Peut imposer Tijan à ses BET","Tier 1"],status:"new",priority:"medium"},
+
+  // ══════════ TIER 2 — Cabinets moyens ══════════
+  {id:6,name:"2MS Architecture",type:"architecte",tier:2,contact:"",title:"",city:"Dakar",zone:"Ouest Foire",phone:"",phone2:"",email:"contact@2msarchitecture.com",email2:"",website:"https://2msarchitecture.com",linkedin:"",facebook:"",instagram:"",desc:"Équipe multidisciplinaire. Espaces fonctionnels, esthétiques, durables. Ouest Foire villa 059.",score:78,reasons:["Multidisciplinaire","Site web actif","Tier 2 — taille idéale Tijan"],status:"new",priority:"high"},
+  {id:7,name:"Architecture et Climat (A&C)",type:"architecte",tier:2,contact:"Armand Agboba",title:"Architecte",city:"Dakar",zone:"Point E",phone:"+221 33 820 40 89",phone2:"+221 33 825 03 66",email:"",email2:"",website:"https://architectureetclimat.com",linkedin:"",facebook:"",instagram:"",desc:"Cabinet multidisciplinaire architectes + ingénieurs. Études, conseils, suivi. Point E, Rue des Écrivains.",score:80,reasons:["Architectes + ingénieurs","Climat = EDGE pertinent","Tier 2"],status:"new",priority:"high"},
+  {id:8,name:"GA2D",type:"architecte",tier:2,contact:"Andrée Diop Depret / Eric Mulot",title:"Fondateurs",city:"Dakar",zone:"Point E",phone:"+221 33 825 89 50",phone2:"",email:"",email2:"",website:"https://ga2d.com",linkedin:"",facebook:"https://www.facebook.com/GA2D.SENEGAL/",instagram:"",desc:"Fondée 1996. ~25 ans d'expérience. Réhabilitation patrimoine, résidentiel, tous usages.",score:76,reasons:["25 ans expérience","Facebook actif","Réhabilitation = niche"],status:"new",priority:"high"},
+  {id:9,name:"Guilloux & Associés",type:"architecte",tier:2,contact:"",title:"",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"http://guillouxetassocies.com",linkedin:"",facebook:"",instagram:"",desc:"Architecture culturelle, tradition + innovation technique. Villas, immeubles, résidences.",score:72,reasons:["Architecture culturelle","Projets résidentiels"],status:"new",priority:"medium"},
+  {id:10,name:"ARCHIK",type:"architecte",tier:2,contact:"",title:"",city:"Dakar / Bamako",zone:"Sacré Cœur",phone:"+221 33 825 24 20",phone2:"",email:"secretariat@archik.org",email2:"",website:"https://archik.org",linkedin:"",facebook:"",instagram:"",desc:"Cabinet 2015. Dakar + Bamako. Architecture contemporaine africaine.",score:85,reasons:["Expansion Mali","Architecture contemporaine","Tier 2"],status:"new",priority:"high"},
+  {id:11,name:"Worofila",type:"architecte",tier:2,contact:"Nzinga B. Mboup / Nicolas Rondet",title:"Co-fondateurs",city:"Dakar",zone:"Fann Hock",phone:"",phone2:"",email:"worofila@gmail.com",email2:"",website:"https://worofila.com",linkedin:"https://www.linkedin.com/in/collectif-worofila-dakar-1987b2176/",facebook:"https://www.facebook.com/worofila",instagram:"",desc:"Bioclimatique, terre crue, typha. Partenariat Kéré Architecture.",score:82,reasons:["EDGE pertinent","RS actifs","Fondée 2019 = agile"],status:"new",priority:"high"},
+  {id:12,name:"INNOV'STRUCTURES",type:"bet",tier:2,contact:"Arame Sarr",title:"Ingénieure, chef de projet",city:"Dakar",zone:"Sacré Cœur 3 Ext.",phone:"",phone2:"",email:"e-contact@innov-structures.com",email2:"",website:"https://innov-structures.com",linkedin:"https://www.linkedin.com/in/arame-sarr-105998121/",facebook:"",instagram:"",desc:"BET structures BA/métal/bois. ~10 ans. Sacré Cœur 3 Villa 133. Projet SEDIMA Group.",score:82,reasons:["Structure = cœur Tijan","Innovation = réceptif IA","LinkedIn présent","Tier 2"],status:"new",priority:"high"},
+  {id:13,name:"OPTIMA INGÉNIERIE",type:"bet",tier:2,contact:"",title:"",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://www.optimaingenierie.com",linkedin:"",facebook:"",instagram:"",desc:"Études techniques, maîtrise d'œuvre, installations techniques.",score:78,reasons:["Maîtrise d'œuvre","Site web pro","Tier 2"],status:"new",priority:"high"},
+  {id:14,name:"Axial Ingénierie",type:"bet",tier:2,contact:"",title:"",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"contact@axial-ing.com",email2:"",website:"https://axial-ingenierie.com",linkedin:"https://www.linkedin.com/company/axial-ing",facebook:"",instagram:"",desc:"BET structures, diagnostic technique, expertise, captation drone. Afrique Ouest francophone.",score:77,reasons:["Multi-pays Afrique Ouest","Drone = tech-savvy","LinkedIn actif"],status:"new",priority:"high"},
+  {id:15,name:"SAS INGÉNIERIE",type:"bet",tier:2,contact:"",title:"",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://www.sasingenierie.com",linkedin:"",facebook:"",instagram:"",desc:"Bureau d'études techniques et ingénierie.",score:72,reasons:["Site web actif","BET généraliste"],status:"new",priority:"medium"},
+  {id:16,name:"EST BTP",type:"entrepreneur",tier:2,contact:"",title:"",city:"Dakar",zone:"VDN",phone:"",phone2:"",email:"",email2:"",website:"https://est-btp.com",linkedin:"",facebook:"",instagram:"",desc:"Entreprise Sénégalaise des Travaux. +20 ans. Gros œuvres, génie civil, VRD.",score:80,reasons:["+20 ans expérience","Gros œuvres = besoin calculs"],status:"new",priority:"medium"},
+
+  // ══════════ TIER 3 — Petits cabinets / indépendants ══════════
+  {id:17,name:"Etienne Diene Architecture",type:"architecte",tier:3,contact:"Etienne Diene",title:"Architecte indépendant",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://etiennediene.com",linkedin:"",facebook:"",instagram:"",desc:"Architecte indépendant. Projets résidentiels. Décision rapide, pas de BET interne.",score:85,reasons:["Indépendant = décision rapide","Pas de BET = BESOIN Tijan","Tier 3 — cible idéale"],status:"new",priority:"high"},
+  {id:18,name:"Archi-Building & Consult",type:"architecte",tier:3,contact:"",title:"",city:"Dakar / Ziguinchor",zone:"Multi-villes",phone:"+221 33 991 49 61",phone2:"",email:"",email2:"",website:"https://www.archibuc.sn",linkedin:"",facebook:"",instagram:"",desc:"Petit cabinet avec bureaux Dakar + Ziguinchor. Architecture, Conseils & Ingénierie.",score:82,reasons:["Multi-villes","Couverture Casamance","Petit = réactif"],status:"new",priority:"high"},
+  {id:19,name:"Cabinet CAAS",type:"architecte",tier:3,contact:"Alioune Sow",title:"Architecte",city:"Dakar / Mbour",zone:"Multi-villes",phone:"",phone2:"",email:"",email2:"",website:"https://www.caas.sn",linkedin:"",facebook:"",instagram:"",desc:"Petit cabinet. Double implantation Dakar-Mbour. Petite Côte touristique.",score:80,reasons:["Petite Côte = hôtels/villas","Double implantation","Tier 3"],status:"new",priority:"high"},
+  {id:20,name:"Fatiya Diene Mazza (ID+EA)",type:"architecte",tier:3,contact:"Fatiya Diene Mazza",title:"Architecte",city:"Mbour",zone:"Petite Côte",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"",instagram:"",desc:"Architecte indépendant Mbour. Zone touristique en boom. Pas de BET.",score:80,reasons:["Petite Côte boom","Indépendant = besoin Tijan","Pas de BET interne"],status:"new",priority:"high"},
+  {id:21,name:"Amadou Gamlin DIOP",type:"architecte",tier:3,contact:"Amadou Gamlin Diop",title:"Architecte, Ordre National",city:"Saint-Louis",zone:"Saint-Louis",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"",instagram:"",desc:"Seul architecte identifié à Saint-Louis. Ville patrimoine UNESCO. Projets de réhabilitation.",score:78,reasons:["Monopole local Saint-Louis","UNESCO = projets","Pas de BET"],status:"new",priority:"high"},
+  {id:22,name:"Cabinet Madyou Ndoye",type:"architecte",tier:3,contact:"Madyou Ndoye",title:"Architecte",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"",instagram:"",desc:"Petit cabinet d'architecture listé sur annuaire-senegal.com. Architecte indépendant.",score:70,reasons:["Petit cabinet","Indépendant","Besoin outils"],status:"new",priority:"high"},
+  {id:23,name:"Lamtôro Architecture",type:"architecte",tier:3,contact:"",title:"",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"",instagram:"",desc:"Petit cabinet d'architecture à Dakar. Peu de présence digitale = pas encore digitalisé.",score:68,reasons:["Peu digitalisé = opportunité","Petit cabinet"],status:"new",priority:"medium"},
+  {id:24,name:"E.T.E.C.S.",type:"bet",tier:3,contact:"",title:"",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://www.etecsafrique.com",linkedin:"",facebook:"",instagram:"",desc:"Petit BET à Dakar. Bureau d'études techniques. Site web basique.",score:72,reasons:["Petit BET","Site web existe","Besoin automatisation"],status:"new",priority:"high"},
+  {id:25,name:"GCBTP (Guindo Construction)",type:"bet",tier:3,contact:"",title:"",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://www.guindoconstruction.xyz",linkedin:"",facebook:"",instagram:"",desc:"Bureau d'études techniques + entreprise de construction BTP.",score:75,reasons:["BET + construction","Double casquette = 2x besoin Tijan"],status:"new",priority:"high"},
+  {id:26,name:"Sylocons",type:"bet",tier:3,contact:"",title:"",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"",instagram:"",desc:"Petit bureau d'études techniques à Dakar.",score:62,reasons:["Petit BET","Peu d'infos"],status:"new",priority:"medium"},
+  {id:27,name:"SEMA Construction",type:"entrepreneur",tier:3,contact:"",title:"",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://www.semacons.com",linkedin:"",facebook:"",instagram:"",desc:"Fondée 2017. Gros œuvres, génie civil. Partenariats LOV Italia, Omega, AB Construction.",score:78,reasons:["Jeune entreprise = agile","Gros œuvres","Partenariats internationaux"],status:"new",priority:"high"},
+  {id:28,name:"Salimto Group",type:"entrepreneur",tier:3,contact:"",title:"",city:"Dakar",zone:"Fann Résidence",phone:"+221 76 195 30 18",phone2:"",email:"contact@salimtogroup.com",email2:"",website:"https://www.salimtogroup.com",linkedin:"",facebook:"",instagram:"",desc:"124 Av. Cheikh Anta DIOP. Tous corps de métier. Neuf + réhabilitation + renforcement.",score:76,reasons:["Tous corps état","Contact direct dispo","Fann = zone active"],status:"new",priority:"high"},
+  {id:29,name:"KOBE BTP",type:"entrepreneur",tier:3,contact:"",title:"",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://kobe-btp.com",linkedin:"",facebook:"",instagram:"",desc:"Gros œuvres, génie civil, entreprise générale.",score:72,reasons:["Entreprise générale","Site web pro"],status:"new",priority:"medium"},
+  {id:30,name:"MADERE BTP",type:"entrepreneur",tier:3,contact:"",title:"",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://maderebtp.com",linkedin:"",facebook:"",instagram:"",desc:"Accompagnement complet conception à réalisation.",score:72,reasons:["Accompagnement complet"],status:"new",priority:"medium"},
+  {id:31,name:"Sadia Travaux",type:"entrepreneur",tier:3,contact:"",title:"",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://sadia-travaux.com",linkedin:"",facebook:"",instagram:"",desc:"Entreprise de Bâtiment. Gros et second œuvre.",score:70,reasons:["Construction résidentielle","Site web actif"],status:"new",priority:"medium"},
+
+  // ══════════ TIER 4 — Micro-entrepreneurs / Petite Côte / Banlieue / Touba ══════════
+  {id:32,name:"Keuryi",type:"entrepreneur",tier:4,contact:"",title:"Plateforme construction",city:"Dakar",zone:"Keur Gorgui",phone:"+221 77 888 61 61",phone2:"",email:"",email2:"",website:"https://keuryi.com",linkedin:"",facebook:"",instagram:"",desc:"1ère plateforme en ligne pour planifier sa construction au Sénégal. Plans 3D, permis, suivi. Lot R74 Keur Gorgui.",score:88,reasons:["Plateforme tech = partenaire idéal","Plans + permis","Peut intégrer Tijan dans son offre"],status:"new",priority:"high"},
+  {id:33,name:"Touba Construction & Services",type:"entrepreneur",tier:4,contact:"Khadim Thiam",title:"Entrepreneur, architecte-ingénieur",city:"Touba",zone:"Touba",phone:"",phone2:"",email:"",email2:"",website:"https://toubaconstruction.fr",linkedin:"",facebook:"",instagram:"",desc:"Jeune entrepreneur Touba. Plans 2D/3D, devis gratuit, suivi chantier. Accompagne diaspora.",score:85,reasons:["Touba = marché énorme","Diaspora = budget","Plans 2D/3D = besoin calculs","Tier 4 — cible prioritaire"],status:"new",priority:"high"},
+  {id:34,name:"EGBTP SUARL",type:"entrepreneur",tier:4,contact:"",title:"",city:"Touba",zone:"Touba",phone:"",phone2:"",email:"",email2:"",website:"https://egbtpsuarltouba.site",linkedin:"",facebook:"",instagram:"",desc:"Basé à Touba depuis 2007. Briques, plans archi, béton armé, structures métalliques.",score:82,reasons:["Touba basé","Béton armé = besoin calculs","Depuis 2007","Tier 4"],status:"new",priority:"high"},
+  {id:35,name:"CBE-BTP (Convention Baol)",type:"entrepreneur",tier:4,contact:"",title:"",city:"Mbour / Diourbel",zone:"Baol",phone:"",phone2:"",email:"",email2:"",website:"https://www.cbe-btp.com",linkedin:"",facebook:"",instagram:"",desc:"Créée 2019. Plans 2D/3D, réalisation, rénovation, études projet, travaux publics. Zone Baol.",score:80,reasons:["Zone Baol (Diourbel/Touba)","Plans 2D/3D = Tijan complément","Jeune entreprise"],status:"new",priority:"high"},
+  {id:36,name:"BeZeN Projet",type:"entrepreneur",tier:4,contact:"",title:"BET + constructeur",city:"Saly",zone:"Petite Côte",phone:"+221 77 193 91 57",phone2:"+221 33 926 20 23",email:"contact@bezenprojet.com",email2:"",website:"https://bezenprojet.com",linkedin:"",facebook:"",instagram:"",desc:"BET + constructeur Saly Portudal. Accompagne diaspora. Études SSI, plans, construction.",score:85,reasons:["BET + constructeur","Diaspora = budget","Petite Côte","Contact direct dispo","Tier 4 — top cible"],status:"new",priority:"high"},
+  {id:37,name:"Atelier-BK",type:"architecte",tier:4,contact:"",title:"Architecte + constructeur",city:"Saly",zone:"Petite Côte",phone:"+221 33 999 45 56",phone2:"+221 76 869 94 92",email:"contact@atelier-bk.com",email2:"",website:"https://www.atelier-bk.com",linkedin:"",facebook:"https://www.facebook.com/Atelier.Benkhoud",instagram:"",desc:"Tunisie + Sénégal. Études archi, structure, fluides, électricité, 3D. Face Diambar, Saly.",score:83,reasons:["Multi-études = tout Tijan","Facebook actif","Saly = zone chaude","Contact direct"],status:"new",priority:"high"},
+  {id:38,name:"SAKIBAT",type:"entrepreneur",tier:4,contact:"",title:"Constructeur",city:"Saly",zone:"Petite Côte",phone:"",phone2:"",email:"",email2:"",website:"https://sakibat-saly.wixsite.com/construction",linkedin:"",facebook:"",instagram:"",desc:"Construction maisons + piscines depuis 2003. Saly. 10+ ans expertise.",score:72,reasons:["Petite Côte","Construction villas","Depuis 2003"],status:"new",priority:"high"},
+  {id:39,name:"Dial Construction",type:"entrepreneur",tier:4,contact:"",title:"Constructeur français",city:"Saly / Ngaparou",zone:"Petite Côte",phone:"",phone2:"",email:"",email2:"",website:"https://www.dialconstruction.fr",linkedin:"",facebook:"",instagram:"",desc:"Constructeur français de villas au Sénégal. Ngaparou, Saly, Somone.",score:68,reasons:["Construction villas","Clientèle expatriée","Petite Côte"],status:"new",priority:"medium"},
+  {id:40,name:"Jean Louis Borgetto",type:"entrepreneur",tier:4,contact:"Jean Louis Borgetto",title:"Constructeur indépendant",city:"Petite Côte",zone:"Saly / Ngaparou / Somone",phone:"+221 77 739 84 45",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"",instagram:"",desc:"Constructeur individuel. Études, plans, devis, contrats, suivi photo. Petite Côte.",score:78,reasons:["Indépendant = décision rapide","Contact direct","Petite Côte = zone active","Fait tout seul = BESOIN Tijan"],status:"new",priority:"high"},
+  {id:41,name:"Gérard Malou Construction",type:"entrepreneur",tier:4,contact:"Gérard Malou",title:"Constructeur",city:"Petite Côte",zone:"Saly / Ngaparou / Nianing",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"",instagram:"",desc:"Maisons individuelles, piscines, jacuzzis. Petite Côte complète.",score:72,reasons:["Constructeur terrain","Petite Côte","Villas individuelles"],status:"new",priority:"high"},
+  {id:42,name:"SATOU VISION IMMO",type:"entrepreneur",tier:4,contact:"",title:"Constructeur + immobilier",city:"Saly / Ngaparou / Somone",zone:"Petite Côte",phone:"",phone2:"",email:"",email2:"",website:"https://www.satouvision.com",linkedin:"",facebook:"",instagram:"",desc:"Collabore avec jeunes architectes. Construction + immobilier. Gestion coûts et délais.",score:74,reasons:["Jeunes architectes = cible indirecte","Petite Côte","Site web actif"],status:"new",priority:"high"},
+  {id:43,name:"GSD BTP",type:"entrepreneur",tier:4,contact:"",title:"",city:"Dakar",zone:"Keur Massar",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"https://www.facebook.com/p/GSD-BTP-100066664496119/",instagram:"",desc:"Entreprise BTP banlieue dakaroise. Keur Massar. Aide clients à construire leur maison.",score:80,reasons:["Banlieue Dakar = gros volume","Facebook actif","Keur Massar = zone explosion","Tier 4 — cible idéale"],status:"new",priority:"high"},
+  {id:44,name:"Sénégal Services BTP",type:"entrepreneur",tier:4,contact:"",title:"",city:"Dakar",zone:"Banlieue Dakar",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"https://www.facebook.com/SenegalServicesBTP/",instagram:"",desc:"Construction, rénovation, finitions, plans 2D/3D. Actif sur Facebook.",score:78,reasons:["Facebook actif","Plans 2D/3D = besoin calculs","Banlieue = volume"],status:"new",priority:"high"},
+  {id:45,name:"Sénégal Construction BTP",type:"entrepreneur",tier:4,contact:"",title:"",city:"Dakar",zone:"Banlieue Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://www.senegalconstruction-btp.com",linkedin:"",facebook:"https://www.facebook.com/senegalconstructionbtp/",instagram:"",desc:"Maçonnerie générale, gros œuvre. Actif Facebook + site web.",score:76,reasons:["Facebook + site web","Maçonnerie = besoin structure","Banlieue Dakar"],status:"new",priority:"high"},
+  {id:46,name:"A-BTP Architecture & Design",type:"architecte",tier:4,contact:"",title:"",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"https://www.facebook.com/abtpconstruction/",instagram:"",desc:"Petit cabinet architecture + design. Uniquement sur Facebook.",score:74,reasons:["Facebook only = petit","Architecture + Design","Banlieue Dakar"],status:"new",priority:"high"},
+  {id:47,name:"BDS Group",type:"entrepreneur",tier:4,contact:"",title:"",city:"Rufisque",zone:"Banlieue Dakar",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"",instagram:"",desc:"Av. Delannoy X Wayembam, Rufisque. Design, construction, rénovation, architecture.",score:72,reasons:["Rufisque = banlieue active","Design + construction"],status:"new",priority:"high"},
+  {id:48,name:"JB Services (Borgetto)",type:"entrepreneur",tier:4,contact:"Jean Louis Borgetto",title:"Constructeur depuis 1964",city:"Saly",zone:"Saly Portudal / Darou Salam",phone:"+221 77 739 84 45",phone2:"",email:"jlborgetto@hotmail.com",email2:"",website:"https://www.jbservices.sn",linkedin:"https://www.linkedin.com/in/jean-louis-borgetto-32a595210/",facebook:"https://www.facebook.com/Jlw.Borgetto",instagram:"",desc:"Villa 49 Darou Salam, BP 127 Saly. Depuis 1964. Plans, 3D, gros œuvre, second œuvre, clé en main.",score:82,reasons:["Depuis 1964","Contact complet (tel+email+FB+LinkedIn)","Saly = zone active","Clé en main = besoin calculs"],status:"new",priority:"high"},
+
+  // ══════════ TOUBA — leads enrichis ══════════
+  {id:49,name:"TEC (Touba Entreprise Construction)",type:"entrepreneur",tier:4,contact:"",title:"",city:"Touba",zone:"Touba",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"https://www.facebook.com/tebtp920/",instagram:"",desc:"Entreprise construction Touba. 1 385 likes Facebook. Gros œuvre, bâtiment.",score:80,reasons:["Facebook actif","Touba = marché énorme","Construction locale"],status:"new",priority:"high"},
+  {id:50,name:"TOUBA Building",type:"entrepreneur",tier:4,contact:"",title:"",city:"Dakar / Thiès",zone:"Touba zone",phone:"+221 77 273 59 91",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"https://www.facebook.com/p/TOUBA-Building-100083318803653/",instagram:"",desc:"Entreprise travaux publics et bâtiment. Dakar + Thiès. Contact direct disponible.",score:82,reasons:["Tel direct","Facebook actif","Dakar + Thiès","Travaux publics + bâtiment"],status:"new",priority:"high"},
+  {id:51,name:"Entreprise Touba Cayor",type:"entrepreneur",tier:4,contact:"",title:"",city:"Dakar / Touba",zone:"Touba / Cayor",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"https://www.facebook.com/entreprisetoubacayor/",instagram:"",desc:"Entreprise BTP zone Cayor/Touba. Actif sur Facebook.",score:75,reasons:["Facebook actif","Zone Cayor-Touba","BTP local"],status:"new",priority:"high"},
+  {id:52,name:"Touba BTP",type:"entrepreneur",tier:4,contact:"",title:"",city:"Touba",zone:"Touba",phone:"",phone2:"",email:"",email2:"",website:"https://touba-btp.com",linkedin:"",facebook:"",instagram:"",desc:"Entreprise BTP basée à Touba. Site web dédié.",score:76,reasons:["Touba basé","Site web actif","BTP local"],status:"new",priority:"high"},
+  {id:53,name:"Touba Construction SUARL",type:"entrepreneur",tier:4,contact:"",title:"",city:"Touba",zone:"Touba",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"",instagram:"",desc:"SUARL enregistré. Construction à Touba. Répertorié au Bureau d'appui Création Entreprise.",score:72,reasons:["SUARL enregistré","Touba","Formalisé"],status:"new",priority:"high"},
+  {id:54,name:"Touba Tenerife Construction SARL",type:"entrepreneur",tier:4,contact:"",title:"",city:"Touba",zone:"Touba",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"",instagram:"",desc:"SARL enregistrée. Entreprise construction Touba. Lien diaspora (Tenerife = îles Canaries).",score:70,reasons:["SARL formalisée","Touba","Diaspora = budget"],status:"new",priority:"high"},
+  {id:55,name:"Touba Business Center SUARL",type:"entrepreneur",tier:4,contact:"",title:"Multi-activités",city:"Thiès",zone:"Thiès / Touba",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"https://www.facebook.com/TBCsuarl/",instagram:"",desc:"BTP, transport, distribution, hydraulique. Thiès. Multi-domaines incluant construction.",score:68,reasons:["Multi-activités dont BTP","Thiès basé","Facebook actif"],status:"new",priority:"medium"},
+  {id:56,name:"Touba General Distribution",type:"fournisseur",tier:4,contact:"",title:"Matériaux construction",city:"Dakar",zone:"Plateau",phone:"+221 77 118 51 27",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"https://www.facebook.com/p/Touba-General-Distribution-100076865117171/",instagram:"",desc:"Distribution matériaux construction. Plateau Dakar. Tel direct. Partenaire potentiel réseau.",score:65,reasons:["Matériaux = réseau vers entrepreneurs","Tel direct","Porte d'entrée leads indirects"],status:"new",priority:"medium"},
+
+  // ══════════ THIÈS — leads enrichis ══════════
+  {id:57,name:"MAKTOUM-BTP",type:"entrepreneur",tier:3,contact:"",title:"",city:"Thiès",zone:"Dakar + Thiès",phone:"",phone2:"",email:"",email2:"",website:"https://maktoum-btp.com",linkedin:"",facebook:"",instagram:"",desc:"Construction, rénovation, études techniques, matériaux. Dakar + Thiès. Design archi, plans détaillés.",score:82,reasons:["Thiès + Dakar","Études techniques","Plans détaillés = besoin calculs","Site web pro"],status:"new",priority:"high"},
+  {id:58,name:"Abdoulaye SENE Architecte",type:"architecte",tier:4,contact:"Abdoulaye Sene",title:"Architecte",city:"Thiès",zone:"Thiès",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"",instagram:"",desc:"Architecte inscrit annuaire Thiès. Relevé → suivi travaux. Seul architecte identifié à Thiès.",score:85,reasons:["SEUL architecte identifié Thiès","Pas de BET = BESOIN Tijan","Toutes phases projet","Tier 4 — top cible"],status:"new",priority:"high"},
+  {id:59,name:"Senegal Prestige Construction",type:"entrepreneur",tier:3,contact:"",title:"",city:"Thiès",zone:"Thiès / Sénégal",phone:"",phone2:"",email:"",email2:"",website:"https://senegalprestigeconstruction.com",linkedin:"https://sn.linkedin.com/company/s%C3%A9n%C3%A9gal-prestige-construction",facebook:"https://www.facebook.com/p/Senegal-Prestige-Construction-61550715445534/",instagram:"https://www.instagram.com/senegalprestigeconstruction/",desc:"Villas de luxe. Thiès. Actif FB (1260 likes) + Instagram + LinkedIn. Études, électricité, plomberie.",score:84,reasons:["Thiès basé","Facebook + Instagram + LinkedIn","Villas luxe = budget","Tous RS présents"],status:"new",priority:"high"},
+  {id:60,name:"Pure Construction Sénégal",type:"entrepreneur",tier:3,contact:"",title:"",city:"Sénégal",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://www.pure-construction-senegal.com",linkedin:"",facebook:"",instagram:"",desc:"Maisons, villas, immeubles. Du terrain à la remise des clés. Partenaire Keur-Immo.",score:72,reasons:["National","Du terrain aux clés","Partenaire Keur-Immo"],status:"new",priority:"medium"},
+
+  // ══════════ PETITE CÔTE — leads enrichis ══════════
+  {id:61,name:"Senafri Immobilier & Construction",type:"entrepreneur",tier:4,contact:"",title:"",city:"Mbour",zone:"Mbour / Château d'Eau Nord",phone:"+221 33 852 21 05",phone2:"+221 77 913 30 59",email:"",email2:"",website:"",linkedin:"",facebook:"",instagram:"",desc:"Infrastructure + construction + vente matériaux. Sable, béton, fer, plomberie, électricité, carrelage.",score:78,reasons:["Mbour basé","2 tels directs","Matériaux + construction","Tier 4 — cible idéale"],status:"new",priority:"high"},
+  {id:62,name:"WIZODIA Sénégal",type:"promoteur",tier:3,contact:"",title:"Plateforme diaspora",city:"Dakar / Diass / Guéréo",zone:"National + Petite Côte",phone:"+33 1 84 80 24 25",phone2:"",email:"contact@wizodia.com",email2:"",website:"https://www.wizodia.com",linkedin:"https://fr.linkedin.com/company/wizodia",facebook:"",instagram:"",desc:"Paris + Sénégal. Packs terrain+villa. Diass, Yenne, Guéréo, Noflaye, Pointe Sarène. Diaspora Canada/USA/France.",score:80,reasons:["Plateforme tech = partenaire","Diaspora = budget","LinkedIn actif","Peut intégrer Tijan"],status:"new",priority:"high"},
+  {id:63,name:"Kebe Carreaux Touba",type:"fournisseur",tier:4,contact:"",title:"Matériaux construction",city:"Touba",zone:"Touba",phone:"+221 77 502 13 33",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"https://www.facebook.com/toubakheweulcarreaux",instagram:"",desc:"Carrelage, faïence, plomberie, sanitaire, matériaux construction. Touba.",score:60,reasons:["Matériaux = réseau leads","Touba","Tel direct","Facebook actif"],status:"new",priority:"medium"},
+
+  // ══════════ BANQUES — liste complète ══════════
+  {id:64,name:"BHS (Banque de l'Habitat)",type:"banque",tier:1,contact:"",title:"Banque spécialisée habitat",city:"Dakar",zone:"National (agences)",phone:"",phone2:"",email:"bhs@bhs.sn",email2:"",website:"https://www.bhs.sn",linkedin:"",facebook:"https://www.facebook.com/BHSenegal/",instagram:"",desc:"Banque spécialisée habitat. Pack 35: crédit 35M FCFA sans apport, taux 6%. Prêts 50M max, 25 ans. Facebook actif.",score:90,reasons:["Partenariat stratégique #1","Pack 35 sans apport","Peut exiger note Tijan","Facebook actif"],status:"new",priority:"high"},
+  {id:65,name:"CBAO (Attijariwafa Bank)",type:"banque",tier:1,contact:"",title:"1ère banque SN",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://www.cbao.sn",linkedin:"",facebook:"",instagram:"",desc:"1ère banque du Sénégal (1632 Mds FCFA). Crédit immobilier 8-12% annuel.",score:72,reasons:["Plus grande banque SN","Crédit immobilier disponible"],status:"new",priority:"medium"},
+  {id:66,name:"Société Générale Sénégal",type:"banque",tier:1,contact:"",title:"Banque commerciale",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://www.societegenerale.sn",linkedin:"",facebook:"",instagram:"",desc:"Crédit immobilier pour salariés privés, diaspora, chefs d'entreprise. Taux 8-10%.",score:70,reasons:["Grande banque","Crédit habitat dispo","Réseau national"],status:"new",priority:"medium"},
+  {id:67,name:"Ecobank Sénégal",type:"banque",tier:1,contact:"",title:"Banque panafricaine",city:"Dakar",zone:"National + sous-régional",phone:"",phone2:"",email:"",email2:"",website:"https://www.ecobank.com/sn",linkedin:"",facebook:"",instagram:"",desc:"3ème banque SN (1084 Mds FCFA). Crédit immobilier. Présence panafricaine = synergie sous-régionale Tijan.",score:75,reasons:["Panafricaine = tous marchés Tijan","Crédit immobilier","Réseau sous-régional"],status:"new",priority:"high"},
+  {id:68,name:"Bank of Africa Sénégal (BOA)",type:"banque",tier:1,contact:"",title:"Banque commerciale",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://www.boasenegal.com",linkedin:"",facebook:"",instagram:"",desc:"Crédit immobilier jusqu'à 20 ans. Groupe BOA = présence multi-pays Afrique Ouest.",score:72,reasons:["Multi-pays Afrique Ouest","Crédit 20 ans","Réseau BOA"],status:"new",priority:"medium"},
+  {id:69,name:"Banque Atlantique Sénégal",type:"banque",tier:1,contact:"",title:"Banque commerciale",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://www.banqueatlantique.net",linkedin:"",facebook:"",instagram:"",desc:"Crédit habitat jusqu'à 20 ans. Groupe Atlantic (BCP Maroc). Salariés + entrepreneurs.",score:70,reasons:["Crédit habitat 20 ans","Réseau Atlantic","Maroc = synergie Tijan"],status:"new",priority:"medium"},
+  {id:70,name:"BNDE (Banque Nationale Développement Économique)",type:"banque",tier:2,contact:"",title:"Banque développement",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://www.bnde.sn",linkedin:"",facebook:"",instagram:"",desc:"Spécialisée financement développement. Crédit immobilier achat + construction. Cible PME/PMI.",score:82,reasons:["PME/PMI = cible partagée Tijan","Développement économique","Peut financer projets clients Tijan"],status:"new",priority:"high"},
+  {id:71,name:"CNCAS (Caisse Nationale Crédit Agricole)",type:"banque",tier:2,contact:"",title:"Banque agricole + habitat",city:"Dakar",zone:"National (zones rurales)",phone:"",phone2:"",email:"",email2:"",website:"https://www.cncas.sn",linkedin:"",facebook:"",instagram:"",desc:"Crédit habitat zones rurales + semi-urbaines. Forte présence Touba, Thiès, Saint-Louis. Taux compétitifs.",score:84,reasons:["Zones rurales = Touba/Thiès","Forte présence hors Dakar","Crédit habitat rural","Synergie parfaite Tijan hors-Dakar"],status:"new",priority:"high"},
+  {id:72,name:"Coris Bank Sénégal",type:"banque",tier:2,contact:"",title:"Banque commerciale",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://www.coris-bank.com",linkedin:"",facebook:"",instagram:"",desc:"Crédit immobilier disponible. Groupe Coris (Burkina Faso). En expansion au Sénégal.",score:65,reasons:["En expansion","Groupe sous-régional"],status:"new",priority:"medium"},
+  {id:73,name:"Orabank Sénégal",type:"banque",tier:2,contact:"",title:"Banque commerciale",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://www.orabank.net",linkedin:"",facebook:"",instagram:"",desc:"Crédit immobilier. Groupe Orabank (12 pays Afrique). En croissance au Sénégal.",score:62,reasons:["12 pays Afrique","Crédit immobilier"],status:"new",priority:"medium"},
+  {id:74,name:"COFINA Sénégal",type:"banque",tier:3,contact:"",title:"Microfinance",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://www.cofina.sn",linkedin:"",facebook:"",instagram:"",desc:"Microfinance + crédit immobilier. Cible PME, petits entrepreneurs, artisans BTP.",score:80,reasons:["Microfinance = petits entrepreneurs BTP","Cible artisans","Synergie clients Tijan tier 4"],status:"new",priority:"high"},
+  {id:75,name:"FBN Bank Sénégal",type:"banque",tier:2,contact:"",title:"Banque commerciale",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"",instagram:"",desc:"Crédit immobilier. Groupe First Bank of Nigeria.",score:58,reasons:["Nigeria = marché Tijan futur"],status:"new",priority:"low"},
+
+  // ══════════ FOURNISSEURS MATÉRIAUX — Relais distribution + Partenaires data prix ══════════
+
+  // —— Plateformes digitales (partenaires tech) ——
+  {id:76,name:"HubCephas (eCephas)",type:"fournisseur",tier:2,contact:"",title:"Plateforme digitale matériaux",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://hubcephas.com",linkedin:"",facebook:"",instagram:"",desc:"Plateforme digitale matériaux construction. Commande en ligne, suivi chantier, comparateur prix. Ciment, béton, fer, carreaux, basalte.",score:90,reasons:["Plateforme tech = partenaire data idéal","Comparateur prix = synergie BOQ Tijan","National","Estimateur en ligne"],status:"new",priority:"high"},
+  {id:77,name:"SamaGallePrix",type:"fournisseur",tier:2,contact:"",title:"Comparateur prix matériaux",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://galleprix.samagalle.com",linkedin:"",facebook:"",instagram:"",desc:"Comparateur prix matériaux BTP. 120+ produits en FCFA. Référence pour professionnels BTP Sénégal. Calculateurs intégrés.",score:92,reasons:["DATA PRIX = partenaire #1 pour BOQ Tijan","120+ produits référencés","Calculateurs = même logique Tijan","Partenariat data stratégique"],status:"new",priority:"high"},
+  {id:78,name:"Nodeen Group",type:"fournisseur",tier:2,contact:"",title:"1er réseau distribution BTP",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://www.nodeengroup.com",linkedin:"",facebook:"",instagram:"",desc:"1ère marketplace BTP Afrique Ouest. Distribution matériaux + matériels + location engins. E-commerce pro.",score:88,reasons:["1ère marketplace BTP Afrique Ouest","E-commerce = tech-savvy","Location engins = réseau BTP","Partenaire distribution Tijan"],status:"new",priority:"high"},
+
+  // —— Gros distributeurs Dakar ——
+  {id:79,name:"Tabakh Matériaux",type:"fournisseur",tier:3,contact:"",title:"Fournisseur matériaux",city:"Dakar",zone:"Parcelles Assainies",phone:"+221 33 855 31 83",phone2:"+221 76 376 13 00",email:"tabakhmat@hotmail.com",email2:"",website:"https://tabakhmateriaux.com",linkedin:"",facebook:"https://www.facebook.com/tabakhmateriaux/",instagram:"",desc:"U22 N°492 Parcelles Assainies. Portes, sanitaires, carrelage, ciment, fer. +20 ans. Livraison Dakar + régions 24-72h.",score:85,reasons:["20+ ans expérience","2 tels + email + Facebook","Livraison régions","Contact complet"],status:"new",priority:"high"},
+  {id:80,name:"TQG (Touba Quincaillerie Générale)",type:"fournisseur",tier:3,contact:"",title:"Quincaillerie générale",city:"Dakar",zone:"Cité Keur Damel",phone:"+221 33 835 56 56",phone2:"",email:"toubaquincaillerie@groupetqg.sn",email2:"",website:"https://tqg.sn",linkedin:"",facebook:"https://www.facebook.com/tqgenerale/",instagram:"",desc:"Keur Damel, Dakar. Quincaillerie gros + détail. Agences Mbour (entre rond-point Saly et Malicounda). DÉJÀ CONTACTÉ PAR MALICK.",score:88,reasons:["DÉJÀ EN CONTACT","Facebook actif","Agence Mbour","Quincaillerie complète"],status:"contacted",priority:"high"},
+  {id:81,name:"TQGF (TQG Fall et Frère)",type:"fournisseur",tier:4,contact:"Mohamed K.",title:"Quincaillerie",city:"Dakar",zone:"Ouakam",phone:"+221 77 531 45 63",phone2:"",email:"Mouhamedk313@gmail.com",email2:"",website:"",linkedin:"",facebook:"https://www.facebook.com/p/TQGF-touba-quincaillerie-general-fall-et-frere-100063595778999/",instagram:"",desc:"Près marché Ouakam. Quincaillerie générale. Lien familial Touba.",score:72,reasons:["Facebook actif","Tel + email directs","Ouakam = zone active","Réseau Touba"],status:"new",priority:"high"},
+  {id:82,name:"ISD Groups",type:"fournisseur",tier:2,contact:"",title:"Référence matériaux",city:"Dakar",zone:"National + régions",phone:"",phone2:"",email:"",email2:"",website:"https://isd-groups.sn",linkedin:"",facebook:"",instagram:"",desc:"Ciment, fer, plomberie, électricité, peinture, carrelage, outillage. Stock permanent. Livraison J+0 Dakar, J+2-5 régions.",score:84,reasons:["Gamme complète","Livraison régions J+2-5","Stock permanent","Données prix temps réel"],status:"new",priority:"high"},
+  {id:83,name:"SIOBATI",type:"fournisseur",tier:3,contact:"",title:"Fer + ciment gros volumes",city:"Dakar",zone:"Dakar / Thiès / Mbour",phone:"",phone2:"",email:"",email2:"",website:"https://www.siobati.com",linkedin:"",facebook:"",instagram:"",desc:"Fer béton local + importé Fe500. Ciment Sococim, Sahel, CIMAF. Livraison Dakar (2.5t min), Thiès/Mbour (4t min).",score:80,reasons:["Livre Thiès + Mbour","Gros volumes = gros chantiers","Multi-marques ciment","Prix marché temps réel"],status:"new",priority:"high"},
+
+  // —— Industriels acier / fer (partenaires data) ——
+  {id:84,name:"Fabrimetal Sénégal (Groupe MMD)",type:"fournisseur",tier:1,contact:"",title:"Fabricant acier Fe500/B500B",city:"Dakar",zone:"Sébikotane (Zone Industrielle)",phone:"+221 77 642 03 03",phone2:"",email:"info@mmdsteel.com",email2:"",website:"https://fabrimetal-senegal.com",linkedin:"https://sn.linkedin.com/company/fabrimetal-s%C3%A9n%C3%A9gal",facebook:"https://www.facebook.com/fabrimetalsn/",instagram:"",desc:"Fabricant acier Fe500/B500B certifié ISO 9001/14001. Tubes, tôles, profilés. 32 834 likes Facebook, 8 410 followers LinkedIn.",score:90,reasons:["FABRICANT = source prix acier #1","ISO 9001 certifié","Facebook 32K + LinkedIn 8K","Partenaire data prix acier idéal"],status:"new",priority:"high"},
+  {id:85,name:"Universelle Industries (Yeshi Group)",type:"fournisseur",tier:1,contact:"",title:"Fabricant métallurgie",city:"Dakar",zone:"Sébikotane (Quartier KIP-KIP)",phone:"",phone2:"",email:"contact@universelleindustries.com",email2:"",website:"https://uisenegal.com",linkedin:"",facebook:"https://www.facebook.com/universelleindustriessenegal/",instagram:"",desc:"Fabricant fer béton, tôles Aluzinc, tubes, profilés, clous. Usine ultra-moderne Sébikotane.",score:86,reasons:["Fabricant = source prix fer","Usine locale","Facebook actif","Yeshi Group = réseau"],status:"new",priority:"high"},
+  {id:86,name:"Batiplus Dakar (Groupe Batimat)",type:"fournisseur",tier:1,contact:"",title:"Négoce acier + bois",city:"Dakar",zone:"Pikine (Km 11)",phone:"+221 33 879 80 20",phone2:"",email:"",email2:"",website:"http://batiplus-dakar.groupebatimat.com",linkedin:"",facebook:"",instagram:"",desc:"Depuis 1987. Négoce acier, fer béton, bois, contreplaqué. 11 pays Afrique. Km 11 entrée Pikine. BP 4334.",score:85,reasons:["Depuis 1987 = 37 ans","11 pays Afrique = réseau","Pikine = banlieue","Tel direct"],status:"new",priority:"high"},
+  {id:87,name:"Machallah Représentation Fer à Béton",type:"fournisseur",tier:2,contact:"",title:"Distribution acier",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://www.mrferbeton.com",linkedin:"",facebook:"",instagram:"",desc:"Distribution + négoce acier construction. Partenariats producteurs Turquie, Ukraine, Chine. Prix CFR compétitifs.",score:78,reasons:["Import direct = prix compétitifs","Turquie/Ukraine/Chine","Données prix import"],status:"new",priority:"high"},
+  {id:88,name:"RMC S.A.",type:"fournisseur",tier:2,contact:"",title:"Matériaux construction",city:"Dakar",zone:"Plateau",phone:"+221 33 897 07 10",phone2:"",email:"",email2:"",website:"https://rmcsenegal.com",linkedin:"",facebook:"",instagram:"",desc:"37 Avenue Jean 23, Dakar. Fer, matériaux construction. Acteur établi Plateau.",score:72,reasons:["Plateau = centre Dakar","Tel direct","Acteur établi"],status:"new",priority:"medium"},
+  {id:89,name:"Metalution",type:"fournisseur",tier:2,contact:"",title:"Fer béton importé",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://metalution.sn",linkedin:"",facebook:"",instagram:"",desc:"Fer béton importé Fe500 certifié. Stock permanent. Spécialiste acier construction.",score:76,reasons:["Stock permanent","Fe500 certifié","Spécialiste acier"],status:"new",priority:"high"},
+
+  // —— Plomberie / Sanitaire / Électricité ——
+  {id:90,name:"CCPS (Comptoir Commercial Plomberie du Sénégal)",type:"fournisseur",tier:2,contact:"",title:"Import + distribution plomberie",city:"Dakar",zone:"Dakar (4 showrooms)",phone:"",phone2:"",email:"",email2:"",website:"https://www.ccps.sn",linkedin:"",facebook:"https://www.facebook.com/ccpsofficielle/",instagram:"",desc:"Depuis 2016. Import + distribution plomberie, sanitaire, équipement industriel, irrigation. 4 showrooms Dakar.",score:82,reasons:["4 showrooms = visibilité","Plomberie = données MEP Tijan","Facebook actif","Import direct"],status:"new",priority:"high"},
+  {id:91,name:"Legrand Sénégal",type:"fournisseur",tier:1,contact:"",title:"Appareillage électrique",city:"Dakar",zone:"Almadies Zone 12",phone:"",phone2:"",email:"",email2:"",website:"https://www.legrand.sn",linkedin:"",facebook:"",instagram:"",desc:"Filiale Legrand. Infrastructures électriques + numériques. Réseau distributeurs Dakar. DÉJÀ CONTACTÉ PAR MALICK.",score:90,reasons:["DÉJÀ EN CONTACT","Mondial = crédibilité","Réseau distributeurs","Données prix électricité"],status:"contacted",priority:"high"},
+  {id:92,name:"Makto Distribution",type:"fournisseur",tier:3,contact:"",title:"Climatisation + plomberie",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://maktodistribution.com",linkedin:"",facebook:"",instagram:"",desc:"Climatisation, plomberie, équipement. Meilleur prix. Magasins complets.",score:70,reasons:["Clim + plomberie = MEP","Prix compétitifs"],status:"new",priority:"medium"},
+  {id:93,name:"Pleno Ambiente",type:"fournisseur",tier:3,contact:"",title:"Matériaux + sanitaires",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://www.plenoambiente.sn",linkedin:"",facebook:"",instagram:"",desc:"Matériaux construction, sanitaires. Showroom Dakar.",score:68,reasons:["Sanitaires","Showroom"],status:"new",priority:"medium"},
+  {id:94,name:"DMC Sénégal",type:"fournisseur",tier:3,contact:"",title:"Matériel électrique",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://dmcsen.com",linkedin:"",facebook:"",instagram:"",desc:"Distribution matériel électrique au Sénégal.",score:68,reasons:["Électricité = données MEP"],status:"new",priority:"medium"},
+  {id:95,name:"CCB Matériaux",type:"fournisseur",tier:3,contact:"",title:"BTP + énergie solaire + agri",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://www.ccbmateriaux.com",linkedin:"",facebook:"",instagram:"",desc:"BTP, énergie solaire, agriculture, sanitaires, électroménagers. Multi-secteurs.",score:72,reasons:["Multi-secteurs","BTP + solaire = EDGE Tijan","National"],status:"new",priority:"medium"},
+
+  // —— Quincailleries en ligne ——
+  {id:96,name:"Quincaillerie Xeweul (Fall & Fils)",type:"fournisseur",tier:3,contact:"",title:"Quincaillerie en ligne",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://www.quincailleriexeweul.com",linkedin:"",facebook:"",instagram:"",desc:"Fer 6 à 14, peinture, ciment, carrelage, outillage. Livraison gratuite national. Support 24/7. Commande en ligne.",score:78,reasons:["E-commerce = tech-savvy","Livraison gratuite national","Fer béton = données prix"],status:"new",priority:"high"},
+  {id:97,name:"Sen Quincaillerie",type:"fournisseur",tier:3,contact:"",title:"#1 Quincaillerie en ligne SN",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://sen-quincaillerie.com",linkedin:"",facebook:"",instagram:"",desc:"Se présente comme #1 quincaillerie en ligne au Sénégal. Catalogue complet.",score:72,reasons:["#1 en ligne","Catalogue complet"],status:"new",priority:"medium"},
+  {id:98,name:"Mat-Outils",type:"fournisseur",tier:3,contact:"",title:"1ère quincaillerie en ligne",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://mat-outils.com",linkedin:"",facebook:"",instagram:"",desc:"1ère quincaillerie en ligne du Sénégal. Outillage, matériaux, équipements.",score:70,reasons:["Quincaillerie en ligne","Outillage + matériaux"],status:"new",priority:"medium"},
+
+  // —— Petite Côte / Mbour ——
+  {id:99,name:"Quincaillerie Gaffari",type:"fournisseur",tier:4,contact:"Famille Gaffari",title:"Quincaillerie familiale depuis 1975",city:"Mbour / Saly / Ngaparou",zone:"Petite Côte (3 magasins)",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"https://www.facebook.com/p/Quincaillerie-Gaffari-100047699052053/",instagram:"",desc:"Familiale depuis 1975. 3 magasins: Mbour, Saly, Ngaparou. Tous matériaux construction. Facebook actif.",score:85,reasons:["Depuis 1975 = institution locale","3 magasins Petite Côte","Tous les entrepreneurs locaux y achètent","Facebook actif","Relais distribution #1 Petite Côte"],status:"new",priority:"high"},
+  {id:100,name:"Marbrerie de la Petite Côte",type:"fournisseur",tier:4,contact:"",title:"Marbre + granit + quartz",city:"Saly / Mbour",zone:"Petite Côte",phone:"",phone2:"",email:"",email2:"",website:"https://marbreriepetitecote.com",linkedin:"",facebook:"",instagram:"",desc:"Vente, découpe, décoration marbre, granit, quartz. Saly + Mbour.",score:65,reasons:["Finitions haut de gamme","Petite Côte","Niche marbre"],status:"new",priority:"medium"},
+
+  // —— Touba ——
+  {id:101,name:"Kebe Carreaux Touba",type:"fournisseur",tier:4,contact:"",title:"Carrelage + sanitaire",city:"Touba",zone:"Touba",phone:"+221 77 502 13 33",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"https://www.facebook.com/toubakheweulcarreaux",instagram:"",desc:"Carrelage, faïence, plomberie, sanitaire, matériaux. Touba. Tel direct + Facebook.",score:75,reasons:["Touba basé","Tel + Facebook","Carrelage + plomberie"],status:"new",priority:"high"},
+  {id:102,name:"Touba General Distribution",type:"fournisseur",tier:4,contact:"",title:"Distribution matériaux",city:"Dakar",zone:"Plateau",phone:"+221 77 118 51 27",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"https://www.facebook.com/p/Touba-General-Distribution-100076865117171/",instagram:"",desc:"Distribution matériaux construction. Plateau Dakar. Réseau Touba. Tel + Facebook.",score:70,reasons:["Réseau Touba","Tel + Facebook","Plateau Dakar"],status:"new",priority:"high"},
+
+  // —— Thiès ——
+  {id:103,name:"BATFUTUR",type:"fournisseur",tier:3,contact:"",title:"Fabricant GFRP (fibres verre)",city:"Thiès",zone:"Km 50, Région Thiès",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"",instagram:"",desc:"Créée 2019. Fabrique barres armatures composites GFRP (fibres de verre). Innovation matériaux Thiès.",score:74,reasons:["Innovation matériaux","Thiès basé","GFRP = alternative acier"],status:"new",priority:"medium"},
+
+  // —— Autres distributeurs spécialisés ——
+  {id:104,name:"Diallo BTP Logistique",type:"fournisseur",tier:3,contact:"",title:"BTP + matériaux",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://www.diallobtp.com",linkedin:"",facebook:"",instagram:"",desc:"Fer béton importé Turquie/Ukraine. Travaux plomberie national. BTP + logistique + matériaux.",score:74,reasons:["Import fer direct","Plomberie national","BTP + matériaux"],status:"new",priority:"medium"},
+  {id:105,name:"MYD Group",type:"fournisseur",tier:3,contact:"",title:"Matériaux + robinetterie + artisanat",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://mydgroup.sn",linkedin:"",facebook:"",instagram:"",desc:"Matériaux construction, robinetterie, sanitaires, artisanat sénégalais. Livraison rapide.",score:68,reasons:["Robinetterie + sanitaires","Livraison rapide"],status:"new",priority:"medium"},
+  {id:106,name:"Quincaillerie Sénégalaise",type:"fournisseur",tier:3,contact:"",title:"Quincaillerie",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://quincaillerie-senegalaise.com",linkedin:"",facebook:"",instagram:"",desc:"Quincaillerie généraliste. Dakar.",score:62,reasons:["Quincaillerie généraliste"],status:"new",priority:"low"},
+  {id:107,name:"GSCE Shop",type:"fournisseur",tier:3,contact:"",title:"Quincaillerie en ligne",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://www.gsceshop.com",linkedin:"",facebook:"",instagram:"",desc:"Quincaillerie en ligne. Outillage, matériaux, équipements pro.",score:65,reasons:["E-commerce","Outillage pro"],status:"new",priority:"medium"},
+  {id:108,name:"CB Trading Electric",type:"fournisseur",tier:3,contact:"",title:"Distributeur Legrand",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://cbtrading-electric.com",linkedin:"",facebook:"",instagram:"",desc:"Distributeur matériel électrique. Distributeur officiel Legrand.",score:72,reasons:["Distributeur Legrand officiel","Électricité = données MEP"],status:"new",priority:"medium"},
+  {id:109,name:"Bernabé Afrique (Élie Chouéri)",type:"fournisseur",tier:2,contact:"",title:"Distributeur Legrand / électrique",city:"Dakar",zone:"Multiple (Bd Centenaire, Rue Vincens)",phone:"",phone2:"",email:"info.sg@bernabeafrique.com",email2:"echoueri@arc.sn",website:"https://eliechoueri.sn",linkedin:"",facebook:"",instagram:"",desc:"Distributeur agréé Legrand. Plusieurs points de vente Dakar. Historique.",score:76,reasons:["Distributeur Legrand agréé","Plusieurs points vente","Historique Dakar"],status:"new",priority:"high"},
+
+  // ══════════ PROMOTEURS T3 & T4 — Petits promoteurs, coopératives, plateformes diaspora ══════════
+
+  // —— Promoteurs de proximité Dakar ——
+  {id:110,name:"COSEPRIM",type:"promoteur",tier:3,contact:"",title:"Promoteur de proximité",city:"Dakar",zone:"Sacré Cœur 4 VDN",phone:"+221 76 925 22 32",phone2:"",email:"coseprimimmo@gmail.com",email2:"",website:"https://www.coseprim.net",linkedin:"",facebook:"https://www.facebook.com/COSEPRIM/",instagram:"",desc:"Fondée 2002. 150A Sacré Cœur 4 VDN. Montage financier, construction, distribution matériaux, gestion immobilière. Résidence NALA Mermoz.",score:88,reasons:["Tel + email + Facebook","Montage financier = besoin études","Distribution matériaux = double rôle","Proximité = décision rapide"],status:"new",priority:"high"},
+  {id:111,name:"Résidences KALIA",type:"promoteur",tier:3,contact:"",title:"Promoteur agréé BHS",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://residenceskalia.com",linkedin:"",facebook:"",instagram:"",desc:"Appartements + villas neufs en résidences sécurisées Dakar. Agréé BHS 2025. Programme 100K logements.",score:82,reasons:["Agréé BHS","Programme 100K logements État","Résidences sécurisées"],status:"new",priority:"high"},
+  {id:112,name:"Kosen Project",type:"promoteur",tier:3,contact:"",title:"Promoteur éco-responsable",city:"Dakar",zone:"Plateau",phone:"",phone2:"",email:"",email2:"",website:"https://kosen-project.com",linkedin:"",facebook:"",instagram:"",desc:"Programme éco-responsable pionnier. Appartements 200-350m² haut de gamme Plateau Dakar. Développement durable.",score:78,reasons:["Éco-responsable = EDGE pertinent","Haut de gamme Plateau","Innovation verte"],status:"new",priority:"high"},
+  {id:113,name:"Sablux Immobilier",type:"promoteur",tier:3,contact:"",title:"Promoteur multi-pays",city:"Dakar",zone:"Dakar + Conakry + Abidjan",phone:"",phone2:"",email:"",email2:"",website:"https://sabluximmobilier.com",linkedin:"",facebook:"",instagram:"",desc:"Depuis 2009. 10 filiales. Sénégal, Guinée, Côte d'Ivoire. Qualité construction + sécurité juridique.",score:80,reasons:["Multi-pays = tous marchés Tijan","10 filiales","Depuis 2009"],status:"new",priority:"high"},
+  {id:114,name:"SERTEM IMMO",type:"promoteur",tier:3,contact:"",title:"Promoteur agréé État",city:"Dakar",zone:"Fann Résidence / Mbao",phone:"",phone2:"",email:"ridwanmbao@sertemimmo.com",email2:"",website:"https://ridwanmbao-villasoraya.com",linkedin:"",facebook:"",instagram:"",desc:"Filiale groupe SERTEM (2014). Agréé État programme 100K logements. Villa Soraya Mbao. 41 Rue C Fann Résidence.",score:82,reasons:["Agréé État","Programme 100K logements","Email direct","Mbao = banlieue"],status:"new",priority:"high"},
+  {id:115,name:"Ilios Groupe",type:"promoteur",tier:3,contact:"",title:"Immobilier haut de gamme",city:"Dakar",zone:"Almadies / Ngor",phone:"",phone2:"",email:"",email2:"",website:"https://www.iliosgroupe.com",linkedin:"",facebook:"",instagram:"",desc:"Immobilier haut de gamme Dakar. Almadies, Ngor. Villas standing.",score:72,reasons:["Haut de gamme","Almadies/Ngor"],status:"new",priority:"medium"},
+  {id:116,name:"Belel Immo",type:"promoteur",tier:4,contact:"",title:"Appartements + bureaux",city:"Dakar",zone:"Dakar",phone:"",phone2:"",email:"",email2:"",website:"https://belelimmo.com",linkedin:"",facebook:"",instagram:"",desc:"Sélection appartements + plateaux bureaux à vendre et louer. Petit promoteur Dakar.",score:70,reasons:["Petit promoteur","Appartements + bureaux"],status:"new",priority:"high"},
+
+  // —— Banlieue Dakar ——
+  {id:117,name:"Plasma Immo SA",type:"promoteur",tier:3,contact:"",title:"Promoteur Diamniadio",city:"Dakar",zone:"Fann Hock / Diamniadio",phone:"+221 77 181 03 03",phone2:"+221 77 181 08 08",email:"plasmaimmo@gmail.com",email2:"",website:"https://plasmaimmo.com",linkedin:"",facebook:"",instagram:"",desc:"4 Route Corniche Ouest, Fann Hock. ~400 logements Diamniadio (Résidence Aïcha). Villas F2-F4. Livraison 2025-2026.",score:85,reasons:["400 logements = gros volume études","3 tels + email directs","Diamniadio = pôle urbain","Livraison 2025-2026"],status:"new",priority:"high"},
+  {id:118,name:"SAFIA IMMO (Coopérative d'habitat)",type:"promoteur",tier:4,contact:"",title:"Coopérative habitat",city:"Dakar",zone:"Pikine / Keur Massar / Rufisque / Diamniadio / Thiès",phone:"",phone2:"",email:"",email2:"",website:"https://safia-immo.sn",linkedin:"",facebook:"",instagram:"",desc:"Coopérative moderne. Cotisation dès 50K FCFA/mois. Logements Dakar, Pikine, Guédiawaye, Keur Massar, Rufisque, Diamniadio, Thiès.",score:86,reasons:["Coopérative = gros volume","Banlieue + Thiès","50K/mois = accessible","Multi-zones = relais distribution"],status:"new",priority:"high"},
+  {id:119,name:"Noreyni Immobilier",type:"promoteur",tier:4,contact:"Amab Diop",title:"Vente terrain + lotissement",city:"Diamniadio / Lac Rose / Diass",zone:"Banlieue + Aéroport",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"https://www.facebook.com/amabdiop/",instagram:"",desc:"Parcelles semi-viabilisées Diamniadio. Vente terrains + lotissements. Facebook actif.",score:78,reasons:["Facebook actif","Diamniadio/Lac Rose/Diass","Lotissements = besoin études","Petit promoteur terrain"],status:"new",priority:"high"},
+
+  // —— Thiès ——
+  {id:120,name:"Espace Diobass (Groupe EFT)",type:"promoteur",tier:3,contact:"",title:"6500 logements Thiès",city:"Thiès",zone:"Sangué (sortie autoroute Thiès Sud)",phone:"",phone2:"",email:"",email2:"",website:"https://www.espacediobass.com",linkedin:"https://www.linkedin.com/in/espace-diobass-aa0967335/",facebook:"https://www.facebook.com/Espace.Diobass.Thies/",instagram:"https://www.instagram.com/espace.diobass/",desc:"Programme 6500 maisons individuelles avec État SN. Sangué, rond-point sortie Ila Touba. +20 ans expérience. TOUS RS actifs.",score:92,reasons:["6500 logements = VOLUME MASSIF","Partenariat État","Facebook + LinkedIn + Instagram","Thiès = hors Dakar prioritaire","20+ ans expérience"],status:"new",priority:"high"},
+
+  // —— Petite Côte / Mbour ——
+  {id:121,name:"ImmoLudivine",type:"promoteur",tier:4,contact:"Ludivine",title:"Agence + promoteur",city:"Saly / Ngaparou / Somone",zone:"Petite Côte complète",phone:"",phone2:"",email:"",email2:"",website:"https://www.immoludivine.com",linkedin:"",facebook:"",instagram:"",desc:"Villas, appartements, terrains. Saly, Ngaparou, Somone, Nguerigne, Nianing, Warang. Spécialiste Petite Côte.",score:80,reasons:["Toute la Petite Côte","Spécialiste local","Villas + terrains"],status:"new",priority:"high"},
+  {id:122,name:"ImmoTop Saly",type:"promoteur",tier:4,contact:"",title:"Agence + promoteur",city:"Saly",zone:"Saly / Ngaparou / Somone / Grand Mbour",phone:"",phone2:"",email:"",email2:"",website:"https://www.immotop-saly.com",linkedin:"",facebook:"",instagram:"",desc:"Vente, achat villas, maisons, appartements, terrains, commerces. Saly, Ngaparou, Somone, Grand Mbour, Nianing.",score:78,reasons:["Multi-zones Petite Côte","Achat + vente","Commerces aussi"],status:"new",priority:"high"},
+  {id:123,name:"Immobilier La Lagune",type:"promoteur",tier:4,contact:"",title:"Promoteur Somone",city:"Somone / Mbour",zone:"Petite Côte",phone:"",phone2:"",email:"",email2:"",website:"https://www.immobilierlalagune.com",linkedin:"",facebook:"",instagram:"",desc:"Appartements neufs 100m de la mer. 1-2 chambres dès 34.8M FCFA. Investissement locatif + pied-à-terre.",score:76,reasons:["Programmes neufs","Dès 34.8M = accessible","Investissement locatif"],status:"new",priority:"high"},
+  {id:124,name:"Saly Immo",type:"promoteur",tier:4,contact:"",title:"Agence immobilière",city:"Saly",zone:"Saly / Ngaparou / Somone / Nguerigne",phone:"",phone2:"",email:"",email2:"",website:"https://www.agence-immobiliere-saly.com",linkedin:"",facebook:"",instagram:"",desc:"Accompagnement achat immobilier Petite Côte. Villas + appartements + terrains.",score:72,reasons:["Spécialiste Petite Côte","Accompagnement complet"],status:"new",priority:"high"},
+  {id:125,name:"Varlet Immobilier",type:"promoteur",tier:4,contact:"",title:"Spécialiste Petite Côte",city:"Saly / Ngaparou",zone:"Petite Côte",phone:"",phone2:"",email:"",email2:"",website:"https://www.varlet-immobilier.com",linkedin:"",facebook:"",instagram:"",desc:"Spécialiste Petite Côte. Achat, vente, location. Villas, appartements Saly, Ngaparou, Somone, Nianing, Warang.",score:72,reasons:["Spécialiste Petite Côte","Achat + vente + location"],status:"new",priority:"high"},
+  {id:126,name:"SATOU VISION IMMO",type:"promoteur",tier:4,contact:"",title:"Constructeur + promoteur",city:"Saly / Ngaparou / Somone",zone:"Petite Côte",phone:"",phone2:"",email:"",email2:"",website:"https://www.satouvision.com",linkedin:"",facebook:"",instagram:"",desc:"Construction + immobilier. Partenariats jeunes architectes. Qualité, coûts, délais. Petite Côte complète.",score:78,reasons:["Constructeur + promoteur","Jeunes architectes = cible indirecte","Petite Côte"],status:"new",priority:"high"},
+
+  // —— Plateformes diaspora (relais de distribution Tijan) ——
+  {id:127,name:"Jiwall",type:"promoteur",tier:3,contact:"",title:"Plateforme investissement immobilier",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://jiwall.com",linkedin:"",facebook:"",instagram:"",desc:"Plateforme qui associe investisseurs et promoteurs de projets immobiliers SN. Co-investissement. Plans + suivi.",score:85,reasons:["Plateforme tech = partenaire Tijan","Associe investisseurs + promoteurs","Plans + suivi = besoin calculs","Relais distribution digital"],status:"new",priority:"high"},
+  {id:128,name:"ImmoBelite",type:"promoteur",tier:4,contact:"",title:"Gestion diaspora",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://immobelite.com",linkedin:"",facebook:"",instagram:"",desc:"Immobilier diaspora: vente, construction, gestion. Accompagnement depuis l'étranger.",score:78,reasons:["Diaspora = budget","Construction = besoin études","Gestion depuis étranger"],status:"new",priority:"high"},
+  {id:129,name:"Keur-Immo",type:"promoteur",tier:3,contact:"",title:"1er site immobilier Afrique",city:"Dakar",zone:"National + Afrique",phone:"",phone2:"",email:"",email2:"",website:"https://keur-immo.com",linkedin:"",facebook:"",instagram:"",desc:"Se présente comme 1er site immobilier d'Afrique. Annonces, construction, financement. Partenaire Pure Construction.",score:80,reasons:["1er site Afrique","Construction + financement","Partenaire Pure Construction","Relais distribution massif"],status:"new",priority:"high"},
+  {id:130,name:"AnnonceToit",type:"promoteur",tier:4,contact:"",title:"Plateforme annonces immobilières",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://annoncetoit.com",linkedin:"",facebook:"",instagram:"",desc:"Top 20 promoteurs. Annonces immobilières SN. Guide promoteurs.",score:68,reasons:["Guide promoteurs = référencement","Annonces national"],status:"new",priority:"medium"},
+  {id:131,name:"Loger-Dakar",type:"promoteur",tier:3,contact:"",title:"Portail immobilier",city:"Dakar",zone:"National",phone:"",phone2:"",email:"",email2:"",website:"https://www.loger-dakar.com",linkedin:"",facebook:"",instagram:"",desc:"Portail immobilier SN. Annonces, financement, guide promoteurs. Section agences + promoteurs Dakar complète.",score:74,reasons:["Portail de référence","Section promoteurs complète","Financement immobilier"],status:"new",priority:"medium"},
+
+  // —— Touba ——
+  {id:132,name:"Invest Immo Touba",type:"promoteur",tier:4,contact:"",title:"Investissement immobilier Touba",city:"Touba",zone:"Touba + périphérie",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"https://www.facebook.com/investimmotouba/",instagram:"",desc:"Investissement immobilier Touba. 1500+ ventes logements/an à Touba. Marché diaspora Mouride.",score:82,reasons:["Touba spécialiste","1500+ ventes/an = volume","Diaspora Mouride = budget","Facebook actif"],status:"new",priority:"high"},
+  {id:133,name:"Touba Habitat",type:"promoteur",tier:4,contact:"",title:"Promotion habitat Touba",city:"Touba",zone:"Touba",phone:"",phone2:"",email:"",email2:"",website:"",linkedin:"",facebook:"",instagram:"",desc:"Promotion habitat à Touba. Lotissements quartiers périphériques.",score:72,reasons:["Touba","Lotissements = besoin études"],status:"new",priority:"high"},
+
+  // —— Saint-Louis ——
+  {id:134,name:"Immobilier 221",type:"promoteur",tier:4,contact:"",title:"Plateforme + agence",city:"Dakar",zone:"National (Diamniadio, Saint-Louis...)",phone:"",phone2:"",email:"",email2:"",website:"https://immobilier221.com",linkedin:"",facebook:"",instagram:"",desc:"Plateforme et agence. Guide zones rentables Diamniadio, Saint-Louis. Conseils investissement.",score:70,reasons:["National dont Saint-Louis","Guide investissement","Plateforme"],status:"new",priority:"medium"},
+
+  // —— Coopératives habitat (volume) ——
+  {id:135,name:"Kindnee Immo",type:"promoteur",tier:4,contact:"",title:"Guide devenir promoteur",city:"Dakar",zone:"National (Diamniadio focus)",phone:"",phone2:"",email:"",email2:"",website:"https://www.kindnee.com",linkedin:"",facebook:"",instagram:"",desc:"Guide et accompagnement pour devenir promoteur immobilier. Focus Diamniadio. Formation + accompagnement.",score:68,reasons:["Formation promoteurs = réseau","Diamniadio focus"],status:"new",priority:"medium"}
+];
+
+// ─── STATE ───
+let currentView = 'briefing';
+let currentFilter = 'all';
+let currentSearch = '';
+let viewMode = 'cards';
+let leadStatuses = {};
+LEADS.forEach(l => { leadStatuses[l.id] = l.status; });
+
+// ─── HELPERS ───
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+const typeLabels = { architecte: 'Architecte', bet: 'BET', entrepreneur: 'Entrepreneur', promoteur: 'Promoteur', banque: 'Banque', fournisseur: 'Fournisseur' };
+const typeColors = { architecte: 'blue', bet: 'purple', entrepreneur: 'orange', promoteur: 'vert', banque: 'red', fournisseur: 'brown' };
+const tierLabels = { 1: 'Tier 1 — Grand', 2: 'Tier 2 — Moyen', 3: 'Tier 3 — Petit', 4: 'Tier 4 — Micro' };
+const tierColors = { 1: '#9E9E9E', 2: '#FF9800', 3: '#4CAF50', 4: '#E91E63' };
+let currentTier = 'all';
+const statusLabels = { new: 'Nouveau', contacted: 'Contacté', interested: 'Intéressé', demo: 'Démo planifiée', closed: 'Fermé' };
+
+function scoreColor(s) {
+  if (s >= 85) return 'var(--vert)';
+  if (s >= 70) return 'var(--orange)';
+  return 'var(--gris3)';
+}
+
+function filtered() {
+  let list = [...LEADS];
+  if (currentFilter !== 'all') list = list.filter(l => l.type === currentFilter);
+  if (currentTier !== 'all') list = list.filter(l => l.tier === parseInt(currentTier));
+  if (currentSearch) {
+    const q = currentSearch.toLowerCase();
+    list = list.filter(l =>
+      l.name.toLowerCase().includes(q) ||
+      l.city.toLowerCase().includes(q) ||
+      l.contact.toLowerCase().includes(q) ||
+      l.desc.toLowerCase().includes(q) ||
+      l.zone.toLowerCase().includes(q)
+    );
+  }
+  return list.sort((a, b) => b.score - a.score);
+}
+
+// ─── RENDER CARD ───
+function renderCard(lead) {
+  const socials = [];
+  if (lead.website) socials.push(`<a href="${lead.website}" target="_blank" class="social-link web" title="Site web">W</a>`);
+  if (lead.linkedin) socials.push(`<a href="${lead.linkedin}" target="_blank" class="social-link linkedin" title="LinkedIn">in</a>`);
+  if (lead.facebook) socials.push(`<a href="${lead.facebook}" target="_blank" class="social-link facebook" title="Facebook">f</a>`);
+  if (lead.instagram) socials.push(`<a href="${lead.instagram}" target="_blank" class="social-link instagram" title="Instagram">ig</a>`);
+
+  const contacts = [];
+  if (lead.phone) contacts.push(`<span class="contact-chip">📞 ${lead.phone}</span>`);
+  if (lead.email) contacts.push(`<span class="contact-chip">✉️ ${lead.email}</span>`);
+  if (lead.contact) contacts.push(`<span class="contact-chip">👤 ${lead.contact}</span>`);
+
+  return `
+    <div class="lead-card">
+      <div class="lead-card-header">
+        <div>
+          <div class="lead-name">${lead.name}</div>
+          ${lead.title ? `<div style="font-size:12px;color:var(--gris3);margin-top:2px;">${lead.title}</div>` : ''}
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <span class="lead-type-badge badge-${lead.type}">${typeLabels[lead.type]}</span>
+          <span style="padding:3px 8px;border-radius:10px;font-size:10px;font-weight:700;color:white;background:${tierColors[lead.tier]}">T${lead.tier}</span>
+        </div>
+      </div>
+      <div class="lead-card-body">
+        <div class="lead-meta">
+          <span>📍 ${lead.city}${lead.zone && lead.zone !== lead.city ? ' — '+lead.zone : ''}</span>
+          <span><span class="priority-dot priority-${lead.priority}"></span>${lead.priority === 'high' ? 'Priorité haute' : lead.priority === 'medium' ? 'Priorité moyenne' : 'Priorité basse'}</span>
+        </div>
+        <div class="lead-desc">${lead.desc}</div>
+        ${contacts.length ? `<div class="lead-contact-row">${contacts.join('')}</div>` : ''}
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="social-links">${socials.join('')}</div>
+          <select class="status-select" data-id="${lead.id}" onchange="updateStatus(${lead.id}, this.value)">
+            ${Object.entries(statusLabels).map(([k,v]) => `<option value="${k}" ${leadStatuses[lead.id]===k?'selected':''}>${v}</option>`).join('')}
+          </select>
+        </div>
+        <div class="score-section">
+          <div class="score-bar-bg"><div class="score-bar-fill" style="width:${lead.score}%;background:${scoreColor(lead.score)};"></div></div>
+          <span class="score-label" style="color:${scoreColor(lead.score)}">${lead.score}</span>
+        </div>
+        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;">
+          ${lead.reasons.map(r => `<span style="font-size:11px;padding:2px 8px;background:var(--gris1);border-radius:4px;color:var(--gris3);">${r}</span>`).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ─── RENDER STATS ───
+function renderStats(containerId) {
+  const total = LEADS.length;
+  const high = LEADS.filter(l => l.priority === 'high').length;
+  const t34 = LEADS.filter(l => l.tier >= 3).length;
+  const avgScore = Math.round(LEADS.reduce((s,l) => s+l.score, 0) / total);
+  const cities = [...new Set(LEADS.flatMap(l => l.city.split(' / ')))].length;
+  const withContact = LEADS.filter(l => l.phone || l.email).length;
+  const withSocial = LEADS.filter(l => l.facebook || l.linkedin || l.instagram).length;
+
+  document.getElementById(containerId).innerHTML = `
+    <div class="stat-card"><div class="label">Total leads</div><div class="value green">${total}</div></div>
+    <div class="stat-card"><div class="label">Tier 3-4 (petits)</div><div class="value" style="color:#E91E63">${t34}</div></div>
+    <div class="stat-card"><div class="label">Priorité haute</div><div class="value orange">${high}</div></div>
+    <div class="stat-card"><div class="label">Score moyen</div><div class="value blue">${avgScore}/100</div></div>
+    <div class="stat-card"><div class="label">Avec contact direct</div><div class="value green">${withContact}</div></div>
+    <div class="stat-card"><div class="label">Avec réseaux sociaux</div><div class="value purple">${withSocial}</div></div>
+  `;
+}
+
+// ─── BAR CHART ───
+function barChart(container, data, color) {
+  const max = Math.max(...data.map(d => d.value));
+  container.innerHTML = data.map(d => `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+      <div style="width:120px;font-size:13px;text-align:right;color:#555;">${d.label}</div>
+      <div style="flex:1;height:28px;background:var(--gris1);border-radius:6px;overflow:hidden;position:relative;">
+        <div style="height:100%;width:${(d.value/max)*100}%;background:${color};border-radius:6px;transition:width 0.5s;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;">
+          <span style="font-size:12px;font-weight:600;color:white;">${d.value}</span>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ─── VIEWS ───
+function showView(view) {
+  currentView = view;
+  $$('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
+  ['briefing','leads','pipeline','analytics'].forEach(v => {
+    document.getElementById('view-'+v).classList.toggle('hidden', v !== view);
+  });
+  if (view === 'briefing') renderBriefing();
+  if (view === 'leads') renderAllLeads();
+  if (view === 'pipeline') renderPipeline();
+  if (view === 'analytics') renderAnalytics();
+}
+
+function renderBriefing() {
+  renderStats('stats-bar');
+  // Priorité aux petits acteurs (tier 3-4) avec score élevé — c'est la cible Tijan
+  const top = LEADS.filter(l => l.priority === 'high' && l.tier >= 3).sort((a,b) => b.score - a.score);
+  const others = LEADS.filter(l => l.priority === 'high' && l.tier < 3).sort((a,b) => b.score - a.score);
+  $('#top-leads').innerHTML = `
+    <div style="grid-column:1/-1;margin-bottom:4px;"><h3 style="font-size:15px;color:var(--vert-dark);">Cibles prioritaires — Tier 3 & 4 (petits acteurs)</h3></div>
+    ${top.map(renderCard).join('')}
+    <div style="grid-column:1/-1;margin-top:16px;margin-bottom:4px;"><h3 style="font-size:15px;color:var(--gris3);">Tier 1 & 2 — Grands / moyens (référence)</h3></div>
+    ${others.map(renderCard).join('')}
+  `;
+}
+
+function renderAllLeads() {
+  const types = ['all', ...new Set(LEADS.map(l => l.type))];
+  const tiers = ['all', 1, 2, 3, 4];
+  $('#filters').innerHTML = `
+    ${types.map(t => `<button class="filter-btn ${currentFilter===t?'active':''}" data-filter="${t}">${t==='all'?'Tous types':typeLabels[t]||t}</button>`).join('')}
+    <span style="color:var(--gris3);font-size:13px;">|</span>
+    ${tiers.map(t => `<button class="filter-btn tier-btn ${currentTier==t?'active':''}" data-tier="${t}" style="${currentTier==t&&t!=='all'?'background:'+tierColors[t]+';border-color:'+tierColors[t]+';color:white;':''}">${t==='all'?'Tous tiers':'T'+t}</button>`).join('')}
+    <input type="text" class="search-input" placeholder="Rechercher nom, ville, zone..." value="${currentSearch}" id="search-box">
+  `;
+  $$('.filter-btn:not(.tier-btn)').forEach(btn => btn.onclick = () => { currentFilter = btn.dataset.filter; renderAllLeads(); });
+  $$('.tier-btn').forEach(btn => btn.onclick = () => { currentTier = btn.dataset.tier; renderAllLeads(); });
+  $('#search-box').oninput = (e) => { currentSearch = e.target.value; renderLeadsList(); };
+  $$('.view-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === viewMode);
+    btn.onclick = () => { viewMode = btn.dataset.mode; renderLeadsList(); $$('.view-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === viewMode)); };
+  });
+  renderLeadsList();
+}
+
+function renderLeadsList() {
+  const list = filtered();
+  if (viewMode === 'cards') {
+    $('#all-leads-cards').classList.remove('hidden');
+    $('#all-leads-table-wrap').classList.add('hidden');
+    $('#all-leads-cards').innerHTML = list.map(renderCard).join('');
+  } else {
+    $('#all-leads-cards').classList.add('hidden');
+    $('#all-leads-table-wrap').classList.remove('hidden');
+    $('#all-leads-table-wrap').innerHTML = `
+      <table class="leads-table">
+        <thead><tr>
+          <th>Score</th><th>Nom</th><th>Tier</th><th>Type</th><th>Ville / Zone</th><th>Contact</th><th>Téléphone</th><th>Email</th><th>Liens</th><th>Status</th>
+        </tr></thead>
+        <tbody>
+          ${list.map(l => `<tr>
+            <td><span style="font-weight:700;color:${scoreColor(l.score)}">${l.score}</span></td>
+            <td style="font-weight:600">${l.name}</td>
+            <td><span style="padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;color:white;background:${tierColors[l.tier]}">T${l.tier}</span></td>
+            <td><span class="lead-type-badge badge-${l.type}" style="font-size:10px">${typeLabels[l.type]}</span></td>
+            <td>${l.city}${l.zone && l.zone !== l.city ? '<br><span style="font-size:11px;color:var(--gris3)">'+l.zone+'</span>' : ''}</td>
+            <td>${l.contact || '—'}</td>
+            <td>${l.phone || '—'}</td>
+            <td>${l.email ? `<a href="mailto:${l.email}" style="color:var(--vert)">${l.email}</a>` : '—'}</td>
+            <td>${[l.website&&'<a href="'+l.website+'" target="_blank" style="color:var(--vert)">Web</a>',l.linkedin&&'<a href="'+l.linkedin+'" target="_blank" style="color:#0A66C2">LinkedIn</a>',l.facebook&&'<a href="'+l.facebook+'" target="_blank" style="color:#1877F2">Facebook</a>'].filter(Boolean).join(' ')||'—'}</td>
+            <td><select class="status-select" onchange="updateStatus(${l.id},this.value)">${Object.entries(statusLabels).map(([k,v])=>`<option value="${k}" ${leadStatuses[l.id]===k?'selected':''}>${v}</option>`).join('')}</select></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+}
+
+function renderPipeline() {
+  const cols = [
+    { key: 'new', label: 'Nouveaux' },
+    { key: 'contacted', label: 'Contactés' },
+    { key: 'interested', label: 'Intéressés' },
+    { key: 'demo', label: 'Démo planifiée' }
+  ];
+  $('#pipeline-board').innerHTML = cols.map(col => {
+    const items = LEADS.filter(l => leadStatuses[l.id] === col.key).sort((a,b) => b.score - a.score);
+    return `
+      <div class="pipeline-col">
+        <h3>${col.label} <span class="count">${items.length}</span></h3>
+        ${items.map(l => `
+          <div class="pipeline-card" onclick="alert('${l.name}\\n${l.desc}\\nScore: ${l.score}\\n${l.phone||''}\\n${l.email||''}')">
+            <div class="p-name">${l.name}</div>
+            <div class="p-type"><span class="lead-type-badge badge-${l.type}" style="font-size:10px">${typeLabels[l.type]}</span> — Score ${l.score}</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }).join('');
+}
+
+function renderAnalytics() {
+  renderStats('analytics-stats');
+
+  // By type
+  const byType = {};
+  LEADS.forEach(l => { byType[l.type] = (byType[l.type]||0) + 1; });
+  barChart($('#chart-type'), Object.entries(byType).map(([k,v]) => ({label:typeLabels[k],value:v})), 'var(--vert)');
+
+  // By city
+  const byCity = {};
+  LEADS.forEach(l => { const c = l.city.split(' / ')[0]; byCity[c] = (byCity[c]||0) + 1; });
+  barChart($('#chart-city'), Object.entries(byCity).sort((a,b)=>b[1]-a[1]).map(([k,v]) => ({label:k,value:v})), 'var(--blue)');
+
+  // Scores
+  const brackets = {'90+':0,'80-89':0,'70-79':0,'60-69':0,'<60':0};
+  LEADS.forEach(l => {
+    if (l.score>=90) brackets['90+']++;
+    else if (l.score>=80) brackets['80-89']++;
+    else if (l.score>=70) brackets['70-79']++;
+    else if (l.score>=60) brackets['60-69']++;
+    else brackets['<60']++;
+  });
+  barChart($('#chart-scores'), Object.entries(brackets).map(([k,v]) => ({label:k,value:v})), 'var(--orange)');
+
+  // Tier
+  const byTier = {1:0,2:0,3:0,4:0};
+  LEADS.forEach(l => byTier[l.tier]++);
+  barChart($('#chart-tier'), Object.entries(byTier).map(([k,v]) => ({label:tierLabels[k],value:v})), 'var(--purple)');
+}
+
+function updateStatus(id, status) {
+  leadStatuses[id] = status;
+  if (currentView === 'pipeline') renderPipeline();
+}
+
+// ─── INIT ───
+document.getElementById('date-display').textContent = new Date().toLocaleDateString('fr-FR', {day:'numeric',month:'long',year:'numeric'});
+document.getElementById('lead-count').textContent = LEADS.length + ' leads';
+$$('.nav-tab').forEach(tab => tab.onclick = () => showView(tab.dataset.view));
+renderBriefing();
+</script>
+</body>
+</html>

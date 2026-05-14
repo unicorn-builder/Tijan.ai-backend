@@ -1,0 +1,10 @@
+{
+  "meta": {
+    "generated": "2026-05-12",
+    "agent": "FARBA v1.1",
+    "total_leads": 50,
+    "tier_breakdown": {"tier1": 7, "tier2": 11, "tier3": 15, "tier4": 17},
+    "sources": ["Google Search", "LinkedIn", "Facebook", "Houzz", "Company Websites", "Annuaire Sénégal", "NexPages", "GoAfrica"]
+  },
+  "note": "50 leads across 4 tiers. Tier 3-4 are the priority targets for Tijan AI — small firms without in-house BET capabilities."
+}

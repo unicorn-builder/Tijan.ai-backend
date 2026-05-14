@@ -10,6 +10,33 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, Spacer, Page
 from tijan_theme import *
 
 
+# ── Equipment vs installation cost split ratios (equipment share) ──
+_EQUIP_RATIOS = {
+    'transfo':      0.80,
+    'groupe_elec':  0.85,
+    'tgbt':         0.60,
+    'cablage':      0.40,
+    'luminaire':    0.65,
+    'prise':        0.50,
+    'tuyauterie':   0.45,
+    'sanitaire':    0.75,
+    'cuve_pompe':   0.80,
+    'split':        0.70,
+    'vmc':          0.65,
+    'ascenseur':    0.75,
+    'rj45':         0.40,
+    'camera':       0.70,
+    'detecteur':    0.60,
+    'centrale':     0.75,
+    'default':      0.65,
+}
+
+def _split_ep(total, cat='default'):
+    """Return (equip, pose) from total price and category."""
+    r = _EQUIP_RATIOS.get(cat, _EQUIP_RATIOS['default'])
+    eq = int(total * r)
+    return eq, total - eq
+
 
 def generer_boq_mep_detail(rm, params: dict, lang: str = "fr") -> bytes:
     buf = io.BytesIO()
@@ -20,21 +47,26 @@ def generer_boq_mep_detail(rm, params: dict, lang: str = "fr") -> bytes:
     return buf.getvalue()
 
 
-def _row(lot, desig, qte, unite, pu_b, pu_h, pu_l, note='', bold=False):
+def _row(lot, desig, qte, unite, pu_b, pu_h, pu_l, cat='default', bold=False):
+    """Build a 9-column row: Lot | Désignation | Qté | Unité | Équip. | Pose | Basic | H-E | Luxury"""
     st = 'td_b' if bold else 'td'
+    eq, po = _split_ep(pu_b, cat) if pu_b else (0, 0)
     return [
         p(lot, st), p(desig, st),
         p(str(qte) if qte != '' else '—', 'td_r'),
         p(unite, st),
+        p(fmt_n(eq) if eq else '—', 'td_r'),
+        p(fmt_n(po) if po else '—', 'td_r'),
         p(fmt_n(pu_b) if pu_b else '—', 'td_r'),
         p(fmt_n(pu_h) if pu_h else '—', 'td_r'),
         p(fmt_n(pu_l) if pu_l else '—', 'td_r'),
-        p(note, 'small'),
     ]
 
-def _sous_total(desig, c_b, c_h, c_l):
+def _sous_total(desig, c_b, c_h, c_l, cat='default'):
+    eq_b, po_b = _split_ep(c_b, cat)
     return [p(''), p(desig, 'td_b'), p(''), p(''),
-            p(fmt_fcfa(c_b), 'td_g_r'), p(fmt_fcfa(c_h), 'td_g_r'), p(fmt_fcfa(c_l), 'td_g_r'), p('')]
+            p(fmt_fcfa(eq_b), 'td_g_r'), p(fmt_fcfa(po_b), 'td_g_r'),
+            p(fmt_fcfa(c_b), 'td_g_r'), p(fmt_fcfa(c_h), 'td_g_r'), p(fmt_fcfa(c_l), 'td_g_r')]
 
 def _build(rm):
     story = []
@@ -82,9 +114,14 @@ def _build(rm):
             eclairage_detecteur_presence=95_000
         px = _PX()
 
-    # Colonnes BOQ MEP
-    CW_COLS = [CW*w for w in [0.05, 0.32, 0.06, 0.05, 0.12, 0.12, 0.12, 0.16]]
-    HEADERS = [p(h,'th') for h in ['Lot','Désignation','Qté','Unité',f"Basic ({devise_label()})",'High-End','Luxury','Marque / Réf.']]
+    # 9 colonnes BOQ MEP
+    CW_COLS = [CW*w for w in [0.04, 0.24, 0.05, 0.04, 0.09, 0.09, 0.12, 0.12, 0.12]]
+    dl = devise_label()
+    HEADERS = [p(h,'th') for h in [
+        'Lot', 'Désignation', 'Qté', 'Unité',
+        f'Équip. ({dl})', f'Pose ({dl})',
+        f'Basic ({dl})', 'High-End', 'Luxury'
+    ]]
 
     def make_table(rows):
         t = Table([HEADERS] + rows, colWidths=CW_COLS, repeatRows=1)
@@ -101,6 +138,7 @@ def _build(rm):
         S['body']))
     story.append(Paragraph(
         'Prix unitaires marché local 2026 — fournis posés — marge ±15%. '
+        'Équip. = coût matériel/équipement | Pose = main-d\'œuvre et installation. '
         'Document utilisable pour consultation d\'entreprises.',
         S['note']))
     story.append(Spacer(1, 2*mm))
@@ -128,31 +166,31 @@ def _build(rm):
     rows_elec = [
         _row('E.1', f'Poste HTA/BT — transformateur {el.transfo_kva} kVA', 1, 'U',
              transfo_pu, int(transfo_pu*1.15), int(transfo_pu*1.40),
-             'Schneider / ABB / Siemens'),
+             'transfo'),
         _row('E.2', 'TGBT — tableau général basse tension', 1, 'U',
              3_500_000, 5_500_000, 8_000_000,
-             'Schneider Prisma / ABB MNS'),
+             'tgbt'),
         _row('E.3', f'Groupe électrogène {el.groupe_electrogene_kva} kVA — insonorisé', 1, 'U',
              ge_pu, int(ge_pu*1.20), int(ge_pu*1.45),
-             'FG Wilson / Caterpillar / Cummins'),
+             'groupe_elec'),
         _row('E.4', f'Compteurs — {el.nb_compteurs} unités',
              el.nb_compteurs, 'U', px.compteur_monophase, px.compteur_triphase, int(px.compteur_triphase*1.3),
-             'SENELEC compatible'),
+             'default'),
         _row('E.5', 'Colonne montante + tableaux divisionnaires',
              d.nb_niveaux, 'niv.', 1_200_000, 1_800_000, 2_500_000,
-             f'Section {el.section_colonne_mm2} mm²'),
+             'cablage'),
         _row('E.6', f'Câblage cuivre distribution — {L_cable} ml',
              L_cable, 'ml', px.canalisation_cuivre_ml, int(px.canalisation_cuivre_ml*1.3), int(px.canalisation_cuivre_ml*1.6),
-             'Câbles NYM / H07RN'),
+             'cablage'),
         _row('E.7', f'Luminaires LED — {nb_lum} unités',
              nb_lum, 'U', px.luminaire_led_standard, px.luminaire_led_premium, int(px.luminaire_led_premium*1.5),
-             'Philips / Osram / Legrand'),
+             'luminaire'),
         _row('E.8', 'Prises de courant + interrupteurs',
              int(surf/8), 'U', 12_000, 22_000, 38_000,
-             'Legrand Mosaic / Schneider Unica'),
+             'prise'),
         _row('E.9', 'Mise à la terre + parafoudres',
              1, 'forfait', 850_000, 1_200_000, 1_800_000,
-             'Obligatoire NF C 15-100'),
+             'default'),
     ]
 
     c_elec_b = (transfo_pu + 3_500_000 + ge_pu + el.nb_compteurs*px.compteur_monophase +
@@ -181,34 +219,34 @@ def _build(rm):
     rows_plomb = [
         _row('P.1', f'Citerne polyéthylène {int(pl.volume_citerne_m3)} m³',
              nb_cuves, 'U', cuve_pu, int(cuve_pu*1.20), int(cuve_pu*1.50),
-             f'Capacité totale {int(pl.volume_citerne_m3)} m³'),
+             'cuve_pompe'),
         _row('P.2', f'Surpresseur {pl.debit_surpresseur_m3h} m³/h — avec variateur',
              1, 'U', surp_pu, int(surp_pu*1.30), int(surp_pu*1.70),
-             'Grundfos / DAB / Ebara'),
+             'cuve_pompe'),
         _row('P.3', f'Colonnes montantes eau froide DN{pl.diam_colonne_montante_mm}',
              int(d.nb_niveaux * d.hauteur_etage_m * 1.2), 'ml',
              px.colonne_montante_ml, int(px.colonne_montante_ml*1.2), int(px.colonne_montante_ml*1.5),
-             'Acier galvanisé / PPR'),
+             'tuyauterie'),
         _row('P.4', 'Réseau EU/EV — PVC DN100/DN150',
              int(surf*0.15), 'ml', px.tuyau_pvc_dn100_ml, int(px.tuyau_pvc_dn100_ml*1.2), int(px.tuyau_pvc_dn100_ml*1.5),
-             'Wavin / Georg Fischer'),
+             'tuyauterie'),
         _row('P.5', f'WC + chasse standard — {pl.nb_wc_double_chasse} u.',
              pl.nb_wc_double_chasse, 'U', px.wc_standard, px.wc_double_chasse, int(px.wc_double_chasse*1.8),
-             'Basic: Standard | HE: 2 chasses | Lux: Geberit'),
+             'sanitaire'),
         _row('P.6', f'Robinets mélangeurs — {pl.nb_robinets_eco} u.',
              pl.nb_robinets_eco, 'U', px.robinet_standard, px.robinet_eco, int(px.robinet_eco*2.5),
-             'Basic: Local | HE: Grohe | Lux: Hansgrohe'),
+             'sanitaire'),
         _row('P.7', 'Lavabos + douches + baignoires',
              pl.nb_logements, 'log.', 280_000, 520_000, 1_200_000,
-             'Forfait sanitaires par logement'),
+             'sanitaire'),
         _row('P.8', 'Chauffe-eau électrique 100L backup',
              pl.nb_logements, 'U', px.chauffe_eau_electrique_100l, int(px.chauffe_eau_electrique_100l*1.3), int(px.chauffe_eau_electrique_100l*1.6),
-             'Atlantic / Thermor'),
+             'sanitaire'),
     ]
     if pl.nb_chauffe_eau_solaire > 0:
         rows_plomb.append(_row('P.9', f'Chauffe-eau solaires CESI 200L — {pl.nb_chauffe_eau_solaire} u.',
              pl.nb_chauffe_eau_solaire, 'U', px.chauffe_eau_solaire_200l, int(px.chauffe_eau_solaire_200l*1.2), int(px.chauffe_eau_solaire_200l*1.5),
-             'CESI = +6% EDGE énergie — ROI 5-7 ans'))
+             'sanitaire'))
 
     c_pl_b = (nb_cuves*cuve_pu + surp_pu +
               int(d.nb_niveaux*d.hauteur_etage_m*1.2*px.colonne_montante_ml) +
@@ -238,30 +276,30 @@ def _build(rm):
         rows_cvc += [
             _row('C.1', f'Splits muraux séjour 1CV — {cv.nb_splits_sejour} u.',
                  cv.nb_splits_sejour, 'U', px.split_1cv, int(px.split_1cv*1.35), int(px.split_1cv*1.80),
-                 'Daikin / Mitsubishi / Carrier'),
+                 'split'),
             _row('C.2', f'Splits muraux chambre 1CV — {cv.nb_splits_chambre} u.',
                  cv.nb_splits_chambre, 'U', px.split_1cv, int(px.split_1cv*1.35), int(px.split_1cv*1.80),
-                 'Basic: Standard | Lux: Inverter A+++'),
+                 'split'),
         ]
     if cv.nb_cassettes > 0:
         rows_cvc.append(_row('C.1', f'Cassettes plafond 4CV — {cv.nb_cassettes} u.',
              cv.nb_cassettes, 'U', px.split_cassette_4cv, int(px.split_cassette_4cv*1.30), int(px.split_cassette_4cv*1.70),
-             'Daikin VRV / Mitsubishi City Multi'))
+             'split'))
 
     vmc_pu = px.vmc_double_flux if cv.type_vmc == 'double_flux' else px.vmc_simple_flux
     rows_cvc += [
         _row('C.3', f'VMC {cv.type_vmc} — {cv.nb_vmc} u.',
              cv.nb_vmc, 'U', vmc_pu, int(vmc_pu*1.25), int(vmc_pu*1.60),
-             'Atlantic / Aldes / Zehnder (double flux)'),
+             'vmc'),
         _row('C.4', 'Réseau de gaines ventilation',
              int(surf*0.08), 'm²', 18_000, 25_000, 35_000,
-             'Gaines acier galva + calorifuge'),
+             'tuyauterie'),
         _row('C.5', 'Grilles + bouches de ventilation',
              int(rm.nb_logements * 4), 'U', 15_000, 25_000, 45_000,
-             'Aldes / Price'),
+             'vmc'),
         _row('C.6', 'Régulation et thermostat par zone',
              int(surf/80), 'zone', 85_000, 150_000, 280_000,
-             'Honeywell / Siemens / KNX'),
+             'default'),
     ]
 
     nb_sp = cv.nb_splits_sejour + cv.nb_splits_chambre + cv.nb_cassettes
@@ -285,33 +323,33 @@ def _build(rm):
     rows_cf = [
         _row('CF.1', f'Câblage réseau Cat6A — {L_rj45} ml',
              L_rj45, 'ml', px.cablage_rj45_ml, int(px.cablage_rj45_ml*1.3), int(px.cablage_rj45_ml*1.6),
-             'Legrand / Nexans Cat6A'),
+             'rj45'),
         _row('CF.2', f'Prises RJ45 double — {cf.nb_prises_rj45} u.',
              cf.nb_prises_rj45, 'U', px.prise_rj45, int(px.prise_rj45*1.4), int(px.prise_rj45*2.0),
-             'Basic: Cat6 | HE: Cat6A | Lux: Cat7'),
+             'rj45'),
         _row('CF.3', f'Baies serveur 12U — {cf.baies_serveur} u.',
              cf.baies_serveur, 'U', px.baie_serveur_12u, int(px.baie_serveur_12u*1.5), int(px.baie_serveur_12u*2.0),
-             'APC / Legrand / Eaton'),
+             'centrale'),
         _row('CF.4', f'Caméras IP intérieures — {cf.nb_cameras_int} u.',
              cf.nb_cameras_int, 'U', px.camera_ip_interieure, int(px.camera_ip_interieure*1.8), int(px.camera_ip_interieure*2.5),
-             'Axis / Hikvision / Dahua'),
+             'camera'),
         _row('CF.5', f'Caméras IP extérieures — {cf.nb_cameras_ext} u.',
              cf.nb_cameras_ext, 'U', px.camera_ip_exterieure, int(px.camera_ip_exterieure*1.6), int(px.camera_ip_exterieure*2.2),
-             'Axis P-series / Bosch'),
+             'camera'),
         _row('CF.6', f'Contrôle d\'accès — {cf.nb_portes_controle_acces} portes',
              cf.nb_portes_controle_acces, 'porte', px.systeme_controle_acces, int(px.systeme_controle_acces*1.5), int(px.systeme_controle_acces*2.5),
-             'HID / Nedap / Siemens'),
+             'detecteur'),
         _row('CF.7', f'Interphones vidéo — {cf.nb_interphones} u.',
              cf.nb_interphones, 'U', px.interphone_video, int(px.interphone_video*1.5), int(px.interphone_video*2.5),
-             'Legrand / BTicino / Aiphone'),
+             'default'),
         _row('CF.8', 'NVR enregistreur vidéo + stockage',
              cf.baies_serveur, 'U', 850_000, 1_500_000, 3_000_000,
-             '30 jours stockage — disques NAS'),
+             'centrale'),
     ]
     if cf.systeme_audio_video:
         rows_cf.append(_row('CF.9', 'Système audio/vidéo collectif (halls, espaces communs)',
              1, 'forfait', 2_500_000, 5_000_000, 12_000_000,
-             'Bose / Sonos / Crestron'))
+             'default'))
 
     c_cf_b = (L_rj45*px.cablage_rj45_ml + cf.nb_prises_rj45*px.prise_rj45 +
               cf.baies_serveur*px.baie_serveur_12u +
@@ -339,40 +377,40 @@ def _build(rm):
     rows_si = [
         _row('SI.1', f'Centrale incendie adressable — {si.centrale_zones} zones',
              1, 'U', centrale_pu, int(centrale_pu*1.30), int(centrale_pu*1.70),
-             'Schneider Esser / Siemens Cerberus / Tyco'),
+             'centrale'),
         _row('SI.2', f'Détecteurs fumée optiques — {si.nb_detecteurs_fumee} u.',
              si.nb_detecteurs_fumee, 'U', px.detecteur_fumee, int(px.detecteur_fumee*1.3), int(px.detecteur_fumee*1.6),
-             'Apollo / Siemens / Hochiki'),
+             'detecteur'),
         _row('SI.3', f'Déclencheurs manuels — {si.nb_declencheurs_manuels} u.',
              si.nb_declencheurs_manuels, 'U', px.declencheur_manuel, int(px.declencheur_manuel*1.2), int(px.declencheur_manuel*1.5),
-             '1 par palier min.'),
+             'detecteur'),
         _row('SI.4', f'Sirènes + flashs — {si.nb_sirenes} u.',
              si.nb_sirenes, 'U', px.sirene_flash, int(px.sirene_flash*1.2), int(px.sirene_flash*1.5),
-             '1 par niveau min.'),
+             'detecteur'),
         _row('SI.5', f'Extincteurs CO2 6kg — {si.nb_extincteurs_co2} u.',
              si.nb_extincteurs_co2, 'U', px.extincteur_6kg_co2, int(px.extincteur_6kg_co2*1.2), int(px.extincteur_6kg_co2*1.4),
-             'Amerex / Firex / Sicli'),
+             'default'),
         _row('SI.6', f'Extincteurs poudre 9kg — {si.nb_extincteurs_poudre} u.',
              si.nb_extincteurs_poudre, 'U', px.extincteur_9kg_poudre, int(px.extincteur_9kg_poudre*1.2), int(px.extincteur_9kg_poudre*1.4),
-             'Locaux techniques + parkings'),
+             'default'),
         _row('SI.7', f'RIA DN25 — {int(si.longueur_ria_ml)} ml',
              int(si.longueur_ria_ml), 'ml', px.ria_dn25_ml, int(px.ria_dn25_ml*1.2), int(px.ria_dn25_ml*1.4),
-             f'Obligatoire {si.categorie_erp}'),
+             'tuyauterie'),
     ]
     if si.sprinklers_requis and si.nb_tetes_sprinkler > 0:
         rows_si += [
             _row('SI.8', f'Centrale sprinkler + réseau alimentation',
                  1, 'U', px.sprinkler_centrale, int(px.sprinkler_centrale*1.2), int(px.sprinkler_centrale*1.5),
-                 '⚠ Obligatoire — poste significatif'),
+                 'centrale'),
             _row('SI.9', f'Têtes de sprinkler — {si.nb_tetes_sprinkler} u.',
                  si.nb_tetes_sprinkler, 'U', px.sprinkler_tete, int(px.sprinkler_tete*1.2), int(px.sprinkler_tete*1.4),
-                 f'1 tête / 9m² — {si.nb_tetes_sprinkler} têtes'),
+                 'detecteur'),
         ]
     if si.desenfumage_requis:
         c_desenfum = int(surf * 3500)
         rows_si.append(_row('SI.10', 'Désenfumage — volets motorisés + gaines',
              1, 'forfait', c_desenfum, int(c_desenfum*1.3), int(c_desenfum*1.6),
-             '⚠ Obligatoire — vérifier IT 246'))
+             'default'))
 
     c_si_b = (centrale_pu + si.nb_detecteurs_fumee*px.detecteur_fumee +
               si.nb_declencheurs_manuels*px.declencheur_manuel +
@@ -409,18 +447,18 @@ def _build(rm):
         rows_asc = [
             _row('ASC.1', f'Ascenseur {asc.capacite_kg}kg {asc.vitesse_ms}m/s — {asc.nb_ascenseurs} u.',
                  asc.nb_ascenseurs, 'U', asc_pu, int(asc_pu*1.15), int(asc_pu*1.40),
-                 'Otis / Schindler / Kone / Thyssen'),
+                 'ascenseur'),
             _row('ASC.2', 'Trémie béton armé + fosse ascenseur',
                  asc.nb_ascenseurs, 'U', 3_500_000, 4_200_000, 4_200_000,
-                 'Inclus dans gros œuvre si prévu'),
+                 'default'),
             _row('ASC.3', 'Tableau électrique dédié ascenseurs',
                  asc.nb_ascenseurs, 'U', 850_000, 1_200_000, 1_500_000,
-                 'Alimentation dédiée NF C 15-100'),
+                 'tgbt'),
         ]
         if asc.nb_monte_charges > 0:
             rows_asc.append(_row('ASC.4', f'Monte-charge 500kg — {asc.nb_monte_charges} u.',
                  asc.nb_monte_charges, 'U', px.monte_charge_500kg, int(px.monte_charge_500kg*1.15), int(px.monte_charge_500kg*1.35),
-                 'Service + cuisine hôtel'))
+                 'ascenseur'))
 
         c_asc_b = (asc.nb_ascenseurs * asc_pu + asc.nb_ascenseurs*3_500_000 +
                    asc.nb_ascenseurs*850_000 + asc.nb_monte_charges*px.monte_charge_500kg)
@@ -443,22 +481,22 @@ def _build(rm):
              5_000_000 if auto.niveau == 'basic' else 12_000_000 if auto.niveau == 'standard' else px.bms_systeme,
              8_000_000 if auto.niveau == 'basic' else 18_000_000 if auto.niveau == 'standard' else int(px.bms_systeme*1.4),
              12_000_000 if auto.niveau == 'basic' else 28_000_000 if auto.niveau == 'standard' else int(px.bms_systeme*1.8),
-             'Schneider EcoStruxure / Siemens Desigo / KNX'),
+             'centrale'),
         _row('AUTO.2', f'Gestion éclairage — {auto.nb_points_controle} points',
              auto.nb_points_controle, 'pt', px.eclairage_detecteur_presence, int(px.eclairage_detecteur_presence*1.4), int(px.eclairage_detecteur_presence*2.0),
-             'Détecteurs présence + variation'),
+             'detecteur'),
         _row('AUTO.3', 'Gestion CVC centralisée',
              1, 'forfait', 2_500_000, 4_500_000, 8_000_000,
-             'Intégré BMS ou standalone'),
+             'default'),
     ]
     if auto.gestion_energie:
         rows_auto.append(_row('AUTO.4', 'Comptage énergie + tableaux de bord',
              1, 'forfait', 3_500_000, 6_000_000, 10_000_000,
-             'Schneider PowerLogic / ABB Ability'))
+             'centrale'))
     if not auto.bms_requis:
         rows_auto.append(_row('AUTO.5', f'Domotique par logement — {rm.nb_logements} u.',
              rm.nb_logements, 'U', px.domotique_logement, int(px.domotique_logement*1.5), int(px.domotique_logement*2.5),
-             'KNX / Legrand MyHome / Somfy'))
+             'default'))
 
     c_auto_b_base = 5_000_000 if auto.niveau == 'basic' else (12_000_000 if auto.niveau == 'standard' else px.bms_systeme)
     c_auto_b = (c_auto_b_base + auto.nb_points_controle*px.eclairage_detecteur_presence +
@@ -481,6 +519,11 @@ def _build(rm):
     ratio_b = int(total_b / surf) if surf > 0 else 0
     ratio_h = int(total_h / surf) if surf > 0 else 0
 
+    # Equip/pose split for recap (using default ratio on totals)
+    total_eq_b, total_po_b = _split_ep(total_b)
+    total_eq_h, total_po_h = _split_ep(total_h)
+    total_eq_l, total_po_l = _split_ep(total_l)
+
     lot_labels = {
         'E': 'Électricité courants forts',
         'P': 'Plomberie sanitaire',
@@ -491,23 +534,27 @@ def _build(rm):
         'AUTO': 'Automatisation GTB',
     }
 
-    CW_RECAP = [CW*w for w in [0.06, 0.38, 0.16, 0.16, 0.16, 0.08]]
-    recap_rows = [[p(h,'th') for h in ['Lot','Désignation','BASIC','HIGH-END','LUXURY','% TOTAL']]]
+    CW_RECAP = [CW*w for w in [0.05, 0.27, 0.10, 0.10, 0.12, 0.12, 0.12, 0.06]]
+    recap_rows = [[p(h,'th') for h in ['Lot','Désignation',f'Équip. ({dl})',f'Pose ({dl})','BASIC','HIGH-END','LUXURY','%']]]
     for k, (cb, ch, cl) in totaux.items():
+        eq_k, po_k = _split_ep(cb)
         recap_rows.append([
             p(k,'td_b'), p(lot_labels.get(k,'—')),
+            p(fmt_fcfa(eq_k),'td_r'), p(fmt_fcfa(po_k),'td_r'),
             p(fmt_fcfa(cb),'td_r'), p(fmt_fcfa(ch),'td_r'), p(fmt_fcfa(cl),'td_r'),
             p(f'{cb/total_b*100:.0f}%','td_r'),
         ])
     recap_rows.append([
         p('','td_b'), p('TOTAL MEP','td_b'),
+        p(fmt_fcfa(total_eq_b),'td_g_r'), p(fmt_fcfa(total_po_b),'td_g_r'),
         p(fmt_fcfa(total_b),'td_g_r'), p(fmt_fcfa(total_h),'td_g_r'), p(fmt_fcfa(total_l),'td_g_r'),
         p('100%','td_b'),
     ])
     recap_rows.append([
         p('','td_b'), p(f'Coût MEP / m² bâti ({fmt_n(surf,0)} m²)','td_b'),
-        p(f'{ratio_b:,} {devise_label()}/m²'.replace(',', ' '),'td_r'),
-        p(f'{ratio_h:,} {devise_label()}/m²'.replace(',', ' '),'td_r'),
+        p('—','td_r'), p('—','td_r'),
+        p(f'{ratio_b:,} {dl}/m²'.replace(',', ' '),'td_r'),
+        p(f'{ratio_h:,} {dl}/m²'.replace(',', ' '),'td_r'),
         p('—','td_r'), p('','td_b'),
     ])
 
@@ -527,6 +574,7 @@ def _build(rm):
     story.append(Paragraph(
         '* Ce BOQ est une estimation d\'avant-projet (±15%). '
         'Les quantités sont calculées depuis les bilans techniques MEP. '
+        'Équip. = coût des matériaux et équipements. Pose = main-d\'œuvre, installation et raccordement. '
         'Un métré définitif sur plans d\'exécution est requis avant appel d\'offres.',
         S['disc']))
 
