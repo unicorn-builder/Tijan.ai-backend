@@ -353,7 +353,7 @@ def _boq_structure(story, rs, params, lang):
         accumulators["total_f"] += lot_f
         accumulators["total_p"] += lot_p
         lot_recap.append((lot_num, lot_name, lot_f, lot_p, total))
-        story += section_title(f"1.{lot_num}", lot_name)
+        story.extend(section_title(f"1.{lot_num}", lot_name))
         story.append(_make_table(rows, lang))
 
     # --- Lot 1: Installation ---
@@ -621,7 +621,7 @@ def _boq_mep(story, rs_mep, params, lang):
         accumulators["total_f"] += lot_f
         accumulators["total_p"] += lot_p
         lot_recap.append((lot_num, lot_name, lot_f, lot_p, total))
-        story += section_title(f"1.{lot_num}", lot_name)
+        story.extend(section_title(f"1.{lot_num}", lot_name))
         story.append(_make_table(rows, lang))
 
     elec = rs_mep.electrique
@@ -791,7 +791,7 @@ def _boq_finitions(story, rs_structure, params, lang):
         accumulators["total_f"] += lot_f
         accumulators["total_p"] += lot_p
         lot_recap.append((lot_num, lot_name, lot_f, lot_p, total))
-        story += section_title(f"1.{lot_num}", lot_name)
+        story.extend(section_title(f"1.{lot_num}", lot_name))
         story.append(_make_table(rows, lang))
 
     # Use high_end prices for DAO (middle option)
