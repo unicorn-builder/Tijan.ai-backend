@@ -2282,6 +2282,123 @@ async def generate_dao(params: ParamsProjet, lot: str = "structure"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/generate-planning-docx")
+async def generate_planning_docx(request: Request):
+    """Planning d'exécution (Word .docx)."""
+    try:
+        body = await request.json()
+        lang = body.pop("lang", "fr")
+        params = ParamsProjet(**body)
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+
+        from engine_planning import generer_planning
+        from gen_planning_docx import generer_planning_docx
+
+        planning = generer_planning(rs, rm, params.dict())
+        docx_bytes = generer_planning_docx(planning, lang=lang)
+        gc.collect()
+        docx_name = f"tijan_planning_{params.nom.replace(' ', '_')[:20]}.docx"
+        return StreamingResponse(
+            io.BytesIO(docx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename={docx_name}"},
+        )
+    except Exception as e:
+        logger.error(f"/generate-planning-docx error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-tresorerie-docx")
+async def generate_tresorerie_docx(request: Request):
+    """Plan de trésorerie (Word .docx)."""
+    try:
+        body = await request.json()
+        lang = body.pop("lang", "fr")
+        params = ParamsProjet(**body)
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+
+        from engine_planning import generer_planning
+        from gen_planning_docx import generer_tresorerie_docx
+
+        planning = generer_planning(rs, rm, params.dict())
+        docx_bytes = generer_tresorerie_docx(planning, lang=lang)
+        gc.collect()
+        docx_name = f"tijan_tresorerie_{params.nom.replace(' ', '_')[:20]}.docx"
+        return StreamingResponse(
+            io.BytesIO(docx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename={docx_name}"},
+        )
+    except Exception as e:
+        logger.error(f"/generate-tresorerie-docx error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-dao-docx")
+async def generate_dao_docx(request: Request, lot: str = "structure"):
+    """Dossier d'Appel d'Offres par lot (Word .docx — quantités sans prix)."""
+    allowed_lots = {"structure", "mep", "finitions"}
+    if lot not in allowed_lots:
+        raise HTTPException(status_code=422, detail=f"lot must be one of: {', '.join(sorted(allowed_lots))}")
+    try:
+        body = await request.json()
+        lang = body.pop("lang", "fr")
+        params = ParamsProjet(**body)
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+
+        from gen_dao_docx import generer_dao_docx
+
+        docx_bytes = generer_dao_docx(rs, rm, params.dict(), lot=lot, lang=lang)
+        gc.collect()
+        docx_name = f"tijan_dao_{lot}_{params.nom.replace(' ', '_')[:20]}.docx"
+        return StreamingResponse(
+            io.BytesIO(docx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename={docx_name}"},
+        )
+    except Exception as e:
+        logger.error(f"/generate-dao-docx error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-fiches-finitions-docx")
+async def generate_fiches_finitions_docx(request: Request):
+    """Fiches techniques Finitions (Word .docx — sans prix)."""
+    try:
+        body = await request.json()
+        lang = body.pop("lang", "fr")
+        params = ParamsProjet(**body)
+        _, _, calculer_structure = get_moteur_structure()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+
+        from gen_fiches_finitions_docx import generer_fiches_finitions_docx
+
+        docx_bytes = generer_fiches_finitions_docx(rs, params.dict(), lang=lang)
+        gc.collect()
+        docx_name = f"tijan_fiches_finitions_{params.nom.replace(' ', '_')[:20]}.docx"
+        return StreamingResponse(
+            io.BytesIO(docx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename={docx_name}"},
+        )
+    except Exception as e:
+        logger.error(f"/generate-fiches-finitions-docx error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/generate-fiches-all")
 async def generate_fiches_all(params: ParamsProjet):
     """Fiches techniques complètes — tous items BOQ (structure + MEP)."""

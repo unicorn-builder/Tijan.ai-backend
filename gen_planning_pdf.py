@@ -4,7 +4,7 @@ Tijan AI — PDF professionnel avec diagramme de Gantt et plan de trésorerie
 """
 import io
 import logging
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
 from reportlab.platypus import (
     SimpleDocTemplate, Table, Spacer, PageBreak, KeepTogether, Flowable,
@@ -260,7 +260,7 @@ class SCurveFlowable(Flowable):
         c.drawString(x0, self._height - 5 * mm, _t("scurve_title", self.lang))
 
         # Max value for Y scale
-        max_cumul = max((row.get("cumul", 0) for row in treso), default=1)
+        max_cumul = max((row.get("cumul_fcfa", 0) for row in treso), default=1)
         if max_cumul <= 0:
             max_cumul = 1
 
@@ -292,9 +292,9 @@ class SCurveFlowable(Flowable):
         points_total = []
         for i, row in enumerate(treso):
             xx = x0 + (i + 0.5) * step_w
-            mat_cumul += row.get("materiel", 0)
-            pose_cumul += row.get("pose", 0)
-            cumul = row.get("cumul", 0)
+            mat_cumul += row.get("depense_materiel_fcfa", 0)
+            pose_cumul += row.get("depense_pose_fcfa", 0)
+            cumul = row.get("cumul_fcfa", 0)
             points_mat.append((xx, y0 + (mat_cumul / max_cumul) * chart_h))
             points_pose.append((xx, y0 + (pose_cumul / max_cumul) * chart_h))
             points_total.append((xx, y0 + (cumul / max_cumul) * chart_h))
@@ -437,9 +437,10 @@ def _is_critical_task(task, all_tasks):
 
 # ── Main generator ───────────────────────────────────────────────
 def generer_planning_pdf(planning, lang: str = "fr") -> bytes:
-    """Generate Gantt-only planning PDF (execution schedule)."""
+    """Generate Gantt-only planning PDF (execution schedule) in LANDSCAPE mode."""
     set_pdf_lang(lang)
     buf = io.BytesIO()
+    page = landscape(A4)
     hf = HeaderFooter(
         planning.projet_nom,
         _t("title_gantt", lang),
@@ -447,14 +448,16 @@ def generer_planning_pdf(planning, lang: str = "fr") -> bytes:
     )
     doc = SimpleDocTemplate(
         buf,
-        pagesize=A4,
+        pagesize=page,
         leftMargin=ML,
         rightMargin=MR,
         topMargin=26 * mm,
         bottomMargin=18 * mm,
     )
 
-    story = _build_gantt_story(planning, lang)
+    # Landscape content width
+    cw_land = page[0] - ML - MR
+    story = _build_gantt_story(planning, lang, content_width=cw_land)
     try:
         doc.build(story, onFirstPage=hf, onLaterPages=hf)
     except Exception:
@@ -490,10 +493,11 @@ def generer_tresorerie_pdf(planning, lang: str = "fr") -> bytes:
     return buf.getvalue()
 
 
-def _build_gantt_story(planning, lang):
+def _build_gantt_story(planning, lang, content_width=None):
     """Story for Gantt-only PDF."""
     story = []
     pl = planning
+    w = content_width or CW
 
     story.append(Spacer(1, 3 * mm))
     story.append(p(pl.projet_nom, "titre"))
@@ -512,11 +516,11 @@ def _build_gantt_story(planning, lang):
     story.append(Spacer(1, 4 * mm))
 
     # Gantt chart — split across pages if too many tasks
-    gantt_pages = _split_groups_for_pages(pl, CW)
+    gantt_pages = _split_groups_for_pages(pl, w)
     for i, groups_chunk in enumerate(gantt_pages):
         if i > 0:
             story.append(PageBreak())
-        gantt = GanttFlowable(pl, lang=lang, width=CW, groups=groups_chunk)
+        gantt = GanttFlowable(pl, lang=lang, width=w, groups=groups_chunk)
         story.append(gantt)
 
     # Task summary table after Gantt
@@ -543,7 +547,7 @@ def _build_gantt_story(planning, lang):
             p("Fin (j)" if lang == "fr" else "End (d)", "th"),
         ]
         rows = [header]
-        col_w = [CW * 0.06, CW * 0.54, CW * 0.12, CW * 0.14, CW * 0.14]
+        col_w = [w * 0.06, w * 0.54, w * 0.12, w * 0.14, w * 0.14]
         for idx, t in enumerate(lot_tasks, 1):
             rows.append([
                 p(str(idx), "td_r"),
@@ -594,13 +598,13 @@ def _build_tresorerie_story(planning, lang):
         for row in treso:
             rows.append([
                 p(f"Mois {row.get('mois', '—')}", "td"),
-                p(fmt_fcfa(row.get("materiel", 0)), "td_r"),
-                p(fmt_fcfa(row.get("pose", 0)), "td_r"),
-                p(fmt_fcfa(row.get("total", 0)), "td_b_r"),
-                p(fmt_fcfa(row.get("cumul", 0)), "td_g_r"),
+                p(fmt_fcfa(row.get("depense_materiel_fcfa", 0)), "td_r"),
+                p(fmt_fcfa(row.get("depense_pose_fcfa", 0)), "td_r"),
+                p(fmt_fcfa(row.get("depense_total_fcfa", 0)), "td_b_r"),
+                p(fmt_fcfa(row.get("cumul_fcfa", 0)), "td_g_r"),
             ])
-        total_mat = sum(r.get("materiel", 0) for r in treso)
-        total_pose = sum(r.get("pose", 0) for r in treso)
+        total_mat = sum(r.get("depense_materiel_fcfa", 0) for r in treso)
+        total_pose = sum(r.get("depense_pose_fcfa", 0) for r in treso)
         rows.append([
             p(_t("total", lang), "td_b"),
             p(fmt_fcfa(total_mat), "td_b_r"),
@@ -637,7 +641,7 @@ def _build_tresorerie_story(planning, lang):
                 phases.append(ph)
             if lot and lot not in lots:
                 lots.append(lot)
-            data_map[(lot, ph)] = entry.get("cout", 0)
+            data_map[(lot, ph)] = entry.get("cout_total_fcfa", 0)
 
         if phases and lots:
             # Header row

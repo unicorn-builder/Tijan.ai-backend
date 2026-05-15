@@ -58,7 +58,7 @@ def _prix_split(total, ratio_mat):
 def _specs_table(specs_pairs):
     """
     Build 4-column specs table from list of (label, value) pairs.
-    Splits into left/right halves.
+    Uses full content width split into left/right halves with proper spacing.
     """
     mid = (len(specs_pairs) + 1) // 2
     left = specs_pairs[:mid]
@@ -73,23 +73,25 @@ def _specs_table(specs_pairs):
             Paragraph(str(rp[0]), S['td_b']),
             Paragraph(str(rp[1]), S['td']),
         ])
-    cw = CW / 4
-    t = Table(rows, colWidths=[cw * 0.28, cw * 0.22, cw * 0.28, cw * 0.22])
-    t.setStyle(TableStyle([
-        ('FONTSIZE', (0, 0), (-1, -1), 7),
-        ('GRID', (0, 0), (-1, -1), 0.25, GRIS2),
+    # Full-width table: label (30%) + value (20%) | label (30%) + value (20%)
+    t = Table(rows, colWidths=[CW * 0.28, CW * 0.22, CW * 0.28, CW * 0.22])
+    style_cmds = [
+        ('FONTSIZE', (0, 0), (-1, -1), 7.5),
+        ('GRID', (0, 0), (-1, -1), 0.3, GRIS2),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-        ('LEFTPADDING', (0, 0), (-1, -1), 3),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-    ]))
-    # zebra
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        # Light green header-like background for label columns
+        ('BACKGROUND', (0, 0), (0, -1), VERT_LIGHT),
+        ('BACKGROUND', (2, 0), (2, -1), VERT_LIGHT),
+    ]
+    # zebra on value columns
     for i in range(0, len(rows), 2):
-        t._argW  # force init
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0, i), (-1, i), GRIS1),
-        ]))
+        style_cmds.append(('BACKGROUND', (1, i), (1, i), GRIS1))
+        style_cmds.append(('BACKGROUND', (3, i), (3, i), GRIS1))
+    t.setStyle(TableStyle(style_cmds))
     return t
 
 
