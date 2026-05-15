@@ -86,35 +86,42 @@ def _t(key: str, lang: str = "fr") -> str:
 
 # ── Gantt Flowable ───────────────────────────────────────────────
 class GanttFlowable(Flowable):
-    """Custom flowable that draws a horizontal Gantt chart using canvas primitives."""
+    """Custom flowable that draws a horizontal Gantt chart using canvas primitives.
+    Accepts a subset of groups (lot, tasks) to allow splitting across pages."""
 
-    def __init__(self, planning, lang="fr", width=None):
+    def __init__(self, planning, lang="fr", width=None, groups=None):
         super().__init__()
         self.planning = planning
         self.lang = lang
         self._width = width or CW
+        self._groups_override = groups  # if provided, only draw these groups
         self._compute_layout()
 
     def _compute_layout(self):
         pl = self.planning
         self.nb_mois = max(pl.duree_totale_mois, 1)
-        # Group tasks by lot, preserving order
-        self.groups = []
-        seen_lots = []
-        for t in pl.taches:
-            if t.lot not in seen_lots:
-                seen_lots.append(t.lot)
-        for lot in seen_lots:
-            taches = [t for t in pl.taches if t.lot == lot]
-            self.groups.append((lot, taches))
+
+        # Use override groups if provided, otherwise build from planning
+        if self._groups_override is not None:
+            self.groups = self._groups_override
+        else:
+            self.groups = []
+            seen_lots = []
+            for t in pl.taches:
+                if t.lot not in seen_lots:
+                    seen_lots.append(t.lot)
+            for lot in seen_lots:
+                taches = [t for t in pl.taches if t.lot == lot]
+                self.groups.append((lot, taches))
+
         self.total_tasks = sum(len(tl) for _, tl in self.groups)
         self.total_rows = self.total_tasks + len(self.groups)  # tasks + lot headers
 
         # Layout dimensions
-        self.label_w = 110 * mm  # left column for task names
+        self.label_w = 110 * mm
         self.chart_w = self._width - self.label_w
+        self.header_h = 7 * mm
         self.row_h = 5.5 * mm
-        self.header_h = 7 * mm  # month header row
         self._height = self.header_h + self.total_rows * self.row_h + 4 * mm
 
     def wrap(self, availWidth, availHeight):
@@ -349,6 +356,73 @@ def _fmt_short(val):
     return f"{int(val)}"
 
 
+def _split_groups_for_pages(planning, width, max_avail_h=190*mm):
+    """Split planning tasks into page-sized chunks of groups.
+    Returns a list of group-lists, each fitting within max_avail_h."""
+    # Build full groups list
+    seen_lots = []
+    for t in planning.taches:
+        if t.lot not in seen_lots:
+            seen_lots.append(t.lot)
+    all_groups = []
+    for lot in seen_lots:
+        taches = [t for t in planning.taches if t.lot == lot]
+        all_groups.append((lot, taches))
+
+    row_h = 5.5 * mm
+    header_h = 7 * mm
+    overhead = header_h + 4 * mm  # month header + padding
+    max_rows = int((max_avail_h - overhead) / row_h)
+    if max_rows < 5:
+        max_rows = 5
+
+    pages = []
+    current_page = []
+    current_rows = 0
+
+    for lot, taches in all_groups:
+        group_rows = 1 + len(taches)  # 1 lot header + N task rows
+        if current_rows + group_rows <= max_rows:
+            # Fits on current page
+            current_page.append((lot, taches))
+            current_rows += group_rows
+        elif group_rows <= max_rows:
+            # Doesn't fit current page but fits on a fresh page
+            if current_page:
+                pages.append(current_page)
+            current_page = [(lot, taches)]
+            current_rows = group_rows
+        else:
+            # Group itself is too large — split its tasks across pages
+            if current_page:
+                pages.append(current_page)
+                current_page = []
+                current_rows = 0
+            # Split tasks into sub-chunks
+            remaining = list(taches)
+            while remaining:
+                avail = max_rows - current_rows - 1  # -1 for lot header
+                if avail < 1:
+                    if current_page:
+                        pages.append(current_page)
+                    current_page = []
+                    current_rows = 0
+                    avail = max_rows - 1
+                chunk = remaining[:avail]
+                remaining = remaining[avail:]
+                current_page.append((lot, chunk))
+                current_rows += 1 + len(chunk)
+                if remaining:
+                    pages.append(current_page)
+                    current_page = []
+                    current_rows = 0
+
+    if current_page:
+        pages.append(current_page)
+
+    return pages if pages else [all_groups]
+
+
 def _is_critical_task(task, all_tasks):
     """Heuristic: a task is critical if it has no slack (fin_jour matches a successor's debut_jour)."""
     for other in all_tasks:
@@ -411,13 +485,18 @@ def _build_story(planning, lang):
     story.append(p(info, "body"))
     story.append(Spacer(1, 4 * mm))
 
-    # Gantt chart
-    gantt = GanttFlowable(pl, lang=lang, width=CW)
-    story.append(gantt)
+    # Gantt chart — split across pages if too many tasks
+    gantt_pages = _split_groups_for_pages(pl, CW)
+    for i, groups_chunk in enumerate(gantt_pages):
+        if i > 0:
+            story.append(PageBreak())
+        gantt = GanttFlowable(pl, lang=lang, width=CW, groups=groups_chunk)
+        story.append(gantt)
 
-    # ── PAGE 2: CASH FLOW ────────────────────────────────────────
+    # ── NEXT PAGE: CASH FLOW ─────────────────────────────────────
     story.append(PageBreak())
-    story += section_title("2", _t("title_cash", lang))
+    cash_section = len(gantt_pages) + 1
+    story += section_title(str(cash_section), _t("title_cash", lang))
     story.append(Spacer(1, 2 * mm))
 
     # Cash flow table
@@ -464,7 +543,7 @@ def _build_story(planning, lang):
     # ── PAGE 3: LOT × PHASE CROSS-TAB ───────────────────────────
     if pl.tresorerie_lot_phase:
         story.append(PageBreak())
-        story += section_title("3", _t("title_cross", lang))
+        story += section_title(str(cash_section + 1), _t("title_cross", lang))
         story.append(Spacer(1, 2 * mm))
 
         cross = pl.tresorerie_lot_phase
