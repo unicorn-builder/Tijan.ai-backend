@@ -140,9 +140,9 @@ def generer_boq_mep_xlsx(rm, params: dict, lang: str = "fr") -> bytes:
     ws.column_dimensions['I'].width = 16
 
     if lang == 'en':
-        headers = ['Lot', 'Description', 'Qty', 'Unit', 'Equip. (FCFA)', 'Labour (FCFA)', 'Basic (FCFA)', 'High-End', 'Luxury']
+        headers = ['Lot', 'Description', 'Qty', 'Unit', 'Materials (FCFA)', 'Installation (FCFA)', 'Basic (FCFA)', 'High-End', 'Luxury']
     else:
-        headers = ['Lot', 'Désignation', 'Qté', 'Unité', 'Équip. (FCFA)', 'Pose (FCFA)', 'Basic (FCFA)', 'High-End', 'Luxury']
+        headers = ['Lot', 'Désignation', 'Qté', 'Unité', 'Matériaux (FCFA)', 'Installation (FCFA)', 'Basic (FCFA)', 'High-End', 'Luxury']
     row = 5
     _add_header_row(ws, row, headers)
     row += 1

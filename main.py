@@ -2213,6 +2213,50 @@ async def generate_planning_xlsx(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/generate-planning-tresorerie")
+async def generate_planning_tresorerie(params: ParamsProjet):
+    """Plan de trésorerie / planning des dépenses (PDF)."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        calculer_mep = get_moteur_mep()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        rm = calculer_mep(donnees, rs)
+        set_pdf_lang(getattr(params, 'lang', 'fr'))
+        set_pdf_devise(get_devise_info(params.ville))
+
+        from engine_planning import generer_planning
+        from gen_planning_pdf import generer_tresorerie_pdf
+
+        planning = generer_planning(rs, rm, params.dict())
+        pdf_bytes = generer_tresorerie_pdf(planning, lang=getattr(params, 'lang', 'fr'))
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, "planning_tresorerie"))
+    except Exception as e:
+        logger.error(f"/generate-planning-tresorerie error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-fiches-finitions")
+async def generate_fiches_finitions(params: ParamsProjet):
+    """Fiches techniques — Finitions (carrelage, menuiserie, peinture, etc.)."""
+    try:
+        _, _, calculer_structure = get_moteur_structure()
+        donnees = params_to_donnees(params)
+        rs = calculer_structure(donnees)
+        set_pdf_lang(getattr(params, 'lang', 'fr'))
+        set_pdf_devise(get_devise_info(params.ville))
+
+        from generate_fiches_all import generer_fiches_finitions
+
+        pdf_bytes = generer_fiches_finitions(rs, params.dict(), lang=getattr(params, 'lang', 'fr'))
+        gc.collect()
+        return pdf_response(pdf_bytes, fname(params, "fiches_finitions"))
+    except Exception as e:
+        logger.error(f"/generate-fiches-finitions error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/generate-dao")
 async def generate_dao(params: ParamsProjet, lot: str = "structure"):
     """Dossier d'Appel d'Offres par lot (BOQ + CCTP)."""

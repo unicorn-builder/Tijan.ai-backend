@@ -119,7 +119,7 @@ def _build(rm):
     dl = devise_label()
     HEADERS = [p(h,'th') for h in [
         'Lot', 'Désignation', 'Qté', 'Unité',
-        f'Équip. ({dl})', f'Pose ({dl})',
+        f'Matériaux ({dl})', f'Installation ({dl})',
         f'Basic ({dl})', 'High-End', 'Luxury'
     ]]
 
@@ -138,7 +138,7 @@ def _build(rm):
         S['body']))
     story.append(Paragraph(
         'Prix unitaires marché local 2026 — fournis posés — marge ±15%. '
-        'Équip. = coût matériel/équipement | Pose = main-d\'œuvre et installation. '
+        'Matériaux = coût matériel/équipement | Installation = main-d\'œuvre et raccordement. '
         'Document utilisable pour consultation d\'entreprises.',
         S['note']))
     story.append(Spacer(1, 2*mm))
@@ -535,7 +535,7 @@ def _build(rm):
     }
 
     CW_RECAP = [CW*w for w in [0.05, 0.27, 0.10, 0.10, 0.12, 0.12, 0.12, 0.06]]
-    recap_rows = [[p(h,'th') for h in ['Lot','Désignation',f'Équip. ({dl})',f'Pose ({dl})','BASIC','HIGH-END','LUXURY','%']]]
+    recap_rows = [[p(h,'th') for h in ['Lot','Désignation',f'Matériaux ({dl})',f'Installation ({dl})','BASIC','HIGH-END','LUXURY','%']]]
     for k, (cb, ch, cl) in totaux.items():
         eq_k, po_k = _split_ep(cb)
         recap_rows.append([
@@ -574,7 +574,7 @@ def _build(rm):
     story.append(Paragraph(
         '* Ce BOQ est une estimation d\'avant-projet (±15%). '
         'Les quantités sont calculées depuis les bilans techniques MEP. '
-        'Équip. = coût des matériaux et équipements. Pose = main-d\'œuvre, installation et raccordement. '
+        'Matériaux = coût des matériaux et équipements. Installation = main-d\'œuvre et raccordement. '
         'Un métré définitif sur plans d\'exécution est requis avant appel d\'offres.',
         S['disc']))
 

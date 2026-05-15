@@ -437,7 +437,7 @@ def _is_critical_task(task, all_tasks):
 
 # ── Main generator ───────────────────────────────────────────────
 def generer_planning_pdf(planning, lang: str = "fr") -> bytes:
-    """Generate Gantt + cash flow PDF from Planning object."""
+    """Generate Gantt-only planning PDF (execution schedule)."""
     set_pdf_lang(lang)
     buf = io.BytesIO()
     hf = HeaderFooter(
@@ -454,7 +454,7 @@ def generer_planning_pdf(planning, lang: str = "fr") -> bytes:
         bottomMargin=18 * mm,
     )
 
-    story = _build_story(planning, lang)
+    story = _build_gantt_story(planning, lang)
     try:
         doc.build(story, onFirstPage=hf, onLaterPages=hf)
     except Exception:
@@ -463,11 +463,38 @@ def generer_planning_pdf(planning, lang: str = "fr") -> bytes:
     return buf.getvalue()
 
 
-def _build_story(planning, lang):
+def generer_tresorerie_pdf(planning, lang: str = "fr") -> bytes:
+    """Generate cash flow / treasury PDF (expense schedule)."""
+    set_pdf_lang(lang)
+    buf = io.BytesIO()
+    hf = HeaderFooter(
+        planning.projet_nom,
+        _t("title_cash", lang),
+        lang=lang,
+    )
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=ML,
+        rightMargin=MR,
+        topMargin=26 * mm,
+        bottomMargin=18 * mm,
+    )
+
+    story = _build_tresorerie_story(planning, lang)
+    try:
+        doc.build(story, onFirstPage=hf, onLaterPages=hf)
+    except Exception:
+        logger.exception("Failed to build tresorerie PDF")
+        raise
+    return buf.getvalue()
+
+
+def _build_gantt_story(planning, lang):
+    """Story for Gantt-only PDF."""
     story = []
     pl = planning
 
-    # ── PAGE 1: GANTT ────────────────────────────────────────────
     story.append(Spacer(1, 3 * mm))
     story.append(p(pl.projet_nom, "titre"))
     subtitle = _t("subtitle", lang).format(
@@ -478,7 +505,6 @@ def _build_story(planning, lang):
     story.append(p(subtitle, "sous_titre"))
     story.append(Spacer(1, 2 * mm))
 
-    # Surface info
     info = f"{fmt_n(pl.surface_batie_m2, 0)} m² — {pl.duree_totale_jours} "
     info += "jours" if lang == "fr" else "days"
     info += f" — {fmt_fcfa(pl.cout_total_fcfa)}"
@@ -493,13 +519,67 @@ def _build_story(planning, lang):
         gantt = GanttFlowable(pl, lang=lang, width=CW, groups=groups_chunk)
         story.append(gantt)
 
-    # ── NEXT PAGE: CASH FLOW ─────────────────────────────────────
+    # Task summary table after Gantt
     story.append(PageBreak())
-    cash_section = len(gantt_pages) + 1
-    story += section_title(str(cash_section), _t("title_cash", lang))
+    story += section_title("2", "Récapitulatif des tâches" if lang == "fr" else "Task Summary")
     story.append(Spacer(1, 2 * mm))
 
-    # Cash flow table
+    seen_lots = []
+    for t in pl.taches:
+        if t.lot not in seen_lots:
+            seen_lots.append(t.lot)
+
+    for lot in seen_lots:
+        lot_label = LOT_LABELS.get(lang, LOT_LABELS["fr"]).get(lot, lot)
+        lot_tasks = [t for t in pl.taches if t.lot == lot]
+        lot_dur = max((t.fin_jour for t in lot_tasks), default=0) - min((t.debut_jour for t in lot_tasks), default=0)
+        story.append(p(f"{lot_label} — {len(lot_tasks)} {'tâches' if lang == 'fr' else 'tasks'} — {lot_dur} {'jours' if lang == 'fr' else 'days'}", "h1"))
+        story.append(Spacer(1, 1 * mm))
+
+        header = [
+            p("N°", "th"), p("Tâche" if lang == "fr" else "Task", "th"),
+            p("Durée (j)" if lang == "fr" else "Duration (d)", "th"),
+            p("Début (j)" if lang == "fr" else "Start (d)", "th"),
+            p("Fin (j)" if lang == "fr" else "End (d)", "th"),
+        ]
+        rows = [header]
+        col_w = [CW * 0.06, CW * 0.54, CW * 0.12, CW * 0.14, CW * 0.14]
+        for idx, t in enumerate(lot_tasks, 1):
+            rows.append([
+                p(str(idx), "td_r"),
+                p(t.designation, "td"),
+                p(str(t.duree_jours), "td_r"),
+                p(f"J{t.debut_jour}", "td_r"),
+                p(f"J{t.fin_jour}", "td_r"),
+            ])
+        ts = table_style(zebra=True)
+        tbl = Table(rows, colWidths=col_w, repeatRows=1)
+        tbl.setStyle(ts)
+        story.append(tbl)
+        story.append(Spacer(1, 4 * mm))
+
+    return story
+
+
+def _build_tresorerie_story(planning, lang):
+    """Story for cash flow / treasury PDF."""
+    story = []
+    pl = planning
+
+    story.append(Spacer(1, 3 * mm))
+    story.append(p(pl.projet_nom, "titre"))
+    subtitle = _t("subtitle", lang).format(
+        n=pl.nb_niveaux - 1 if pl.nb_niveaux > 0 else 0,
+        ville=pl.ville,
+        mois=pl.duree_totale_mois,
+    )
+    story.append(p(subtitle, "sous_titre"))
+    story.append(Spacer(1, 2 * mm))
+
+    # ── PAGE 1: CASH FLOW TABLE ──────────────────────────────────
+    story += section_title("1", _t("title_cash", lang))
+    story.append(Spacer(1, 2 * mm))
+
     treso = pl.tresorerie_mensuelle or []
     if treso:
         header = [
@@ -519,7 +599,6 @@ def _build_story(planning, lang):
                 p(fmt_fcfa(row.get("total", 0)), "td_b_r"),
                 p(fmt_fcfa(row.get("cumul", 0)), "td_g_r"),
             ])
-        # Total row
         total_mat = sum(r.get("materiel", 0) for r in treso)
         total_pose = sum(r.get("pose", 0) for r in treso)
         rows.append([
@@ -540,10 +619,10 @@ def _build_story(planning, lang):
     scurve = SCurveFlowable(treso, lang=lang, width=CW, height=70 * mm)
     story.append(scurve)
 
-    # ── PAGE 3: LOT × PHASE CROSS-TAB ───────────────────────────
+    # ── PAGE 2: LOT × PHASE CROSS-TAB ───────────────────────────
     if pl.tresorerie_lot_phase:
         story.append(PageBreak())
-        story += section_title(str(cash_section + 1), _t("title_cross", lang))
+        story += section_title("2", _t("title_cross", lang))
         story.append(Spacer(1, 2 * mm))
 
         cross = pl.tresorerie_lot_phase

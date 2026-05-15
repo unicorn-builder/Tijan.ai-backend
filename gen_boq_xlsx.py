@@ -141,9 +141,9 @@ def generer_boq_structure_xlsx(rs, params: dict, lang: str = "fr") -> bytes:
     ws.column_dimensions['H'].width = 30
 
     if lang == 'en':
-        headers = ['Lot', 'Description', 'Qty', 'Unit', 'Supply (FCFA)', 'Labour (FCFA)', 'Total (FCFA)', 'Notes']
+        headers = ['Lot', 'Description', 'Qty', 'Unit', 'Materials (FCFA)', 'Installation (FCFA)', 'Total (FCFA)', 'Notes']
     else:
-        headers = ['Lot', 'Désignation', 'Qté', 'Unité', 'Fourniture (FCFA)', 'Pose (FCFA)', 'Total (FCFA)', 'Observations']
+        headers = ['Lot', 'Désignation', 'Qté', 'Unité', 'Matériaux (FCFA)', 'Installation (FCFA)', 'Total (FCFA)', 'Observations']
     row = 5
     _add_header_row(ws, row, headers)
     row += 1

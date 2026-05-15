@@ -121,7 +121,7 @@ def _build(rm):
     dl = devise_label()
     HEADERS = [p(h,'th') for h in [
         'Lot', 'Description', 'Qty', 'Unit',
-        f'Equip. ({dl})', f'Labour ({dl})',
+        f'Materials ({dl})', f'Installation ({dl})',
         f'Basic ({dl})', 'High-End', 'Luxury'
     ]]
 
@@ -530,7 +530,7 @@ def _build(rm):
     }
 
     CW_RECAP = [CW*w for w in [0.06, 0.30, 0.12, 0.12, 0.12, 0.12, 0.08]]
-    recap_rows = [[p(h,'th') for h in ['Lot','Description',f'Equip. ({dl})',f'Labour ({dl})','BASIC','HIGH-END','LUXURY','%']]]
+    recap_rows = [[p(h,'th') for h in ['Lot','Description',f'Materials ({dl})',f'Installation ({dl})','BASIC','HIGH-END','LUXURY','%']]]
     for k, (cb, ch, cl) in totaux.items():
         eq_k, po_k = _split_ep(cb, 'default')
         recap_rows.append([

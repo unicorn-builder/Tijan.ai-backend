@@ -170,8 +170,8 @@ _USAGE_LABELS = {
 # TABLE HELPERS
 # ══════════════════════════════════════════════════════════════
 
-# 8 columns: N° | Designation | Qty | Unit | Fourniture | Pose | Total | Obs
-_COL_W = [0.04, 0.30, 0.06, 0.05, 0.14, 0.14, 0.14, 0.13]
+# 5 columns: N° | Designation | Qty | Unit | Observations
+_COL_W = [0.06, 0.44, 0.10, 0.08, 0.32]
 
 
 def _col_widths():
@@ -179,43 +179,31 @@ def _col_widths():
 
 
 def _headers(lang="fr"):
-    dl = devise_label()
     return [
         p(_t("col_no", lang), "th"),
         p(_t("col_desig", lang), "th"),
         p(_t("col_qty", lang), "th"),
         p(_t("col_unit", lang), "th"),
-        p(f'{_t("col_fourniture", lang)} ({dl})', "th"),
-        p(f'{_t("col_pose", lang)} ({dl})', "th"),
-        p(f'{_t("col_total", lang)} ({dl})', "th"),
         p(_t("col_obs", lang), "th"),
     ]
 
 
-def _row(no, desig, qty, unite, fourniture, pose, total, obs="",
-         bold=False, green=False):
+def _row(no, desig, qty, unite, obs="", bold=False):
     st = "td_b" if bold else "td"
     st_r = "td_b_r" if bold else "td_r"
-    st_t = "td_g_r" if green else st_r
     return [
         p(no, st),
         p(desig, st),
         p(str(qty) if qty != "" else "—", st_r),
         p(unite, st),
-        p(fmt_fcfa(fourniture) if fourniture else "—", st_r),
-        p(fmt_fcfa(pose) if pose else "—", st_r),
-        p(fmt_fcfa(total) if total else "—", st_t),
         p(obs, "small"),
     ]
 
 
-def _sous_total_row(desig, fourniture, pose, total, lang="fr"):
+def _sous_total_row(desig, lang="fr"):
     return [
         p("", "td_b"), p(f'{_t("sous_total", lang)} — {desig}', "td_b"),
         p("", "td_b"), p("", "td_b"),
-        p(fmt_fcfa(fourniture), "td_b_r"),
-        p(fmt_fcfa(pose), "td_b_r"),
-        p(fmt_fcfa(total), "td_g_r"),
         p("", "td_b"),
     ]
 
@@ -335,24 +323,15 @@ def _boq_structure(story, rs, params, lang):
     ep_dalle_m = dalle.epaisseur_mm / 1000
     surf_batie = boq.surface_batie_m2
 
-    accumulators = {"total_f": 0, "total_p": 0}
     lot_recap = []
 
     def _lot_section(lot_num, lot_name, items, cat):
         """items: list of (no, desig, qty, unit, total_fp, obs)"""
         rows = []
-        lot_f = 0
-        lot_p = 0
         for no, desig, qty, unit, total_fp, obs in items:
-            f, pose = _split(int(total_fp), cat)
-            lot_f += f
-            lot_p += pose
-            rows.append(_row(no, desig, qty, unit, f, pose, int(total_fp), obs))
-        total = lot_f + lot_p
-        rows.append(_sous_total_row(lot_name, lot_f, lot_p, total, lang))
-        accumulators["total_f"] += lot_f
-        accumulators["total_p"] += lot_p
-        lot_recap.append((lot_num, lot_name, lot_f, lot_p, total))
+            rows.append(_row(no, desig, qty, unit, obs))
+        rows.append(_sous_total_row(lot_name, lang))
+        lot_recap.append((lot_num, lot_name, 0, 0, 0))
         story.extend(section_title(f"1.{lot_num}", lot_name))
         story.append(_make_table(rows, lang))
 
@@ -565,10 +544,6 @@ def _boq_structure(story, rs, params, lang):
     _lot_section("6", "Etancheite", etanch_items, "etancheite")
 
     # --- Lot 7: Divers ---
-    sous_tot = accumulators["total_f"] + accumulators["total_p"]
-    c_impr = int(sous_tot * 0.05)
-    c_bet = int(sous_tot * 0.04)
-    c_ctrl = int(sous_tot * 0.015)
     divers_items = [
         ("7.1", "Joints de dilatation",
          max(1, int(surf_batie / 500)), "U",
@@ -576,15 +551,15 @@ def _boq_structure(story, rs, params, lang):
         ("7.2", "Reservations et scellements divers",
          1, "fft", int(surf_batie * 800), ""),
         ("7.3", "Imprevus chantier (5%)",
-         1, "fft", c_impr, "Aleas"),
+         1, "fft", 0, "Aleas"),
         ("7.4", "Honoraires BET structure (4%)",
-         1, "fft", c_bet, "Plans + suivi"),
+         1, "fft", 0, "Plans + suivi"),
         ("7.5", "Controle technique (1.5%)",
-         1, "fft", c_ctrl, "Organisme agree"),
+         1, "fft", 0, "Organisme agree"),
     ]
     _lot_section("7", "Divers et honoraires", divers_items, "divers")
 
-    return lot_recap, accumulators["total_f"], accumulators["total_p"]
+    return lot_recap, 0, 0
 
 
 # ══════════════════════════════════════════════════════════════
@@ -604,23 +579,14 @@ def _boq_mep(story, rs_mep, params, lang):
         from prix_marche import get_prix_mep
         px = get_prix_mep("Dakar")
 
-    accumulators = {"total_f": 0, "total_p": 0}
     lot_recap = []
 
     def _lot_section(lot_num, lot_name, items, cat="mep"):
         rows = []
-        lot_f = 0
-        lot_p = 0
         for no, desig, qty, unit, total_fp, obs in items:
-            f, pose = _split(int(total_fp), cat)
-            lot_f += f
-            lot_p += pose
-            rows.append(_row(no, desig, qty, unit, f, pose, int(total_fp), obs))
-        total = lot_f + lot_p
-        rows.append(_sous_total_row(lot_name, lot_f, lot_p, total, lang))
-        accumulators["total_f"] += lot_f
-        accumulators["total_p"] += lot_p
-        lot_recap.append((lot_num, lot_name, lot_f, lot_p, total))
+            rows.append(_row(no, desig, qty, unit, obs))
+        rows.append(_sous_total_row(lot_name, lang))
+        lot_recap.append((lot_num, lot_name, 0, 0, 0))
         story.extend(section_title(f"1.{lot_num}", lot_name))
         story.append(_make_table(rows, lang))
 
@@ -743,7 +709,7 @@ def _boq_mep(story, rs_mep, params, lang):
         ]
         _lot_section("6", "Ascenseurs", asc_items)
 
-    return lot_recap, accumulators["total_f"], accumulators["total_p"]
+    return lot_recap, 0, 0
 
 
 def perim_from_params(params):
@@ -774,23 +740,14 @@ def _boq_finitions(story, rs_structure, params, lang):
     except Exception:
         fin = None
 
-    accumulators = {"total_f": 0, "total_p": 0}
     lot_recap = []
 
     def _lot_section(lot_num, lot_name, items, cat="finitions"):
         rows = []
-        lot_f = 0
-        lot_p = 0
         for no, desig, qty, unit, total_fp, obs in items:
-            f, pose = _split(int(total_fp), cat)
-            lot_f += f
-            lot_p += pose
-            rows.append(_row(no, desig, qty, unit, f, pose, int(total_fp), obs))
-        total = lot_f + lot_p
-        rows.append(_sous_total_row(lot_name, lot_f, lot_p, total, lang))
-        accumulators["total_f"] += lot_f
-        accumulators["total_p"] += lot_p
-        lot_recap.append((lot_num, lot_name, lot_f, lot_p, total))
+            rows.append(_row(no, desig, qty, unit, obs))
+        rows.append(_sous_total_row(lot_name, lang))
+        lot_recap.append((lot_num, lot_name, 0, 0, 0))
         story.extend(section_title(f"1.{lot_num}", lot_name))
         story.append(_make_table(rows, lang))
 
@@ -856,7 +813,7 @@ def _boq_finitions(story, rs_structure, params, lang):
          ml_cuisine, "ml", ml_cuisine * prix_cuisine, "Schmidt / Nobilia"),
     ])
 
-    return lot_recap, accumulators["total_f"], accumulators["total_p"]
+    return lot_recap, 0, 0
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1609,24 +1566,18 @@ def generer_dao(rs_structure, rs_mep, params: dict,
     if lot == "structure":
         if rs_structure is None:
             raise ValueError("rs_structure is required for lot 'structure'")
-        lot_recap, total_f, total_p = _boq_structure(
-            story, rs_structure, params, lang)
+        _boq_structure(story, rs_structure, params, lang)
         _cctp_structure(story, rs_structure, params, lang)
-        _recap(story, lot_recap, total_f, total_p, lang)
 
     elif lot == "mep":
         if rs_mep is None:
             raise ValueError("rs_mep is required for lot 'mep'")
-        lot_recap, total_f, total_p = _boq_mep(
-            story, rs_mep, params, lang)
+        _boq_mep(story, rs_mep, params, lang)
         _cctp_mep(story, rs_mep, params, lang)
-        _recap(story, lot_recap, total_f, total_p, lang)
 
     elif lot == "finitions":
-        lot_recap, total_f, total_p = _boq_finitions(
-            story, rs_structure, params, lang)
+        _boq_finitions(story, rs_structure, params, lang)
         _cctp_finitions(story, rs_structure, params, lang)
-        _recap(story, lot_recap, total_f, total_p, lang)
 
     else:
         raise ValueError(f"Unknown lot: {lot}. Use 'structure', 'mep', or 'finitions'.")

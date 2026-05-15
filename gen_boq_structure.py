@@ -123,7 +123,7 @@ def _build(rs):
         f'Béton {rs.classe_beton} — Acier {rs.classe_acier}',
         S['body']))
     story.append(Paragraph(
-        'Prix unitaires marché local 2026 décomposés fourniture / pose. Marge ±15%. '
+        'Prix unitaires marché local 2026. Colonnes matériaux et installation séparées. Marge ±15%. '
         'Document utilisable pour consultation d\'entreprises.',
         S['note']))
     story.append(Spacer(1, 3*mm))
@@ -133,7 +133,7 @@ def _build(rs):
     dl = devise_label()
     HEADERS = [p(h,'th') for h in [
         'Lot', 'Désignation', 'Qté', 'Unité',
-        f'Fourniture ({dl})', f'Pose ({dl})', f'Total ({dl})', 'Observations']]
+        f'Matériaux ({dl})', f'Installation ({dl})', f'Total ({dl})', 'Observations']]
 
     def make_table(rows):
         t = Table([HEADERS] + rows, colWidths=CW_COLS, repeatRows=1)
@@ -635,7 +635,7 @@ def _build(rs):
     recap_rows.append([p('','td_b'), p('TOTAL ESTIMATIF HT','td_b'),
                        p(fmt_fcfa(total_fourn),'td_r'), p(fmt_fcfa(total_pose),'td_r'),
                        p(fmt_fcfa(total_ht),'td_g_r'), p('100%','td_b')])
-    recap_rows.append([p('','td_b'), p('% Fourniture / Pose','td_b'),
+    recap_rows.append([p('','td_b'), p('% Matériaux / Installation','td_b'),
                        p(f'{total_fourn/total_ht*100:.0f}%','td_r'), p(f'{total_pose/total_ht*100:.0f}%','td_r'),
                        p('','td_r'), p('','td_b')])
     recap_rows.append([p('','td_b'), p('FOURCHETTE BASSE (-5%)','td_b'),
@@ -662,7 +662,7 @@ def _build(rs):
         [p('Coût béton armé / m² bâti','td_b'), p(f'{int(c_lot4/surf_batie):,} FCFA/m²'.replace(',', ' ')), p('Ratio béton + acier + coffrage')],
         [p('Fondations / total structure','td_b'), p(f'{c_fond/total_ht*100:.1f}%'), p('Normal : 15–25% (fondations profondes)')],
         [p('Ratio acier','td_b'), p(f'{int(boq.acier_kg/surf_batie)} kg/m²'), p('Référence EDGE : 40 kg/m²')],
-        [p('Ratio fourniture / pose','td_b'), p(f'{total_fourn/total_ht*100:.0f}% / {total_pose/total_ht*100:.0f}%'), p('Référence marché : 45–55% / 55–45%')],
+        [p('Ratio matériaux / installation','td_b'), p(f'{total_fourn/total_ht*100:.0f}% / {total_pose/total_ht*100:.0f}%'), p('Référence marché : 45–55% / 55–45%')],
     ]
     tr2 = Table(rat_data, colWidths=[CW*0.35, CW*0.25, CW*0.40], repeatRows=1)
     tr2.setStyle(table_style())
@@ -672,7 +672,7 @@ def _build(rs):
     story.append(Paragraph(
         '* Ce BOQ est une estimation d\'avant-projet (±15%). Les quantités sont calculées depuis le '
         'dimensionnement EC2/EC8 et les ratios validés pour le marché local. '
-        'Les ratios fourniture/pose sont indicatifs et peuvent varier selon les entreprises. '
+        'Les ratios matériaux/installation sont indicatifs et peuvent varier selon les entreprises. '
         'Un métré définitif sur plans d\'exécution est requis avant appel d\'offres.',
         S['disc']))
 

@@ -124,7 +124,7 @@ def _build(rs):
         f'Concrete {rs.classe_beton} — Steel {rs.classe_acier}',
         S['body']))
     story.append(Paragraph(
-        'Unit prices local market 2026 split into supply and labour. Margin ±15%. '
+        'Unit prices local market 2026. Materials and installation columns separated. Margin ±15%. '
         'Document suitable for contractor tender.',
         S['note']))
     story.append(Spacer(1, 3*mm))
@@ -134,7 +134,7 @@ def _build(rs):
     dl = devise_label()
     HEADERS = [p(h,'th') for h in [
         'Lot', 'Description', 'Qty', 'Unit',
-        f'Supply ({dl})', f'Labour ({dl})', f'Total ({dl})', 'Notes']]
+        f'Materials ({dl})', f'Installation ({dl})', f'Total ({dl})', 'Notes']]
 
     def make_table(rows):
         t = Table([HEADERS] + rows, colWidths=CW_COLS, repeatRows=1)
@@ -627,7 +627,7 @@ def _build(rs):
         [p('INDICATOR','th'), p('VALUE','th'), p('MARKET REFERENCE','th')],
         [p('Total built area','td_b'), p(f'{fmt_n(surf_batie,0)} m²'), p(f'Footprint {int(d.surface_emprise_m2)} m² × {d.nb_niveaux} levels')],
         [p('Total cost / m² built','td_b'), p(f'{int(total_ht/surf_batie):,} FCFA/m²'.replace(',', ' ')), p('Residential Dakar: 80 000–160 000 FCFA/m²')],
-        [p('Supply / Labour ratio','td_b'), p(f'{total_fourn/total_ht*100:.0f}% / {total_pose/total_ht*100:.0f}%'), p('Reference: 55% supply / 45% labour')],
+        [p('Materials / Installation ratio','td_b'), p(f'{total_fourn/total_ht*100:.0f}% / {total_pose/total_ht*100:.0f}%'), p('Reference: 55% materials / 45% installation')],
         [p('Foundations / total structure','td_b'), p(f'{c_fond/total_ht*100:.1f}%'), p('Normal: 15–25% (deep foundations)')],
         [p('Steel ratio','td_b'), p(f'{int(boq.acier_kg/surf_batie)} kg/m²'), p('EDGE reference: 40 kg/m²')],
     ]
