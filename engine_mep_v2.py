@@ -1448,17 +1448,49 @@ def _calculer_boq_mep(d: DonneesProjet, surf_batie: float,
                          "forfait", 1, cout_plomb_basic, cout_plomb_hend, cout_plomb_luxury,
                          note_plomb))
 
-    # Lot 3 — CVC
-    if cvc.nb_splits_sejour > 0 or cvc.nb_splits_chambre > 0:
-        nb_splits = cvc.nb_splits_sejour + cvc.nb_splits_chambre
-        cout_cvc_basic = int(nb_splits * p.split_1cv + cvc.nb_vmc * p.vmc_simple_flux)
+    # Lot 3 — CVC (3 systèmes distincts par gamme)
+    nb_indoor = cvc.nb_splits_sejour + cvc.nb_splits_chambre  # total indoor units
+    is_residential = nb_indoor > 0  # splits résidentiels vs cassettes bureaux
+    nb_log_cvc = max(nb_logements, 1)
+    vmc_cost = cvc.nb_vmc * (p.vmc_double_flux if cvc.type_vmc == "double_flux"
+                              else p.vmc_simple_flux)
+
+    if is_residential:
+        # ── BASIC : Splits muraux individuels (1 indoor + 1 outdoor par pièce)
+        cout_cvc_basic = int(nb_indoor * p.split_1cv + vmc_cost)
+        note_basic = f"{nb_indoor} splits muraux individuels"
+
+        # ── HIGH-END : Multi-split (1 outdoor tri-split par logement, indoor muraux)
+        cout_cvc_hend = int(nb_log_cvc * p.multi_split_tri +
+                             nb_indoor * p.multi_split_indoor + vmc_cost)
+        note_hend = f"{nb_log_cvc} multi-split tri-split + {nb_indoor} unités intérieures"
+
+        # ── LUXURY : VRV/VRF centralisé (1 outdoor 14kW pour 5 logements, indoor muraux)
+        nb_vrv_outdoor = max(1, math.ceil(nb_log_cvc / 5))
+        cout_cvc_luxury = int(nb_vrv_outdoor * p.vrv_outdoor_14kw +
+                               nb_indoor * p.vrv_indoor_mural + vmc_cost)
+        note_luxury = f"VRV/VRF : {nb_vrv_outdoor} groupes ext. + {nb_indoor} unités int."
     else:
-        cout_cvc_basic = int(cvc.nb_cassettes * p.split_cassette_4cv +
-                              cvc.nb_vmc * (p.vmc_double_flux if cvc.type_vmc == "double_flux"
-                                             else p.vmc_simple_flux))
-    cout_cvc_hend   = int(cout_cvc_basic * 1.45)
-    cout_cvc_luxury = int(cout_cvc_basic * 2.00)
-    note_cvc = f"VMC {cvc.type_vmc}"
+        # Bureaux / Hôtel / Commercial → cassettes
+        nb_cass = cvc.nb_cassettes
+        # ── BASIC : Cassettes individuelles
+        cout_cvc_basic = int(nb_cass * p.split_cassette_4cv + vmc_cost)
+        note_basic = f"{nb_cass} cassettes plafond 4CV"
+
+        # ── HIGH-END : Multi-split cassettes
+        nb_outdoor_ms = max(1, math.ceil(nb_cass / 4))
+        cout_cvc_hend = int(nb_outdoor_ms * p.multi_split_tri +
+                             nb_cass * p.multi_split_indoor + vmc_cost)
+        note_hend = f"{nb_outdoor_ms} multi-split + {nb_cass} cassettes"
+
+        # ── LUXURY : VRV cassettes
+        nb_vrv_outdoor = max(1, math.ceil(nb_cass / 8))
+        cout_cvc_luxury = int(nb_vrv_outdoor * p.vrv_outdoor_14kw +
+                               nb_cass * p.vrv_indoor_cassette + vmc_cost)
+        note_luxury = f"VRV/VRF : {nb_vrv_outdoor} groupes ext. + {nb_cass} cassettes"
+
+    note_cvc = (f"Basic: {note_basic} | High-End: {note_hend} | Luxury: {note_luxury}"
+                f" — VMC {cvc.type_vmc}")
     if cvc.type_vmc == "double_flux":
         note_cvc += " — économie énergie 30-40% vs simple flux"
     lots.append(BOQ_Lot("C1", f"CVC — climatisation, ventilation ({cvc.puissance_frigorifique_kw:.0f} kW)",
@@ -1583,6 +1615,8 @@ def calculer_mep(d: DonneesProjet, struct_resultats=None, edge_optimise: bool = 
             pompe_surpresseur_1kw = 450_000; pompe_surpresseur_3kw = 850_000
             chauffe_eau_electrique_100l = 180_000; chauffe_eau_solaire_200l = 2_100_000
             split_1cv = 450_000; split_2cv = 750_000; split_cassette_4cv = 1_800_000
+            multi_split_bi = 650_000; multi_split_tri = 950_000; multi_split_indoor = 180_000
+            vrv_outdoor_14kw = 4_500_000; vrv_indoor_mural = 280_000; vrv_indoor_cassette = 450_000
             vmc_simple_flux = 320_000; vmc_double_flux = 850_000
             ascenseur_630kg_r4_r6 = 28_000_000; ascenseur_630kg_r7_r10 = 38_000_000
             ascenseur_1000kg_r6_r10 = 45_000_000; ascenseur_1000kg_r11_plus = 58_000_000

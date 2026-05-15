@@ -127,9 +127,15 @@ class PrixMEP:
     chauffe_eau_solaire_200l: float  # CESI 200L
 
     # CVC
-    split_1cv: float                # Split mural 1CV (9000 BTU)
-    split_2cv: float                # Split mural 2CV (18000 BTU)
-    split_cassette_4cv: float       # Cassette plafond 4CV
+    split_1cv: float                # Split mural 1CV (9000 BTU) — Basic
+    split_2cv: float                # Split mural 2CV (18000 BTU) — Basic
+    split_cassette_4cv: float       # Cassette plafond 4CV — Basic bureaux
+    multi_split_bi: float           # Multi-split bi-split outdoor — High-End
+    multi_split_tri: float          # Multi-split tri-split outdoor — High-End
+    multi_split_indoor: float       # Unité intérieure multi-split — High-End
+    vrv_outdoor_14kw: float         # VRV/VRF groupe ext 14kW (4-6 logements) — Luxury
+    vrv_indoor_mural: float         # VRV unité intérieure murale — Luxury
+    vrv_indoor_cassette: float      # VRV cassette plafond — Luxury
     vmc_simple_flux: float          # VMC simple flux (par logement)
     vmc_double_flux: float          # VMC double flux (par logement)
     climatiseur_central_kw: float   # Clim centrale (FCFA/kW)
@@ -271,6 +277,12 @@ DAKAR = PrixPays(
         split_1cv=250_000,                      # was 450K, Jumia: 155-228K + pose
         split_2cv=400_000,                      # was 750K, Jumia: 281-350K + pose
         split_cassette_4cv=1_800_000,
+        multi_split_bi=650_000,                 # Multi-split bi-split outdoor (Daikin 2MXM)
+        multi_split_tri=950_000,                # Multi-split tri-split outdoor (Daikin 3MXM)
+        multi_split_indoor=180_000,             # Unité intérieure murale multi-split
+        vrv_outdoor_14kw=4_500_000,             # VRV/VRF outdoor 14kW (Daikin RXYQ)
+        vrv_indoor_mural=280_000,               # VRV indoor murale
+        vrv_indoor_cassette=450_000,            # VRV indoor cassette plafond
         vmc_simple_flux=320_000,
         vmc_double_flux=850_000,
         climatiseur_central_kw=280_000,
@@ -392,6 +404,12 @@ ABIDJAN = PrixPays(
         split_1cv=275_000,
         split_2cv=440_000,
         split_cassette_4cv=1_980_000,
+        multi_split_bi=715_000,
+        multi_split_tri=1_045_000,
+        multi_split_indoor=198_000,
+        vrv_outdoor_14kw=4_950_000,
+        vrv_indoor_mural=308_000,
+        vrv_indoor_cassette=495_000,
         vmc_simple_flux=352_000,
         vmc_double_flux=935_000,
         climatiseur_central_kw=308_000,
@@ -504,6 +522,12 @@ CASABLANCA = PrixPays(
         split_1cv=int(to_fcfa(8_500, "MAD")),
         split_2cv=int(to_fcfa(14_000, "MAD")),
         split_cassette_4cv=int(to_fcfa(32_000, "MAD")),
+        multi_split_bi=int(to_fcfa(22_000, "MAD")),
+        multi_split_tri=int(to_fcfa(32_000, "MAD")),
+        multi_split_indoor=int(to_fcfa(6_000, "MAD")),
+        vrv_outdoor_14kw=int(to_fcfa(150_000, "MAD")),
+        vrv_indoor_mural=int(to_fcfa(9_500, "MAD")),
+        vrv_indoor_cassette=int(to_fcfa(15_000, "MAD")),
         vmc_simple_flux=int(to_fcfa(6_500, "MAD")),
         vmc_double_flux=int(to_fcfa(16_000, "MAD")),
         climatiseur_central_kw=int(to_fcfa(4_800, "MAD")),
@@ -618,6 +642,12 @@ LAGOS = PrixPays(
         split_1cv=int(to_fcfa(2_200_000, "NGN")),
         split_2cv=int(to_fcfa(3_800_000, "NGN")),
         split_cassette_4cv=int(to_fcfa(8_500_000, "NGN")),
+        multi_split_bi=int(to_fcfa(5_800_000, "NGN")),
+        multi_split_tri=int(to_fcfa(8_500_000, "NGN")),
+        multi_split_indoor=int(to_fcfa(1_600_000, "NGN")),
+        vrv_outdoor_14kw=int(to_fcfa(40_000_000, "NGN")),
+        vrv_indoor_mural=int(to_fcfa(2_500_000, "NGN")),
+        vrv_indoor_cassette=int(to_fcfa(4_000_000, "NGN")),
         vmc_simple_flux=int(to_fcfa(1_800_000, "NGN")),
         vmc_double_flux=int(to_fcfa(4_200_000, "NGN")),
         climatiseur_central_kw=int(to_fcfa(1_350_000, "NGN")),
@@ -731,6 +761,12 @@ ACCRA = PrixPays(
         split_1cv=int(to_fcfa(12_500, "GHS")),
         split_2cv=int(to_fcfa(21_000, "GHS")),
         split_cassette_4cv=int(to_fcfa(48_000, "GHS")),
+        multi_split_bi=int(to_fcfa(33_000, "GHS")),
+        multi_split_tri=int(to_fcfa(48_000, "GHS")),
+        multi_split_indoor=int(to_fcfa(9_000, "GHS")),
+        vrv_outdoor_14kw=int(to_fcfa(230_000, "GHS")),
+        vrv_indoor_mural=int(to_fcfa(14_000, "GHS")),
+        vrv_indoor_cassette=int(to_fcfa(23_000, "GHS")),
         vmc_simple_flux=int(to_fcfa(9_500, "GHS")),
         vmc_double_flux=int(to_fcfa(24_000, "GHS")),
         climatiseur_central_kw=int(to_fcfa(7_200, "GHS")),
@@ -1153,6 +1189,36 @@ JUSTIFICATIONS = {
     "split_cassette_4cv": {
         "methode": "Split cassette plafond 4CV fourni posé",
         "source_dakar": "Estimation terrain",
+        "fiabilite": "moyenne",
+    },
+    "multi_split_bi": {
+        "methode": "Multi-split bi-split groupe extérieur (Daikin 2MXM) fourni posé",
+        "source_dakar": "CFAO Dakar — catalogue Daikin distributeur",
+        "fiabilite": "moyenne",
+    },
+    "multi_split_tri": {
+        "methode": "Multi-split tri-split groupe extérieur (Daikin 3MXM) fourni posé",
+        "source_dakar": "CFAO Dakar — catalogue Daikin distributeur",
+        "fiabilite": "moyenne",
+    },
+    "multi_split_indoor": {
+        "methode": "Unité intérieure murale multi-split fournie posée",
+        "source_dakar": "CFAO Dakar — catalogue Daikin distributeur",
+        "fiabilite": "moyenne",
+    },
+    "vrv_outdoor_14kw": {
+        "methode": "VRV/VRF groupe extérieur 14kW (Daikin RXYQ) fourni posé",
+        "source_dakar": "CFAO Dakar — devis projet R+8",
+        "fiabilite": "moyenne",
+    },
+    "vrv_indoor_mural": {
+        "methode": "VRV unité intérieure murale fournie posée",
+        "source_dakar": "CFAO Dakar — devis projet R+8",
+        "fiabilite": "moyenne",
+    },
+    "vrv_indoor_cassette": {
+        "methode": "VRV cassette plafond fournie posée",
+        "source_dakar": "CFAO Dakar — devis projet R+8",
         "fiabilite": "moyenne",
     },
     "vmc_simple_flux": {
