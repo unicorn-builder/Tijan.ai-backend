@@ -356,7 +356,7 @@ def _fmt_short(val):
     return f"{int(val)}"
 
 
-def _split_groups_for_pages(planning, width, max_avail_h=190*mm):
+def _split_groups_for_pages(planning, width, max_avail_h=150*mm):
     """Split planning tasks into page-sized chunks of groups.
     Returns a list of group-lists, each fitting within max_avail_h."""
     # Build full groups list

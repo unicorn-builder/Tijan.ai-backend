@@ -32,6 +32,8 @@ _T = {
         "col_desig": "Désignation",
         "col_qty": "Quantité",
         "col_unit": "Unité",
+        "col_pu": "PU (HT)",
+        "col_montant": "Montant (HT)",
         "col_obs": "Observations",
         "project": "Projet",
         "location": "Localisation",
@@ -49,6 +51,8 @@ _T = {
         "col_desig": "Description",
         "col_qty": "Quantity",
         "col_unit": "Unit",
+        "col_pu": "Unit Price (excl.)",
+        "col_montant": "Amount (excl.)",
         "col_obs": "Notes",
         "project": "Project",
         "location": "Location",
@@ -373,6 +377,8 @@ def generer_dao_docx(rs_structure, rs_mep, params, lot='structure', lang='fr') -
         _t("col_desig", lang),
         _t("col_qty", lang),
         _t("col_unit", lang),
+        _t("col_pu", lang),
+        _t("col_montant", lang),
         _t("col_obs", lang),
     ]
 
@@ -393,11 +399,13 @@ def generer_dao_docx(rs_structure, rs_mep, params, lot='structure', lang='fr') -
             str(desig),
             str(qty) if qty else '—',
             str(unit),
+            '',           # PU — empty, to be filled by contractor
+            '',           # Montant — empty, to be filled by contractor
             str(obs) if obs else '',
         ])
 
     _add_styled_table(doc, boq_headers, boq_rows,
-                      col_widths=[1.5, 7.5, 2.0, 1.5, 4.0],
+                      col_widths=[1.2, 5.5, 1.5, 1.2, 2.5, 2.5, 2.5],
                       header_color='43A956', zebra=True)
 
     doc.add_paragraph()

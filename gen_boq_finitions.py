@@ -4,8 +4,13 @@ gen_boq_finitions.py — BOQ Finitions Tijan AI
 3 gammes: Basic, High-End, Luxury
 6 postes: carrelage, menuiserie int/ext, faux-plafond, peinture, cuisine
 Prix par ville (5 marchés) — cohérent avec prix_marche.py
+Format BPU : N° | Désignation | Unité | Quantité | Basic | High-End | Luxury
 """
-import math
+import io, math
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, Spacer, PageBreak
+from tijan_theme import *
 
 FINITIONS_DB = {
     "carrelage": {
@@ -133,32 +138,52 @@ def calculer_finitions(surface_emprise_m2: float, nb_niveaux: int, ville: str) -
         detail = {}
 
         # Carrelage
-        carrelage = surface_totale * db["carrelage"]["ratio_plancher"] * db["carrelage"][gamme]["prix_m2"][v]
-        detail["carrelage"] = {"montant": round(carrelage), "description": db["carrelage"][gamme]["description"], "marques": db["carrelage"][gamme]["marques"]}
+        q_carrelage = surface_totale * db["carrelage"]["ratio_plancher"]
+        carrelage = q_carrelage * db["carrelage"][gamme]["prix_m2"][v]
+        detail["carrelage"] = {"montant": round(carrelage), "quantite": round(q_carrelage), "unite": "m²",
+                               "pu": db["carrelage"][gamme]["prix_m2"][v],
+                               "description": db["carrelage"][gamme]["description"],
+                               "marques": db["carrelage"][gamme]["marques"]}
 
         # Menuiserie intérieure
         nb_portes = (surface_totale / 100) * db["menuiserie_interieure"]["nb_portes_par_100m2"]
         menu_int = nb_portes * db["menuiserie_interieure"][gamme]["prix_porte"][v]
-        detail["menuiserie_interieure"] = {"montant": round(menu_int), "description": db["menuiserie_interieure"][gamme]["description"], "marques": db["menuiserie_interieure"][gamme]["marques"]}
+        detail["menuiserie_interieure"] = {"montant": round(menu_int), "quantite": round(nb_portes), "unite": "U",
+                                           "pu": db["menuiserie_interieure"][gamme]["prix_porte"][v],
+                                           "description": db["menuiserie_interieure"][gamme]["description"],
+                                           "marques": db["menuiserie_interieure"][gamme]["marques"]}
 
         # Menuiserie extérieure
         surface_vitrages = surface_facade * db["menuiserie_exterieure"]["ratio_facade"]
         menu_ext = surface_vitrages * db["menuiserie_exterieure"][gamme]["prix_m2"][v]
-        detail["menuiserie_exterieure"] = {"montant": round(menu_ext), "description": db["menuiserie_exterieure"][gamme]["description"], "marques": db["menuiserie_exterieure"][gamme]["marques"]}
+        detail["menuiserie_exterieure"] = {"montant": round(menu_ext), "quantite": round(surface_vitrages), "unite": "m²",
+                                           "pu": db["menuiserie_exterieure"][gamme]["prix_m2"][v],
+                                           "description": db["menuiserie_exterieure"][gamme]["description"],
+                                           "marques": db["menuiserie_exterieure"][gamme]["marques"]}
 
         # Faux-plafond
-        fp = surface_totale * db["faux_plafond"]["ratio_plancher"] * db["faux_plafond"][gamme]["prix_m2"][v]
-        detail["faux_plafond"] = {"montant": round(fp), "description": db["faux_plafond"][gamme]["description"], "marques": db["faux_plafond"][gamme]["marques"]}
+        q_fp = surface_totale * db["faux_plafond"]["ratio_plancher"]
+        fp = q_fp * db["faux_plafond"][gamme]["prix_m2"][v]
+        detail["faux_plafond"] = {"montant": round(fp), "quantite": round(q_fp), "unite": "m²",
+                                  "pu": db["faux_plafond"][gamme]["prix_m2"][v],
+                                  "description": db["faux_plafond"][gamme]["description"],
+                                  "marques": db["faux_plafond"][gamme]["marques"]}
 
         # Peinture
         surface_peinte = surface_totale * (db["peinture"]["ratio_murs"] + db["peinture"]["ratio_plafond"])
         peinture = surface_peinte * db["peinture"][gamme]["prix_m2"][v]
-        detail["peinture"] = {"montant": round(peinture), "description": db["peinture"][gamme]["description"], "marques": db["peinture"][gamme]["marques"]}
+        detail["peinture"] = {"montant": round(peinture), "quantite": round(surface_peinte), "unite": "m²",
+                              "pu": db["peinture"][gamme]["prix_m2"][v],
+                              "description": db["peinture"][gamme]["description"],
+                              "marques": db["peinture"][gamme]["marques"]}
 
         # Cuisine
         ml_cuisine = (surface_totale / 100) * db["cuisine"]["ml_par_100m2"]
         cuisine = ml_cuisine * db["cuisine"][gamme]["prix_ml"][v]
-        detail["cuisine"] = {"montant": round(cuisine), "description": db["cuisine"][gamme]["description"], "marques": db["cuisine"][gamme]["marques"]}
+        detail["cuisine"] = {"montant": round(cuisine), "quantite": round(ml_cuisine, 1), "unite": "ml",
+                             "pu": db["cuisine"][gamme]["prix_ml"][v],
+                             "description": db["cuisine"][gamme]["description"],
+                             "marques": db["cuisine"][gamme]["marques"]}
 
         total = sum(d["montant"] for d in detail.values())
         results[gamme] = {"total": round(total), "detail": detail}
@@ -166,71 +191,131 @@ def calculer_finitions(surface_emprise_m2: float, nb_niveaux: int, ville: str) -
     return results
 
 
+def _row(lot, desig, unite, qte, pu_b, pu_h, pu_l):
+    """7-column row: N° | Désignation | Unité | Qté | Basic | High-End | Luxury"""
+    return [
+        p(lot), p(desig),
+        p(unite),
+        p(str(qte) if qte != '' else '—', 'td_r'),
+        p(fmt_fcfa(pu_b) if pu_b else '—', 'td_r'),
+        p(fmt_fcfa(pu_h) if pu_h else '—', 'td_r'),
+        p(fmt_fcfa(pu_l) if pu_l else '—', 'td_r'),
+    ]
+
+def _sous_total(desig, c_b, c_h, c_l):
+    return [p(''), p(desig, 'td_b'), p(''), p(''),
+            p(fmt_fcfa(c_b), 'td_g_r'), p(fmt_fcfa(c_h), 'td_g_r'), p(fmt_fcfa(c_l), 'td_g_r')]
+
+
 def generer_boq_finitions_pdf(output_path: str, resultats_finitions: dict, params: dict) -> str:
-    """Génère le PDF BOQ Finitions avec les 3 gammes côte à côte."""
-    from reportlab.lib.pagesizes import A4
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.lib import colors
-    from reportlab.lib.units import cm
-
-    VERT = colors.HexColor('#43A956')
-    NAVY = colors.HexColor('#1B2A4A')
-
-    doc = SimpleDocTemplate(output_path, pagesize=A4,
-                            leftMargin=2*cm, rightMargin=2*cm,
-                            topMargin=2*cm, bottomMargin=2*cm)
-    styles = getSampleStyleSheet()
-    story = []
-
+    """Génère le PDF BOQ Finitions avec le format BPU harmonisé."""
+    buf = io.BytesIO()
     nom = params.get("nom", "Projet")
     ville = params.get("ville", "Dakar")
 
-    story.append(Paragraph(f"<b>BOQ FINITIONS — {nom}</b>", styles["Title"]))
-    story.append(Paragraph(f"{ville} — 3 gammes de finition", styles["Normal"]))
-    story.append(Spacer(1, 0.5*cm))
+    hf = HeaderFooter(nom, 'BOQ Finitions — 3 Gammes')
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+        leftMargin=ML, rightMargin=MR, topMargin=26*mm, bottomMargin=18*mm)
 
-    gamme_labels = {"basic": "BASIC", "high_end": "HIGH-END", "luxury": "LUXURY"}
-    poste_labels = {
-        "carrelage": "Carrelage",
-        "menuiserie_interieure": "Menuiserie intérieure",
-        "menuiserie_exterieure": "Menuiserie extérieure",
-        "faux_plafond": "Faux-plafond",
-        "peinture": "Peinture",
-        "cuisine": "Cuisine équipée"
-    }
+    story = []
 
-    from reportlab.lib.styles import ParagraphStyle
-    cell_style = ParagraphStyle('cell', fontName='Helvetica', fontSize=8, leading=10)
+    # En-tête
+    story.append(Spacer(1, 3*mm))
+    story.append(Paragraph(nom, S['titre']))
+    story.append(Paragraph(f'Bordereau Finitions — {ville} — 3 gammes de finition', S['sous_titre']))
+    story.append(Paragraph(
+        'Prix unitaires marché local 2026 — fournis posés — marge ±15%. '
+        'Document utilisable pour consultation d\'entreprises.',
+        S['note']))
+    story.append(Spacer(1, 3*mm))
 
-    for gamme, label in gamme_labels.items():
-        data = resultats_finitions.get(gamme, {})
-        story.append(Paragraph(f"<b>Gamme {label}</b>", styles["Heading2"]))
-        rows = [["Poste", "Description", "Montant (FCFA)"]]
-        for poste, pl in poste_labels.items():
-            d = data.get("detail", {}).get(poste, {})
-            montant_str = f"{d.get('montant', 0):,.0f}".replace(",", " ")
-            desc = d.get("description", "")
-            marques = d.get("marques", "")
-            desc_text = f"{desc}<br/><i><font size='7' color='#999'>{marques}</font></i>" if marques else desc
-            rows.append([pl, Paragraph(desc_text, cell_style), montant_str])
-        total_str = f"{data.get('total', 0):,.0f}".replace(",", " ")
-        rows.append(["TOTAL", "", total_str])
+    # 7 colonnes BPU
+    dl = devise_label()
+    CW_COLS = [CW*w for w in [0.05, 0.29, 0.05, 0.05, 0.16, 0.16, 0.16]]
+    HEADERS = [p(h,'th') for h in [
+        'N°', 'Désignation', 'Unité', 'Qté',
+        f'Basic ({dl})', f'High-End ({dl})', f'Luxury ({dl})'
+    ]]
 
-        t = Table(rows, colWidths=[3.5*cm, 9.5*cm, 4*cm])
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), NAVY),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('BACKGROUND', (0, -1), (-1, -1), VERT),
-            ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor('#F7F8FA')]),
-        ]))
-        story.append(t)
-        story.append(Spacer(1, 0.5*cm))
+    poste_config = [
+        ("F.1", "carrelage", "Carrelage"),
+        ("F.2", "menuiserie_interieure", "Menuiserie intérieure"),
+        ("F.3", "menuiserie_exterieure", "Menuiserie extérieure"),
+        ("F.4", "faux_plafond", "Faux-plafond"),
+        ("F.5", "peinture", "Peinture"),
+        ("F.6", "cuisine", "Cuisine équipée"),
+    ]
 
-    doc.build(story)
+    basic = resultats_finitions.get("basic", {})
+    high_end = resultats_finitions.get("high_end", {})
+    luxury = resultats_finitions.get("luxury", {})
+
+    rows = []
+    for num, key, label in poste_config:
+        d_b = basic.get("detail", {}).get(key, {})
+        d_h = high_end.get("detail", {}).get(key, {})
+        d_l = luxury.get("detail", {}).get(key, {})
+
+        # Use basic quantities (same for all tiers)
+        qte = d_b.get("quantite", 0)
+        unite = d_b.get("unite", "")
+        desc = d_b.get("description", label)
+
+        # Build description with all tier descriptions
+        desc_b = d_b.get("description", "")
+        desc_h = d_h.get("description", "")
+        desc_l = d_l.get("description", "")
+        full_desc = f'{label} — {desc_b}'
+
+        rows.append(_row(num, full_desc, unite, int(qte) if isinstance(qte, (int, float)) and qte == int(qte) else qte,
+                         d_b.get("montant", 0), d_h.get("montant", 0), d_l.get("montant", 0)))
+
+    # Totaux
+    rows.append(_sous_total('TOTAL FINITIONS',
+                            basic.get("total", 0),
+                            high_end.get("total", 0),
+                            luxury.get("total", 0)))
+
+    t = Table([HEADERS] + rows, colWidths=CW_COLS, repeatRows=1)
+    t.setStyle(table_style())
+    story.append(t)
+
+    # Ratio /m²
+    surf = params.get("surface_emprise_m2", 0) * params.get("nb_niveaux", 1)
+    if surf > 0:
+        story.append(Spacer(1, 3*mm))
+        ratio_b = int(basic.get("total", 0) / surf)
+        ratio_h = int(high_end.get("total", 0) / surf)
+        ratio_l = int(luxury.get("total", 0) / surf)
+        story.append(Paragraph(
+            f'Ratio finitions / m² bâti ({fmt_n(surf,0)} m²) : '
+            f'Basic {ratio_b:,} FCFA/m² — High-End {ratio_h:,} FCFA/m² — Luxury {ratio_l:,} FCFA/m²'.replace(',', ' '),
+            S['note']))
+
+    # Détail marques par poste
+    story.append(Spacer(1, 4*mm))
+    story.append(Paragraph('Détail des gammes par poste', S['h2']))
+    for num, key, label in poste_config:
+        d_b = basic.get("detail", {}).get(key, {})
+        d_h = high_end.get("detail", {}).get(key, {})
+        d_l = luxury.get("detail", {}).get(key, {})
+        story.append(Paragraph(
+            f'<b>{num} {label}</b> — '
+            f'Basic : {d_b.get("description","")} | '
+            f'High-End : {d_h.get("description","")} | '
+            f'Luxury : {d_l.get("description","")}',
+            S['small']))
+
+    story.append(Spacer(1, 4*mm))
+    story.append(Paragraph(
+        '* Ce BOQ est une estimation d\'avant-projet (±15%). '
+        'Les quantités sont calculées depuis les ratios standards pour le marché local. '
+        'Un métré définitif sur plans d\'exécution est requis avant appel d\'offres.',
+        S['disc']))
+
+    doc.build(story, onFirstPage=hf, onLaterPages=hf)
+
+    # Write to file
+    with open(output_path, 'wb') as f:
+        f.write(buf.getvalue())
     return output_path

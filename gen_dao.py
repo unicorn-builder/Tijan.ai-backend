@@ -28,32 +28,6 @@ from tijan_theme import *
 
 
 # ══════════════════════════════════════════════════════════════
-# COST SPLIT RATIOS (fourniture vs pose)
-# ══════════════════════════════════════════════════════════════
-RATIO_FOURNITURE = {
-    "beton":        0.75,
-    "acier":        0.60,
-    "coffrage":     0.30,
-    "terrassement": 0.35,
-    "fondations":   0.55,
-    "maconnerie":   0.50,
-    "etancheite":   0.60,
-    "mep":          0.70,
-    "finitions":    0.55,
-    "installation": 0.40,
-    "divers":       0.50,
-}
-
-
-def _ratio_f(cat: str) -> float:
-    return RATIO_FOURNITURE.get(cat, 0.50)
-
-
-def _ratio_p(cat: str) -> float:
-    return 1.0 - _ratio_f(cat)
-
-
-# ══════════════════════════════════════════════════════════════
 # I18N — French / English labels
 # ══════════════════════════════════════════════════════════════
 _T = {
@@ -72,6 +46,8 @@ _T = {
         "col_fourniture":   "Fourniture",
         "col_pose":         "Pose",
         "col_total":        "Total",
+        "col_pu":           "PU (HT)",
+        "col_montant":      "Montant (HT)",
         "col_obs":          "Observations",
         "sous_total":       "SOUS-TOTAL",
         "total_general":    "TOTAL GÉNÉRAL",
@@ -109,6 +85,8 @@ _T = {
         "col_fourniture":   "Materials",
         "col_pose":         "Labor",
         "col_total":        "Total",
+        "col_pu":           "Unit Price (excl.)",
+        "col_montant":      "Amount (excl.)",
         "col_obs":          "Notes",
         "sous_total":       "SUB-TOTAL",
         "total_general":    "GRAND TOTAL",
@@ -170,8 +148,8 @@ _USAGE_LABELS = {
 # TABLE HELPERS
 # ══════════════════════════════════════════════════════════════
 
-# 5 columns: N° | Designation | Qty | Unit | Observations
-_COL_W = [0.06, 0.44, 0.10, 0.08, 0.32]
+# 7 columns: N° | Designation | Qty | Unit | PU (HT) | Montant (HT) | Observations
+_COL_W = [0.05, 0.33, 0.08, 0.07, 0.14, 0.14, 0.19]
 
 
 def _col_widths():
@@ -184,6 +162,8 @@ def _headers(lang="fr"):
         p(_t("col_desig", lang), "th"),
         p(_t("col_qty", lang), "th"),
         p(_t("col_unit", lang), "th"),
+        p(_t("col_pu", lang), "th"),
+        p(_t("col_montant", lang), "th"),
         p(_t("col_obs", lang), "th"),
     ]
 
@@ -196,6 +176,8 @@ def _row(no, desig, qty, unite, obs="", bold=False):
         p(desig, st),
         p(str(qty) if qty != "" else "—", st_r),
         p(unite, st),
+        p("", st),       # PU — empty, to be filled by contractor
+        p("", st),       # Montant — empty, to be filled by contractor
         p(obs, "small"),
     ]
 
@@ -204,14 +186,9 @@ def _sous_total_row(desig, lang="fr"):
     return [
         p("", "td_b"), p(f'{_t("sous_total", lang)} — {desig}', "td_b"),
         p("", "td_b"), p("", "td_b"),
+        p("", "td_b"), p("", "td_b"),
         p("", "td_b"),
     ]
-
-
-def _split(total_fp, cat):
-    """Split a fourni-pose total into (fourniture, pose)."""
-    f = int(total_fp * _ratio_f(cat))
-    return f, total_fp - f
 
 
 def _make_table(rows, lang="fr"):
@@ -1465,40 +1442,28 @@ def _recap(story, lot_recap, total_f, total_p, lang):
     story.append(PageBreak())
     story += section_title("3", _t("section_recap", lang))
 
-    total = total_f + total_p
-
     recap_hdr = [
         p(_t("lot", lang), "th"),
         p(_t("col_desig", lang), "th"),
-        p(_t("col_fourniture", lang), "th"),
-        p(_t("col_pose", lang), "th"),
-        p(_t("col_total", lang), "th"),
-        p(_t("pct", lang), "th"),
+        p(_t("col_montant", lang), "th"),
     ]
 
     rows = [recap_hdr]
-    for lot_num, lot_name, f, po, tot in lot_recap:
-        pct = f"{tot / total * 100:.1f}%" if total > 0 else "—"
+    for lot_num, lot_name, _f, _po, _tot in lot_recap:
         rows.append([
             p(str(lot_num), "td_b"),
             p(lot_name, "td"),
-            p(fmt_fcfa(f), "td_r"),
-            p(fmt_fcfa(po), "td_r"),
-            p(fmt_fcfa(tot), "td_r"),
-            p(pct, "td_r"),
+            p("", "td"),       # empty — to be filled by contractor
         ])
 
     # Totals row
     rows.append([
         p("", "td_b"),
         p(_t("total_general", lang), "td_b"),
-        p(fmt_fcfa(total_f), "td_g_r"),
-        p(fmt_fcfa(total_p), "td_g_r"),
-        p(fmt_fcfa(total), "td_g_r"),
-        p("100%", "td_b"),
+        p("", "td_g_r"),      # empty — to be filled by contractor
     ])
 
-    col_w = [CW * w for w in [0.06, 0.34, 0.18, 0.18, 0.18, 0.06]]
+    col_w = [CW * w for w in [0.08, 0.62, 0.30]]
     t = Table(rows, colWidths=col_w, repeatRows=1)
     ts = table_style(zebra=False)
     ts.add("BACKGROUND", (0, -1), (-1, -1), VERT_LIGHT)
@@ -1507,21 +1472,16 @@ def _recap(story, lot_recap, total_f, total_p, lang):
     t.setStyle(ts)
     story.append(t)
 
-    # Ratio split
     story.append(Spacer(1, 4 * mm))
-    if total > 0:
-        pct_f = total_f / total * 100
-        pct_p = total_p / total * 100
-        story.append(Paragraph(
-            f"Repartition : Fourniture {pct_f:.0f}% — Pose {pct_p:.0f}%",
-            S["body"]))
-
-    story.append(Spacer(1, 4 * mm))
-    story.append(Paragraph(
-        "* Ce document est une estimation d'avant-projet (precision +/- 15%). "
-        "Les prix unitaires sont bases sur les references marche local 2026. "
-        "Un metre definitif sur plans d'execution est requis avant consultation.",
-        S["disc"]))
+    disc_text = {
+        "fr": ("* Ce bordereau est un cadre d'offre : les quantites sont fournies par le bureau d'etudes, "
+               "les prix unitaires et montants sont a completer par l'entreprise soumissionnaire. "
+               "Un metre definitif sur plans d'execution est requis avant consultation."),
+        "en": ("* This bill of quantities is a tender framework: quantities are provided by the engineering office, "
+               "unit prices and amounts are to be completed by the bidding contractor. "
+               "A definitive bill based on execution drawings is required before consultation."),
+    }
+    story.append(Paragraph(disc_text.get(lang, disc_text["fr"]), S["disc"]))
 
 
 # ══════════════════════════════════════════════════════════════
