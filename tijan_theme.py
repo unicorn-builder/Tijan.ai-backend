@@ -97,18 +97,33 @@ def p(txt, style='td', lang='fr'):
 # Version sans lang pour compatibilité
 _p_orig = p
 
+def _fmt_local(local, sym):
+    """Format a local-currency amount with its symbol."""
+    if local >= 1e9: return f'{local/1e9:.2f} B {sym}'
+    if local >= 1e6: return f'{local/1e6:.1f} M {sym}'
+    if local >= 1e3: return f'{local/1e3:.0f}k {sym}'
+    return f'{int(local):,} {sym}'.replace(',', ' ')
+
+def _fmt_fcfa_only(v):
+    """Format a FCFA amount."""
+    if v >= 1e9: return f'{v/1e9:.2f} Mds FCFA'
+    if v >= 1e6: return f'{v/1e6:.1f} M FCFA'
+    if v >= 1e3: return f'{v/1e3:.0f}k FCFA'
+    return f'{int(v):,} FCFA'.replace(',', ' ')
+
 def fmt_fcfa(v):
     try:
         v = float(v)
         if v == 0: return '—'
         if current_devise and current_devise.get('devise') != 'XOF':
             taux = current_devise.get('taux_depuis_fcfa', 1.0)
-            sym = current_devise.get('devise', 'FCFA')  # Use ISO code for PDF (Helvetica has no ₦/₵)
+            sym = current_devise.get('devise', 'FCFA')
             local = v * taux
-            if local >= 1e9: return f'{local/1e9:.2f} B {sym}'
-            if local >= 1e6: return f'{local/1e6:.1f} M {sym}'
-            if local >= 1e3: return f'{local/1e3:.0f}k {sym}'
-            return f'{int(local):,} {sym}'.replace(',', ' ')
+            local_str = _fmt_local(local, sym)
+            # Double display for MRU: show "14.6k MRU (241k FCFA)"
+            if current_devise.get('devise') == 'MRU':
+                return f'{local_str} ({_fmt_fcfa_only(v)})'
+            return local_str
         if v >= 1e9: return f'{v/1e9:.2f} Mds FCFA'
         if v >= 1e6: return f'{v/1e6:.1f} M FCFA'
         return f'{int(v):,} FCFA'.replace(',', ' ')

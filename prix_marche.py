@@ -29,6 +29,7 @@ TAUX_CHANGE = {
     "MAD": 60.5,          # 1 MAD = 60.5 FCFA (Dirham marocain)
     "NGN": 0.48,          # 1 NGN = 0.48 FCFA (Naira nigérian) — ⚠ très volatile, vérifier mensuellement
     "GHS": 57.0,          # 1 GHS = 57 FCFA (Cedi ghanéen)
+    "MRU": 16.5,          # 1 MRU = 16.5 FCFA (Ouguiya mauritanien — Mai 2026)
     "EUR": 655.957,       # 1 EUR = 655.957 FCFA (fixe Zone CFA)
     "USD": 607.0,         # 1 USD ≈ 607 FCFA (Mars 2026)
 }
@@ -799,6 +800,264 @@ ACCRA = PrixPays(
 )
 
 # ══════════════════════════════════════════════════════════════
+# NOUAKCHOTT, MAURITANIE — Dakar ×1.25-1.35 structure, ×1.30-1.40 MEP
+# Matériaux importés du Sénégal/Maroc ou directement d'Europe/Asie
+# MO spécialisée depuis le Sénégal (+50%), manœuvres locaux (-20%)
+# ══════════════════════════════════════════════════════════════
+NOUAKCHOTT = PrixPays(
+    pays="Mauritanie",
+    ville_reference="Nouakchott",
+    devise="MRU",
+    date_maj="2026-05",
+    fiabilite="estimation",
+    notes=(
+        "Estimation Dakar ×1.25-1.35 structure, ×1.30-1.40 MEP. "
+        "Matériaux: ciment importé Sénégal (SOCOCIM/CIMAF) ou Maroc, acier importé. "
+        "MO clef (chef chantier, électricien, plombier) depuis Sénégal à prime +50%. "
+        "Manœuvres locaux moins chers (-20%). Équipements MEP importés Europe/Asie via port. "
+        "1 MRU ≈ 16.5 FCFA. Sources: estimation marché + transport Dakar-Nouakchott."
+    ),
+    structure=PrixStructure(
+        # Béton: ciment importé SN/MA, agrégats locaux (sable abondant)
+        # ×1.30 Dakar — transport routier ~700km + droits douane
+        beton_c2530_m3=int(to_fcfa(13_400, "MRU")),     # Dakar 170K × 1.30
+        beton_c3037_m3=int(to_fcfa(14_600, "MRU")),     # Dakar 185K × 1.30
+        beton_c3545_m3=int(to_fcfa(16_500, "MRU")),     # Dakar 210K × 1.30
+        beton_c4050_m3=int(to_fcfa(19_000, "MRU")),     # Dakar 240K × 1.30
+        # Acier: 100% importé (pas de production locale), ×1.30
+        acier_ha400_kg=int(to_fcfa(59, "MRU")),          # Dakar 750 × 1.30
+        acier_ha500_kg=int(to_fcfa(64, "MRU")),          # Dakar 810 × 1.30
+        acier_ha500_vrac_kg=int(to_fcfa(43, "MRU")),    # Dakar 530 × 1.35 (import brut)
+        # Coffrage: bois importé (peu de forêts), ×1.25
+        coffrage_bois_m2=int(to_fcfa(1_360, "MRU")),    # Dakar 18K × 1.25
+        coffrage_metal_m2=int(to_fcfa(1_900, "MRU")),   # Dakar 25K × 1.25
+        # Fondations: équipement spécialisé importé, ×1.35
+        pieu_fore_d600_ml=int(to_fcfa(12_300, "MRU")),   # Dakar 150K × 1.35
+        pieu_fore_d800_ml=int(to_fcfa(16_400, "MRU")),   # Dakar 200K × 1.35
+        pieu_fore_d1000_ml=int(to_fcfa(23_000, "MRU")),  # Dakar 280K × 1.35
+        semelle_filante_ml=int(to_fcfa(6_450, "MRU")),   # Dakar 85K × 1.25
+        radier_m2=int(to_fcfa(7_200, "MRU")),            # Dakar 95K × 1.25
+        # Maçonnerie: agglos fabriqués localement (sable+ciment), ×1.25
+        agglo_creux_10_m2=int(to_fcfa(910, "MRU")),
+        agglo_creux_15_m2=int(to_fcfa(1_210, "MRU")),
+        agglo_creux_20_m2=int(to_fcfa(2_270, "MRU")),
+        agglo_plein_25_m2=int(to_fcfa(2_880, "MRU")),
+        brique_pleine_m2=int(to_fcfa(4_100, "MRU")),    # Importé, ×1.30
+        ba13_simple_m2=int(to_fcfa(1_800, "MRU")),      # Importé Europe, ×1.35
+        ba13_double_m2=int(to_fcfa(2_860, "MRU")),
+        # Étanchéité: produits importés, ×1.35
+        etanch_sbs_m2=int(to_fcfa(655, "MRU")),
+        etanch_pvc_m2=int(to_fcfa(1_800, "MRU")),
+        etanch_liquide_m2=int(to_fcfa(950, "MRU")),
+        # Terrassement: local, sol sableux facile, ×1.15
+        terr_mecanique_m3=int(to_fcfa(620, "MRU")),      # Dakar 8.5K × 1.20
+        terr_manuel_m3=int(to_fcfa(335, "MRU")),         # Dakar 5K × 1.10
+        remblai_m3=int(to_fcfa(1_090, "MRU")),           # Dakar 15K × 1.20
+        # MO: spécialistes depuis Sénégal (+50%), manœuvres locaux (-20%)
+        mo_chef_chantier_j=int(to_fcfa(910, "MRU")),    # Dakar 10K × 1.50 (expatrié SN)
+        mo_macon_j=int(to_fcfa(510, "MRU")),             # Dakar 7K × 1.20 (local disponible)
+        mo_ferrailleur_j=int(to_fcfa(630, "MRU")),       # Dakar 8K × 1.30
+        mo_electricien_j=int(to_fcfa(820, "MRU")),       # Dakar 9K × 1.50 (expatrié SN)
+        mo_plombier_j=int(to_fcfa(820, "MRU")),          # Dakar 9K × 1.50 (expatrié SN)
+        mo_manœuvre_j=int(to_fcfa(145, "MRU")),          # Dakar 3K × 0.80 (local bon marché)
+    ),
+    mep=PrixMEP(
+        # Électricité — ×1.35 (équipements importés, SOMELEC raccordement)
+        tableau_general_bt=int(to_fcfa(205_000, "MRU")),
+        transfo_160kva=int(to_fcfa(1_800_000, "MRU")),
+        transfo_250kva=int(to_fcfa(2_620_000, "MRU")),
+        transfo_400kva=int(to_fcfa(3_930_000, "MRU")),
+        groupe_electrogene_100kva=int(to_fcfa(1_145_000, "MRU")),
+        groupe_electrogene_200kva=int(to_fcfa(1_800_000, "MRU")),
+        groupe_electrogene_400kva=int(to_fcfa(3_440_000, "MRU")),
+        compteur_monophase=int(to_fcfa(11_800, "MRU")),   # SOMELEC raccordement
+        compteur_triphase=int(to_fcfa(22_000, "MRU")),
+        canalisation_cuivre_ml=int(to_fcfa(980, "MRU")),
+        luminaire_led_standard=int(to_fcfa(1_180, "MRU")),
+        luminaire_led_premium=int(to_fcfa(6_700, "MRU")),
+        # Plomberie — ×1.35 (SNDE réseau, eau rare → stockage crucial)
+        colonne_montante_ml=int(to_fcfa(1_800, "MRU")),
+        tuyau_pvc_dn50_ml=int(to_fcfa(695, "MRU")),
+        tuyau_pvc_dn100_ml=int(to_fcfa(655, "MRU")),
+        tuyau_pvc_dn150_ml=int(to_fcfa(1_800, "MRU")),
+        robinet_standard=int(to_fcfa(1_970, "MRU")),
+        robinet_eco=int(to_fcfa(3_680, "MRU")),
+        wc_standard=int(to_fcfa(6_700, "MRU")),
+        wc_double_chasse=int(to_fcfa(10_600, "MRU")),
+        cuve_eau_5000l=int(to_fcfa(57_300, "MRU")),      # Crucial en Mauritanie (eau rare)
+        cuve_eau_10000l=int(to_fcfa(106_400, "MRU")),
+        pompe_surpresseur_1kw=int(to_fcfa(36_800, "MRU")),
+        pompe_surpresseur_3kw=int(to_fcfa(69_500, "MRU")),
+        chauffe_eau_electrique_100l=int(to_fcfa(14_200, "MRU")),
+        chauffe_eau_solaire_200l=int(to_fcfa(53_200, "MRU")),  # Très pertinent (ensoleillement max)
+        # CVC — ×1.35-1.40 (climat saharien, clim indispensable, imports)
+        split_1cv=int(to_fcfa(20_500, "MRU")),
+        split_2cv=int(to_fcfa(32_700, "MRU")),
+        split_cassette_4cv=int(to_fcfa(147_300, "MRU")),
+        multi_split_bi=int(to_fcfa(53_200, "MRU")),
+        multi_split_tri=int(to_fcfa(77_700, "MRU")),
+        multi_split_indoor=int(to_fcfa(14_700, "MRU")),
+        vrv_outdoor_14kw=int(to_fcfa(382_000, "MRU")),   # ×1.40 (import lourd)
+        vrv_indoor_mural=int(to_fcfa(23_800, "MRU")),
+        vrv_indoor_cassette=int(to_fcfa(38_200, "MRU")),
+        vmc_simple_flux=int(to_fcfa(25_200, "MRU")),
+        vmc_double_flux=int(to_fcfa(69_500, "MRU")),
+        climatiseur_central_kw=int(to_fcfa(23_000, "MRU")),
+        # Ascenseurs — ×1.40 (import complet Europe/Asie)
+        ascenseur_630kg_r4_r6=int(to_fcfa(1_270_000, "MRU")),
+        ascenseur_630kg_r7_r10=int(to_fcfa(1_870_000, "MRU")),
+        ascenseur_1000kg_r6_r10=int(to_fcfa(2_550_000, "MRU")),
+        ascenseur_1000kg_r11_plus=int(to_fcfa(3_560_000, "MRU")),
+        monte_charge_500kg=int(to_fcfa(1_270_000, "MRU")),
+        # Courants faibles — ×1.30
+        cablage_rj45_ml=int(to_fcfa(275, "MRU")),
+        prise_rj45=int(to_fcfa(1_420, "MRU")),
+        baie_serveur_12u=int(to_fcfa(69_500, "MRU")),
+        camera_ip_interieure=int(to_fcfa(14_200, "MRU")),
+        camera_ip_exterieure=int(to_fcfa(22_000, "MRU")),
+        systeme_controle_acces=int(to_fcfa(28_600, "MRU")),
+        interphone_video=int(to_fcfa(5_120, "MRU")),
+        # Sécurité incendie — ×1.30-1.35
+        detecteur_fumee=int(to_fcfa(3_550, "MRU")),
+        declencheur_manuel=int(to_fcfa(2_760, "MRU")),
+        sirene_flash=int(to_fcfa(4_330, "MRU")),
+        centrale_incendie_16zones=int(to_fcfa(147_000, "MRU")),
+        centrale_incendie_32zones=int(to_fcfa(262_000, "MRU")),
+        extincteur_6kg_co2=int(to_fcfa(7_500, "MRU")),
+        extincteur_9kg_poudre=int(to_fcfa(3_940, "MRU")),
+        ria_dn25_ml=int(to_fcfa(3_680, "MRU")),
+        sprinkler_tete=int(to_fcfa(6_950, "MRU")),
+        sprinkler_centrale=int(to_fcfa(382_000, "MRU")),
+        # Automatisation — ×1.35
+        domotique_logement=int(to_fcfa(69_500, "MRU")),
+        bms_systeme=int(to_fcfa(982_000, "MRU")),
+        eclairage_detecteur_presence=int(to_fcfa(7_500, "MRU")),
+    )
+)
+
+# ══════════════════════════════════════════════════════════════
+# NOUADHIBOU, MAURITANIE — Port minier, imports directs maritimes
+# Matériaux ×0.95 Nouakchott (port direct), MO ×1.10 (marché plus petit)
+# ══════════════════════════════════════════════════════════════
+NOUADHIBOU = PrixPays(
+    pays="Mauritanie",
+    ville_reference="Nouadhibou",
+    devise="MRU",
+    date_maj="2026-05",
+    fiabilite="estimation",
+    notes=(
+        "Estimation basée sur Nouakchott avec ajustement: matériaux importés ×0.95 "
+        "(port maritime direct, pas de transport routier 450km), MO locale ×1.10 "
+        "(marché plus petit, moins de main d'œuvre disponible). "
+        "Port minier SNIM — conteneurs import direct possible. "
+        "1 MRU ≈ 16.5 FCFA."
+    ),
+    structure=PrixStructure(
+        # Béton: import maritime direct, légèrement moins cher que NKC
+        beton_c2530_m3=int(to_fcfa(12_700, "MRU")),     # NKC ×0.95
+        beton_c3037_m3=int(to_fcfa(13_900, "MRU")),
+        beton_c3545_m3=int(to_fcfa(15_700, "MRU")),
+        beton_c4050_m3=int(to_fcfa(18_000, "MRU")),
+        acier_ha400_kg=int(to_fcfa(56, "MRU")),          # NKC ×0.95
+        acier_ha500_kg=int(to_fcfa(61, "MRU")),
+        acier_ha500_vrac_kg=int(to_fcfa(41, "MRU")),
+        coffrage_bois_m2=int(to_fcfa(1_300, "MRU")),
+        coffrage_metal_m2=int(to_fcfa(1_800, "MRU")),
+        pieu_fore_d600_ml=int(to_fcfa(11_700, "MRU")),
+        pieu_fore_d800_ml=int(to_fcfa(15_600, "MRU")),
+        pieu_fore_d1000_ml=int(to_fcfa(21_900, "MRU")),
+        semelle_filante_ml=int(to_fcfa(6_130, "MRU")),
+        radier_m2=int(to_fcfa(6_850, "MRU")),
+        agglo_creux_10_m2=int(to_fcfa(865, "MRU")),
+        agglo_creux_15_m2=int(to_fcfa(1_150, "MRU")),
+        agglo_creux_20_m2=int(to_fcfa(2_160, "MRU")),
+        agglo_plein_25_m2=int(to_fcfa(2_740, "MRU")),
+        brique_pleine_m2=int(to_fcfa(3_900, "MRU")),
+        ba13_simple_m2=int(to_fcfa(1_710, "MRU")),
+        ba13_double_m2=int(to_fcfa(2_720, "MRU")),
+        etanch_sbs_m2=int(to_fcfa(622, "MRU")),
+        etanch_pvc_m2=int(to_fcfa(1_710, "MRU")),
+        etanch_liquide_m2=int(to_fcfa(900, "MRU")),
+        terr_mecanique_m3=int(to_fcfa(650, "MRU")),      # Sol rocheux côtier, plus cher
+        terr_manuel_m3=int(to_fcfa(365, "MRU")),
+        remblai_m3=int(to_fcfa(1_140, "MRU")),
+        # MO: plus cher que NKC (marché plus petit)
+        mo_chef_chantier_j=int(to_fcfa(1_000, "MRU")),  # NKC ×1.10
+        mo_macon_j=int(to_fcfa(560, "MRU")),
+        mo_ferrailleur_j=int(to_fcfa(695, "MRU")),
+        mo_electricien_j=int(to_fcfa(900, "MRU")),
+        mo_plombier_j=int(to_fcfa(900, "MRU")),
+        mo_manœuvre_j=int(to_fcfa(160, "MRU")),          # NKC ×1.10
+    ),
+    mep=PrixMEP(
+        # Électricité — NKC ×0.95 matériaux, port direct
+        tableau_general_bt=int(to_fcfa(195_000, "MRU")),
+        transfo_160kva=int(to_fcfa(1_710_000, "MRU")),
+        transfo_250kva=int(to_fcfa(2_490_000, "MRU")),
+        transfo_400kva=int(to_fcfa(3_735_000, "MRU")),
+        groupe_electrogene_100kva=int(to_fcfa(1_088_000, "MRU")),
+        groupe_electrogene_200kva=int(to_fcfa(1_710_000, "MRU")),
+        groupe_electrogene_400kva=int(to_fcfa(3_270_000, "MRU")),
+        compteur_monophase=int(to_fcfa(11_200, "MRU")),
+        compteur_triphase=int(to_fcfa(20_900, "MRU")),
+        canalisation_cuivre_ml=int(to_fcfa(930, "MRU")),
+        luminaire_led_standard=int(to_fcfa(1_120, "MRU")),
+        luminaire_led_premium=int(to_fcfa(6_365, "MRU")),
+        colonne_montante_ml=int(to_fcfa(1_710, "MRU")),
+        tuyau_pvc_dn50_ml=int(to_fcfa(660, "MRU")),
+        tuyau_pvc_dn100_ml=int(to_fcfa(622, "MRU")),
+        tuyau_pvc_dn150_ml=int(to_fcfa(1_710, "MRU")),
+        robinet_standard=int(to_fcfa(1_870, "MRU")),
+        robinet_eco=int(to_fcfa(3_500, "MRU")),
+        wc_standard=int(to_fcfa(6_365, "MRU")),
+        wc_double_chasse=int(to_fcfa(10_070, "MRU")),
+        cuve_eau_5000l=int(to_fcfa(54_400, "MRU")),
+        cuve_eau_10000l=int(to_fcfa(101_100, "MRU")),
+        pompe_surpresseur_1kw=int(to_fcfa(34_960, "MRU")),
+        pompe_surpresseur_3kw=int(to_fcfa(66_000, "MRU")),
+        chauffe_eau_electrique_100l=int(to_fcfa(13_490, "MRU")),
+        chauffe_eau_solaire_200l=int(to_fcfa(50_540, "MRU")),
+        split_1cv=int(to_fcfa(19_475, "MRU")),
+        split_2cv=int(to_fcfa(31_065, "MRU")),
+        split_cassette_4cv=int(to_fcfa(139_935, "MRU")),
+        multi_split_bi=int(to_fcfa(50_540, "MRU")),
+        multi_split_tri=int(to_fcfa(73_815, "MRU")),
+        multi_split_indoor=int(to_fcfa(13_965, "MRU")),
+        vrv_outdoor_14kw=int(to_fcfa(362_900, "MRU")),
+        vrv_indoor_mural=int(to_fcfa(22_610, "MRU")),
+        vrv_indoor_cassette=int(to_fcfa(36_290, "MRU")),
+        vmc_simple_flux=int(to_fcfa(23_940, "MRU")),
+        vmc_double_flux=int(to_fcfa(66_025, "MRU")),
+        climatiseur_central_kw=int(to_fcfa(21_850, "MRU")),
+        ascenseur_630kg_r4_r6=int(to_fcfa(1_207_000, "MRU")),
+        ascenseur_630kg_r7_r10=int(to_fcfa(1_777_000, "MRU")),
+        ascenseur_1000kg_r6_r10=int(to_fcfa(2_423_000, "MRU")),
+        ascenseur_1000kg_r11_plus=int(to_fcfa(3_382_000, "MRU")),
+        monte_charge_500kg=int(to_fcfa(1_207_000, "MRU")),
+        cablage_rj45_ml=int(to_fcfa(261, "MRU")),
+        prise_rj45=int(to_fcfa(1_349, "MRU")),
+        baie_serveur_12u=int(to_fcfa(66_025, "MRU")),
+        camera_ip_interieure=int(to_fcfa(13_490, "MRU")),
+        camera_ip_exterieure=int(to_fcfa(20_900, "MRU")),
+        systeme_controle_acces=int(to_fcfa(27_170, "MRU")),
+        interphone_video=int(to_fcfa(4_864, "MRU")),
+        detecteur_fumee=int(to_fcfa(3_373, "MRU")),
+        declencheur_manuel=int(to_fcfa(2_622, "MRU")),
+        sirene_flash=int(to_fcfa(4_114, "MRU")),
+        centrale_incendie_16zones=int(to_fcfa(139_650, "MRU")),
+        centrale_incendie_32zones=int(to_fcfa(248_900, "MRU")),
+        extincteur_6kg_co2=int(to_fcfa(7_125, "MRU")),
+        extincteur_9kg_poudre=int(to_fcfa(3_743, "MRU")),
+        ria_dn25_ml=int(to_fcfa(3_496, "MRU")),
+        sprinkler_tete=int(to_fcfa(6_603, "MRU")),
+        sprinkler_centrale=int(to_fcfa(362_900, "MRU")),
+        domotique_logement=int(to_fcfa(66_025, "MRU")),
+        bms_systeme=int(to_fcfa(932_900, "MRU")),
+        eclairage_detecteur_presence=int(to_fcfa(7_125, "MRU")),
+    )
+)
+
+# ══════════════════════════════════════════════════════════════
 # INDEX PAYS
 # ══════════════════════════════════════════════════════════════
 PAYS = {
@@ -814,6 +1073,9 @@ PAYS = {
     "nigeria":     LAGOS,
     "accra":       ACCRA,
     "ghana":       ACCRA,
+    "nouakchott":  NOUAKCHOTT,
+    "nouadhibou":  NOUADHIBOU,
+    "mauritanie":  NOUAKCHOTT,
 }
 
 def get_prix(ville: str) -> PrixPays:
@@ -840,7 +1102,7 @@ def comparer_prix(poste: str, villes: list = None) -> dict:
     Utile pour le rapport multi-pays.
     """
     if villes is None:
-        villes = ["dakar", "abidjan", "casablanca", "lagos", "accra"]
+        villes = ["dakar", "abidjan", "casablanca", "lagos", "accra", "nouakchott", "nouadhibou"]
     result = {}
     for v in villes:
         p = get_prix(v)
@@ -1399,7 +1661,7 @@ def rapport_fiabilite():
     """Generate a reliability report for all prices."""
     rapport = {}
     for ville, prix_pays in PAYS.items():
-        if ville in ('senegal', 'cote_ivoire', 'maroc', 'nigeria', 'ghana'):
+        if ville in ('senegal', 'cote_ivoire', 'maroc', 'nigeria', 'ghana', 'mauritanie'):
             continue  # Skip aliases
         p = prix_pays
         rapport[p.ville_reference] = {
@@ -1415,7 +1677,7 @@ def rapport_fiabilite():
 # ══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     print("=== BASE DE PRIX TIJAN AI — MULTI-PAYS ===\n")
-    for ville in ["dakar", "abidjan", "casablanca", "lagos", "accra"]:
+    for ville in ["dakar", "abidjan", "casablanca", "lagos", "accra", "nouakchott", "nouadhibou"]:
         p = get_prix(ville)
         s = p.structure
         print(f"{p.pays} ({p.ville_reference}) — {p.fiabilite}")

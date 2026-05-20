@@ -492,7 +492,7 @@ def get_devise_info(ville: str) -> dict:
         taux = TAUX_CHANGE.get(p.devise, 1.0)
         return {
             "devise": p.devise,
-            "symbole": {"XOF": "FCFA", "NGN": "₦", "MAD": "MAD", "GHS": "GH₵", "EUR": "€", "USD": "$"}.get(p.devise, p.devise),
+            "symbole": {"XOF": "FCFA", "NGN": "₦", "MAD": "MAD", "GHS": "GH₵", "MRU": "MRU", "EUR": "€", "USD": "$"}.get(p.devise, p.devise),
             "taux_vers_fcfa": taux,
             "taux_depuis_fcfa": round(1.0 / taux, 6) if taux else 1.0,
             "pays": p.pays,

@@ -77,6 +77,8 @@ PRESSION_SOL_DEFAUT = {
     "rabat":       0.25,
     "lagos":       0.10,  # Sol mou Lagos
     "accra":       0.20,
+    "nouakchott":  0.10,  # Sol sableux, faible portance
+    "nouadhibou":  0.15,  # Sol côtier rocheux, meilleur
 }
 
 # Distance mer par défaut par ville (km) — pour durabilité
@@ -87,6 +89,8 @@ DISTANCE_MER_DEFAUT = {
     "rabat":       5.0,
     "lagos":       2.0,
     "accra":       4.0,
+    "nouakchott":  0.5,   # Ville côtière, très proche océan
+    "nouadhibou":  0.3,   # Presqu'île, entourée d'eau
 }
 
 # Zone sismique par pays
@@ -96,6 +100,7 @@ ZONE_SISMIQUE = {
     "maroc":       3,   # Zone sismique active — ag = 0.16g
     "nigeria":     1,
     "ghana":       1,
+    "mauritanie":  0,   # Très faible activité sismique
 }
 
 

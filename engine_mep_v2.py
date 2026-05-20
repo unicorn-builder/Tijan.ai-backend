@@ -78,6 +78,8 @@ CLIMAT = {
     "rabat":       {"T_ext": 29, "T_confort": 24, "humidite": 65, "ensoleillement": "moyen"},
     "lagos":       {"T_ext": 34, "T_confort": 25, "humidite": 85, "ensoleillement": "fort"},
     "accra":       {"T_ext": 32, "T_confort": 25, "humidite": 80, "ensoleillement": "fort"},
+    "nouakchott":  {"T_ext": 42, "T_confort": 26, "humidite": 40, "ensoleillement": "extrême"},  # Saharien
+    "nouadhibou":  {"T_ext": 38, "T_confort": 26, "humidite": 55, "ensoleillement": "extrême"},  # Côtier saharien
 }
 
 # Dotation eau par usage (L/pers/j)
@@ -131,6 +133,13 @@ EDGE_BASELINES = {
         "climate_zone": "hot-humid",
         "annual_rainfall_mm": 800,      # Accra region
     },
+    "Mauritanie": {
+        "energy_kwh_m2_yr": 160.0,      # Hot-arid Saharan, extreme cooling demand
+        "water_L_pers_day": 140.0,      # Low water availability, conservation baseline
+        "embodied_energy_kwh_m2": 530.0, # Higher: all materials imported
+        "climate_zone": "hot-arid",
+        "annual_rainfall_mm": 80,       # Nouakchott: extreme aridity (<100mm/yr)
+    },
 }
 
 # Fixture water consumption (L/use) for EDGE water calculations
@@ -175,6 +184,8 @@ TARIFS = {
     "rabat":       {"kwh": 78,  "m3_eau": 420},
     "lagos":       {"kwh": 50,  "m3_eau": 300},
     "accra":       {"kwh": 85,  "m3_eau": 500},
+    "nouakchott":  {"kwh": 120, "m3_eau": 1200},  # SOMELEC tarif élevé, SNDE eau très chère (désalinisation)
+    "nouadhibou":  {"kwh": 120, "m3_eau": 1300},  # Idem SOMELEC, eau encore plus rare
 }
 
 
@@ -915,6 +926,8 @@ def _get_edge_baselines(d: DonneesProjet) -> dict:
         "maroc": "Morocco",
         "nigeria": "Nigeria",
         "ghana": "Ghana",
+        "mauritanie": "Mauritanie",
+        "mauritania": "Mauritanie",
     }
     country = country_map.get(country.lower(), "Senegal")
 
